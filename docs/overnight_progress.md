@@ -164,3 +164,36 @@ Clean reproduction: `outputs/single_arm_scientific/segmentation_v1_clean` at
 commit `7bfdfc4`, source hash `30cded39e7941bf39070079771db321fcbb8effb311094fec530fa6b38d348c4`,
 analysis fingerprint
 `867c512ca7a7ecee6a6905cd71303d9ed749534cd207a7afd7949c7d983dd3eb`.
+
+### Phase 4 — bidirectional online relation estimation
+
+Status: complete pending clean-commit reproduction.
+
+- Preserved `KinematicConnectionDetector` as the legacy implementation and
+  added a phase-independent four-state `OnlineRelationEstimator`.
+- Added actual finger opening/velocity, 6-D relative motion, windowed stability,
+  object/EE velocity correlation, optional contact, asymmetric connection/loss
+  thresholds, temporal hysteresis, and continuous confidence.
+- Calibrated every threshold from all five frozen demonstrations; no simulator
+  test seed contributes to calibration.
+- Added the independent `relation_dynamac` policy, source/config fingerprints,
+  per-step relation state/confidence/gripper traces, onset/release/loss delays,
+  and two new perturbations.
+- Frozen-demo replay: mean onset offset -8 ms, release delay 60 ms, false
+  positive 0.01845, false negative 0.00681 against scripted states 4–6.
+- Four deterministic mechanism tests cover miss, successful transport, closed
+  gripper drop, and external object motion.
+- Dirty-run Isaac smoke, seed 6200: 6/6 original conditions succeeded; onset
+  delay 120 ms and release delay 60 ms. Forced drop revoked in 40 ms; the miss
+  never connected. Both counterexample tasks failed because regrasp/replanning
+  is not implemented.
+
+Validation so far:
+
+- `conda run -n env_isaaclab python -m pytest -q` — 16 passed
+- `conda run -n env_isaaclab python scripts/analyze_relation_estimator.py ...`
+  — five complete replays and a visually inspected confidence/state plot
+- `conda run -n env_isaaclab python scripts/eval_single_arm.py ...` — eight
+  isolated workers, complete JSON/NPZ trials
+- `python -m compileall -q source/essay2608/essay2608 scripts tests`
+- `git diff --check`

@@ -9,9 +9,16 @@ import numpy as np
 from essay2608.data.dataset import Demonstration
 from essay2608.data.transforms import relative_pose
 
-from .base import PolicyObservation
+from .base import PolicyObservation, PolicyStep
 from .gaussian import fit_frame_gaussian
 from .multistream import StaticMultiStreamPolicy
+from .relation import (
+    OnlineRelationEstimator,
+    RelationEstimate,
+    RelationSample,
+    RelationState,
+    calibrate_relation_estimator,
+)
 
 
 class KinematicConnectionDetector:
@@ -127,3 +134,89 @@ class OnlineDynaMACPrototype(MaskOnlyPolicy):
 # Backward-compatible name for saved configs and older scripts. New code should
 # use OnlineDynaMACPrototype so it is not confused with the paper-level method.
 DynaMACPolicy = OnlineDynaMACPrototype
+
+
+class RelationDynaMACPolicy(StaticMultiStreamPolicy):
+    """Project policy driven by bidirectional, phase-independent relation state."""
+
+    name = "relation_dynamac"
+    fitted_frames = ("world", "object", "target", "virtual_ee")
+
+    def __init__(self, bins: int = 25, control_dt: float = 0.02) -> None:
+        super().__init__(bins=bins)
+        self.control_dt = float(control_dt)
+        self.estimator: OnlineRelationEstimator | None = None
+        self.calibration_diagnostics: dict = {}
+        self.virtual_frame_pose: np.ndarray | None = None
+        self.relation_estimate: RelationEstimate | None = None
+
+    def fit(self, demonstrations: list[Demonstration]) -> None:
+        self._fit_phase_durations(demonstrations)
+        self.models = {
+            frame_name: fit_frame_gaussian(demonstrations, frame_name, bins=self.bins)
+            for frame_name in self.fitted_frames
+        }
+        config, self.calibration_diagnostics = calibrate_relation_estimator(
+            demonstrations
+        )
+        self.estimator = OnlineRelationEstimator(config)
+
+    def _on_reset(self, observation: PolicyObservation) -> None:
+        super()._on_reset(observation)
+        if self.estimator is None:
+            raise RuntimeError("Policy must be fitted before reset.")
+        self.estimator.reset()
+        self.virtual_frame_pose = None
+        self.relation_estimate = None
+
+    def _frame_pose(self, frame_name: str, observation: PolicyObservation) -> np.ndarray:
+        if frame_name == "virtual_ee":
+            if self.virtual_frame_pose is None:
+                raise RuntimeError("Virtual EE frame has not been captured.")
+            return self.virtual_frame_pose
+        return super()._frame_pose(frame_name, observation)
+
+    def _update_online_state(self, observation: PolicyObservation, index: int) -> None:
+        del index
+        if self.estimator is None:
+            raise RuntimeError("Policy must be fitted before use.")
+        if observation.gripper_opening_m is None or observation.gripper_velocity_m_s is None:
+            raise ValueError("RelationDynaMACPolicy requires actual gripper joint observations.")
+        estimate = self.estimator.update(
+            RelationSample(
+                ee_pose=observation.ee_pose,
+                object_pose=observation.object_pose,
+                gripper_opening_m=observation.gripper_opening_m,
+                gripper_velocity_m_s=observation.gripper_velocity_m_s,
+                control_dt_s=self.control_dt,
+                contact=observation.object_contact,
+            )
+        )
+        if estimate.transitioned and estimate.state == RelationState.CONNECTED:
+            self.virtual_frame_pose = observation.ee_pose.copy()
+        self.relation_estimate = estimate
+
+    def _active_frames(self, observation: PolicyObservation) -> list[str]:
+        del observation
+        if self.estimator is not None and self.estimator.connected:
+            if self.virtual_frame_pose is not None and self.phase == 4:
+                return ["target", "virtual_ee"]
+            return ["target"]
+        return ["object", "target"]
+
+    def _connection_state(self) -> bool:
+        return bool(self.estimator is not None and self.estimator.connected)
+
+    def _compute_action(self, observation: PolicyObservation) -> PolicyStep:
+        step = super()._compute_action(observation)
+        estimate = self.relation_estimate
+        diagnostics = {
+            **step.diagnostics,
+            "policy_family": "bidirectional_online_project_prototype",
+            "relation_state": estimate.state.value if estimate else RelationState.DISCONNECTED.value,
+            "relation_confidence": estimate.confidence if estimate else 0.0,
+            "relation_connection_score": estimate.connection_score if estimate else 0.0,
+            "relation_loss_score": estimate.loss_score if estimate else 0.0,
+            "relation_features": estimate.features if estimate else {},
+        }
+        return PolicyStep(action=step.action, diagnostics=diagnostics)

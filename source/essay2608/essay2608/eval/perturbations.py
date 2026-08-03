@@ -14,6 +14,8 @@ CONDITIONS = (
     "smooth_target",
     "sudden_target",
     "arm_offset",
+    "drop_after_grasp",
+    "close_without_grasp",
 )
 
 
@@ -32,6 +34,8 @@ class PerturbationController:
     object_shift = np.asarray([0.0, 0.08, 0.0], dtype=np.float64)
     target_shift = np.asarray([0.0, -0.10, 0.0], dtype=np.float64)
     arm_shift = np.asarray([0.0, 0.06, 0.0], dtype=np.float64)
+    drop_shift = np.asarray([0.0, 0.18, 0.0], dtype=np.float64)
+    miss_shift = np.asarray([0.0, -0.18, 0.0], dtype=np.float64)
 
     def __init__(self, condition: str, env) -> None:
         if condition not in CONDITIONS:
@@ -47,6 +51,7 @@ class PerturbationController:
         self.maximum_fraction = 0.0
         self.event_started = False
         self.event_finished = False
+        self.instantaneous_event_applied = False
 
     @staticmethod
     def _smooth_fraction(phase: int, phase_step: int, trigger_phase: int) -> float:
@@ -74,6 +79,13 @@ class PerturbationController:
         pose[:3] += shift
         self.target_term.pose_command_b[0] = pose
 
+    def _teleport_object(self, shift: np.ndarray, place_on_support: bool) -> None:
+        pose = self.object_asset.data.root_pose_w[0].detach().clone()
+        pose[:3] += pose.new_tensor(shift)
+        if place_on_support:
+            pose[2] = self.env_origin[2] + 0.021
+        self.object_asset.write_root_pose_to_sim(pose.unsqueeze(0))
+
     def update_scene(self, phase: int, phase_step: int) -> PerturbationStatus:
         """Update object/target perturbations before policy observation."""
 
@@ -97,6 +109,29 @@ class PerturbationController:
             fraction = self._sudden_fraction(phase, phase_step, trigger_phase=4)
             shift = self.target_shift
             self._write_target_shift(fraction)
+        elif (
+            self.condition == "drop_after_grasp"
+            and phase == 5
+            and phase_step >= 10
+            and not self.instantaneous_event_applied
+        ):
+            self._teleport_object(self.drop_shift, place_on_support=True)
+            self.instantaneous_event_applied = True
+            self.event_started = True
+            self.event_finished = True
+            fraction = 1.0
+            shift = self.drop_shift
+        elif (
+            self.condition == "close_without_grasp"
+            and phase == 3
+            and not self.instantaneous_event_applied
+        ):
+            self._teleport_object(self.miss_shift, place_on_support=True)
+            self.instantaneous_event_applied = True
+            self.event_started = True
+            self.event_finished = True
+            fraction = 1.0
+            shift = self.miss_shift
 
         self.maximum_fraction = max(self.maximum_fraction, fraction)
         self.event_started |= fraction > 0.0

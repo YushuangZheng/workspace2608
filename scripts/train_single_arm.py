@@ -13,6 +13,7 @@ from essay2608.data.dataset import load_dataset
 from essay2608.policy import (
     DynaMACPolicy,
     MaskOnlyPolicy,
+    RelationDynaMACPolicy,
     SkillDynaMACPolicy,
     StaticMultiStreamPolicy,
     WorldGaussianPolicy,
@@ -25,6 +26,7 @@ POLICIES = {
     "skill_dynamac": SkillDynaMACPolicy,
     "mask_only": MaskOnlyPolicy,
     "full_dynamac": DynaMACPolicy,
+    "relation_dynamac": RelationDynaMACPolicy,
 }
 
 
@@ -72,6 +74,11 @@ def main() -> None:
                 **(
                     {"skill_diagnostics": policy.skill_diagnostics}
                     if isinstance(policy, SkillDynaMACPolicy)
+                    else {}
+                ),
+                **(
+                    {"relation_calibration": policy.calibration_diagnostics}
+                    if isinstance(policy, RelationDynaMACPolicy)
                     else {}
                 ),
             }

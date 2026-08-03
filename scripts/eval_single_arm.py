@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 from isaaclab.app import AppLauncher
@@ -21,6 +22,7 @@ GEOMETRIC_METHODS = (
     "skill_dynamac",
     "mask_only",
     "full_dynamac",
+    "relation_dynamac",
 )
 METHODS = (*GEOMETRIC_METHODS, "diffusion_policy")
 CONDITIONS = (
@@ -30,6 +32,8 @@ CONDITIONS = (
     "smooth_target",
     "sudden_target",
     "arm_offset",
+    "drop_after_grasp",
+    "close_without_grasp",
 )
 TASK_ID = "Essay2608-Dynamic-Pick-Place-v0"
 
@@ -73,7 +77,19 @@ AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 
 
-EVALUATION_SCHEMA_VERSION = 3
+EVALUATION_SCHEMA_VERSION = 4
+
+
+@lru_cache(maxsize=1)
+def calibrated_relation_configuration() -> dict:
+    """Load the frozen-data calibration once in the controller process."""
+
+    from essay2608.data.dataset import load_dataset
+    from essay2608.policy.relation import calibrate_relation_estimator
+
+    demonstrations, _ = load_dataset(args.data_dir, verify_hashes=True)
+    config, _ = calibrate_relation_estimator(demonstrations)
+    return config.as_dict()
 
 
 def policy_configuration(method: str) -> dict:
@@ -116,6 +132,14 @@ def policy_configuration(method: str) -> dict:
             },
             "virtual_frame": "captured_at_phase_4_start",
         },
+        "relation_dynamac": {
+            **common,
+            "estimator": calibrated_relation_configuration(),
+            "actual_gripper_joint_feedback": True,
+            "contact_sensor_available": False,
+            "virtual_frame": "captured_on_connected_transition",
+            "frame_activation": "mask_while_connected_virtual_in_phase_4",
+        },
         "diffusion_policy": {
             **common,
             "execution_horizon": 4,
@@ -154,6 +178,19 @@ def perturbation_configuration(condition: str) -> dict:
             "shift_m": [0.0, 0.06, 0.0],
             "active_phase": 5,
             "active_phase_steps": [5, 25],
+        },
+        "drop_after_grasp": {
+            "shift_m": [0.0, 0.18, 0.0],
+            "trigger_phase": 5,
+            "trigger_phase_step": 10,
+            "place_on_support": True,
+            "gripper_command_unchanged": True,
+        },
+        "close_without_grasp": {
+            "shift_m": [0.0, -0.18, 0.0],
+            "trigger_phase": 3,
+            "place_on_support": True,
+            "gripper_command_unchanged": True,
         },
     }
     return configurations[condition]
@@ -328,6 +365,21 @@ def aggregate_trials(trials: list[dict]) -> dict:
             metrics = [trial["metrics"] for trial in selected]
             successes = sum(bool(item["success"]) for item in metrics)
             recovery = [item["recovery_success"] for item in metrics if item["recovery_success"] is not None]
+            onset_delays = [
+                item["connection_onset_delay_s"]
+                for item in metrics
+                if item["connection_onset_delay_s"] is not None
+            ]
+            release_delays = [
+                item["connection_release_delay_s"]
+                for item in metrics
+                if item["connection_release_delay_s"] is not None
+            ]
+            post_event_loss_delays = [
+                item["post_event_connection_loss_delay_s"]
+                for item in metrics
+                if item["post_event_connection_loss_delay_s"] is not None
+            ]
             interval_seed = 2608 + 100 * method_index + condition_index
             sensitivity_keys = sorted(metrics[0]["xy_success_sensitivity"])
             summary[method][condition] = {
@@ -359,6 +411,20 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 ),
                 "mean_mask_false_negative_rate": float(
                     np.mean([item["mask_false_negative_rate"] for item in metrics])
+                ),
+                "mean_connection_onset_delay_s": (
+                    float(np.mean(onset_delays)) if onset_delays else None
+                ),
+                "mean_connection_release_delay_s": (
+                    float(np.mean(release_delays)) if release_delays else None
+                ),
+                "mean_post_event_connection_loss_delay_s": (
+                    float(np.mean(post_event_loss_delays))
+                    if post_event_loss_delays
+                    else None
+                ),
+                "mean_maximum_relation_confidence": float(
+                    np.mean([item["maximum_relation_confidence"] for item in metrics])
                 ),
                 "xy_success_sensitivity": {
                     threshold: float(
@@ -557,6 +623,7 @@ from essay2608.policy import (
     DiffusionActionPolicy,
     DynaMACPolicy,
     MaskOnlyPolicy,
+    RelationDynaMACPolicy,
     SkillDynaMACPolicy,
     StaticMultiStreamPolicy,
     WorldGaussianPolicy,
@@ -569,10 +636,15 @@ def numpy_observation(env: gym.Env) -> PolicyObservation:
     """Read the first environment into the policy's NumPy observation."""
 
     ee_pose, object_pose, target_pose = get_scene_poses(env)
+    robot = env.unwrapped.scene["robot"]
+    gripper_opening = float(torch.sum(robot.data.joint_pos[0, -2:]).item())
+    gripper_velocity = float(torch.sum(robot.data.joint_vel[0, -2:]).item())
     return PolicyObservation(
         ee_pose=ee_pose[0].detach().cpu().numpy().astype(np.float64),
         object_pose=object_pose[0].detach().cpu().numpy().astype(np.float64),
         target_pose=target_pose[0].detach().cpu().numpy().astype(np.float64),
+        gripper_opening_m=gripper_opening,
+        gripper_velocity_m_s=gripper_velocity,
     )
 
 
@@ -587,6 +659,7 @@ def make_policy(name: str):
         "skill_dynamac": SkillDynaMACPolicy,
         "mask_only": MaskOnlyPolicy,
         "full_dynamac": DynaMACPolicy,
+        "relation_dynamac": RelationDynaMACPolicy,
     }[name]()
 
 
@@ -616,7 +689,9 @@ def run_worker() -> None:
     for _ in range(args.max_steps):
         phase_before = policy.phase
         phase_step_before = policy.phase_step
+        event_started_before = perturbation.event_started
         scene_status = perturbation.update_scene(phase_before, phase_step_before)
+        perturbation_event = perturbation.event_started and not event_started_before
         observation = numpy_observation(env)
 
         start = time.perf_counter()
@@ -633,6 +708,7 @@ def run_worker() -> None:
             policy_step.diagnostics,
             inference_ms,
             scene_status.active or action_status.active,
+            perturbation_event,
         )
         action_tensor = torch.as_tensor(action, dtype=torch.float32, device=env.unwrapped.device).unsqueeze(0)
         _, _, terminated, truncated, _ = env.step(action_tensor)
@@ -675,6 +751,7 @@ def run_worker() -> None:
         environment_done=environment_done,
         forced_transitions=policy.forced_transitions,
         perturbation_started=perturbation.event_started,
+        relation_loss_expected=args.worker_condition == "drop_after_grasp",
     )
     fingerprint, fingerprint_payload = experiment_fingerprint(
         args.worker_method, args.worker_condition, args.worker_seed
