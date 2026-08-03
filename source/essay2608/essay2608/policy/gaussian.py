@@ -7,7 +7,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from essay2608.data.dataset import Demonstration
-from essay2608.data.transforms import interpolate_poses, interpolate_rows, quaternion_mean, relative_pose
+from essay2608.data.transforms import (
+    interpolate_poses,
+    interpolate_rows,
+    quaternion_mean,
+    quaternion_residual_vector,
+    relative_pose,
+)
 
 from .base import PHASE_NAMES, PhaseClockPolicy, PolicyObservation, PolicyStep
 
@@ -19,6 +25,7 @@ class FrameGaussianModel:
     frame_name: str
     mean_pose: np.ndarray
     position_covariance: np.ndarray
+    pose_covariance: np.ndarray
     mean_gripper: np.ndarray
 
     def uncertainty_scale(self, phase: int, index: int) -> float:
@@ -28,6 +35,11 @@ class FrameGaussianModel:
 
 def _virtual_frame_pose(demonstration: Demonstration) -> np.ndarray:
     indices = demonstration.phase_indices(4)
+    return demonstration.ee_pose[indices[0]]
+
+
+def _skill_virtual_frame_pose(demonstration: Demonstration, phase: int) -> np.ndarray:
+    indices = demonstration.phase_indices(phase)
     return demonstration.ee_pose[indices[0]]
 
 
@@ -41,6 +53,10 @@ def _frame_poses(demonstration: Demonstration, frame_name: str, indices: np.ndar
     if frame_name == "virtual_ee":
         pose = _virtual_frame_pose(demonstration)
         return np.repeat(pose[None], len(indices), axis=0)
+    if frame_name.startswith("virtual_skill_"):
+        phase = int(frame_name.removeprefix("virtual_skill_"))
+        pose = _skill_virtual_frame_pose(demonstration, phase)
+        return np.repeat(pose[None], len(indices), axis=0)
     raise ValueError(frame_name)
 
 
@@ -49,16 +65,19 @@ def fit_frame_gaussian(
     frame_name: str,
     bins: int = 25,
     variance_floor: float = 1.0e-6,
+    pose_variance_floor: float = 1.0e-8,
 ) -> FrameGaussianModel:
     """Fit a time-aligned local trajectory Gaussian for every phase."""
 
     mean_pose = np.zeros((len(PHASE_NAMES), bins, 7), dtype=np.float64)
     covariance = np.zeros((len(PHASE_NAMES), bins, 3, 3), dtype=np.float64)
+    pose_covariance = np.zeros((len(PHASE_NAMES), bins, 6, 6), dtype=np.float64)
     mean_gripper = np.zeros((len(PHASE_NAMES), bins), dtype=np.float64)
 
     for phase in range(len(PHASE_NAMES)):
         if frame_name == "virtual_ee" and phase < 4:
             covariance[phase] = np.eye(3) * 1.0e6
+            pose_covariance[phase] = np.eye(6) * 1.0e6
             mean_pose[phase, :, 3] = 1.0
             continue
 
@@ -87,11 +106,22 @@ def fit_frame_gaussian(
             centered = executed[:, index, :3] - executed_mean
             covariance[phase, index] = centered.T @ centered / max(len(demonstrations) - 1, 1)
             covariance[phase, index] += np.eye(3) * variance_floor
+            executed_quaternion_mean = quaternion_mean(executed[:, index, 3:7])
+            rotation_residual = quaternion_residual_vector(
+                executed_quaternion_mean,
+                executed[:, index, 3:7],
+            )
+            pose_residual = np.concatenate((centered, rotation_residual), axis=-1)
+            pose_covariance[phase, index] = (
+                pose_residual.T @ pose_residual / max(len(demonstrations) - 1, 1)
+            )
+            pose_covariance[phase, index] += np.eye(6) * pose_variance_floor
 
     return FrameGaussianModel(
         frame_name=frame_name,
         mean_pose=mean_pose,
         position_covariance=covariance,
+        pose_covariance=pose_covariance,
         mean_gripper=mean_gripper,
     )
 

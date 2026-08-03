@@ -115,6 +115,33 @@ def quaternion_distance_radians(left: np.ndarray, right: np.ndarray) -> np.ndarr
     return 2.0 * np.arccos(np.clip(dot, -1.0, 1.0))
 
 
+def quaternion_to_rotation_vector(quaternion: np.ndarray) -> np.ndarray:
+    """Map normalized wxyz quaternions to shortest-axis rotation vectors."""
+
+    quaternion = normalize_quaternion(quaternion).copy()
+    quaternion[quaternion[..., 0] < 0.0] *= -1.0
+    vector = quaternion[..., 1:]
+    vector_norm = np.linalg.norm(vector, axis=-1)
+    angle = 2.0 * np.arctan2(vector_norm, np.clip(quaternion[..., 0], 0.0, 1.0))
+    scale = np.divide(
+        angle,
+        vector_norm,
+        out=np.full_like(angle, 2.0),
+        where=vector_norm > 1.0e-12,
+    )
+    return vector * scale[..., None]
+
+
+def quaternion_residual_vector(reference: np.ndarray, quaternion: np.ndarray) -> np.ndarray:
+    """Return the tangent rotation taking ``reference`` to ``quaternion``."""
+
+    relative = quaternion_multiply(
+        quaternion_conjugate(normalize_quaternion(reference)),
+        normalize_quaternion(quaternion),
+    )
+    return quaternion_to_rotation_vector(relative)
+
+
 def interpolate_rows(values: np.ndarray, length: int) -> np.ndarray:
     """Linearly resample an array along its first axis."""
 

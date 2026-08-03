@@ -10,12 +10,19 @@ from pathlib import Path
 import numpy as np
 
 from essay2608.data.dataset import load_dataset
-from essay2608.policy import DynaMACPolicy, MaskOnlyPolicy, StaticMultiStreamPolicy, WorldGaussianPolicy
+from essay2608.policy import (
+    DynaMACPolicy,
+    MaskOnlyPolicy,
+    SkillDynaMACPolicy,
+    StaticMultiStreamPolicy,
+    WorldGaussianPolicy,
+)
 
 
 POLICIES = {
     "world_gaussian": WorldGaussianPolicy,
     "static_multistream": StaticMultiStreamPolicy,
+    "skill_dynamac": SkillDynaMACPolicy,
     "mask_only": MaskOnlyPolicy,
     "full_dynamac": DynaMACPolicy,
 }
@@ -51,6 +58,7 @@ def main() -> None:
                 continue
             arrays[f"{frame_name}__mean_pose"] = model.mean_pose
             arrays[f"{frame_name}__position_covariance"] = model.position_covariance
+            arrays[f"{frame_name}__pose_covariance"] = model.pose_covariance
             arrays[f"{frame_name}__mean_gripper"] = model.mean_gripper
 
         artifact_path = output_dir / f"{name}.npz"
@@ -61,6 +69,11 @@ def main() -> None:
                 "file": artifact_path.name,
                 "sha256": artifact_hash(artifact_path),
                 "frames": sorted(models),
+                **(
+                    {"skill_diagnostics": policy.skill_diagnostics}
+                    if isinstance(policy, SkillDynaMACPolicy)
+                    else {}
+                ),
             }
         )
 

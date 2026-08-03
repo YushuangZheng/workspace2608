@@ -15,7 +15,13 @@ from pathlib import Path
 from isaaclab.app import AppLauncher
 
 
-GEOMETRIC_METHODS = ("world_gaussian", "static_multistream", "mask_only", "full_dynamac")
+GEOMETRIC_METHODS = (
+    "world_gaussian",
+    "static_multistream",
+    "skill_dynamac",
+    "mask_only",
+    "full_dynamac",
+)
 METHODS = (*GEOMETRIC_METHODS, "diffusion_policy")
 CONDITIONS = (
     "static",
@@ -67,7 +73,90 @@ AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 
 
-EVALUATION_SCHEMA_VERSION = 2
+EVALUATION_SCHEMA_VERSION = 3
+
+
+def policy_configuration(method: str) -> dict:
+    """Return the rollout-relevant defaults that are otherwise hidden in classes."""
+
+    common = {
+        "bins_per_phase": 25,
+        "position_threshold_m": 0.018,
+        "maximum_hold_steps": 200,
+        "maximum_action_position_step_m": 0.02,
+    }
+    configurations = {
+        "world_gaussian": {**common, "frames": ["world"]},
+        "static_multistream": {**common, "frames": ["object", "target"]},
+        "skill_dynamac": {
+            **common,
+            "skill_labels": "scripted_expert_phases_0_to_9",
+            "pose_state_dimension": 6,
+            "kinematic_scale_threshold": 0.001,
+            "linked_bin_fraction": 0.5,
+            "frame_selection_threshold": 0.2,
+            "selection_mode": "offline_fixed_per_skill",
+        },
+        "mask_only": {
+            **common,
+            "detector": {
+                "window_steps": 10,
+                "relative_rms_std_threshold_m": 0.0015,
+                "object_motion_threshold_m": 0.004,
+                "release_rule": "open_gripper_only",
+            },
+        },
+        "full_dynamac": {
+            **common,
+            "detector": {
+                "window_steps": 10,
+                "relative_rms_std_threshold_m": 0.0015,
+                "object_motion_threshold_m": 0.004,
+                "release_rule": "open_gripper_only",
+            },
+            "virtual_frame": "captured_at_phase_4_start",
+        },
+        "diffusion_policy": {
+            **common,
+            "execution_horizon": 4,
+            "sampling_seed": 2608,
+        },
+    }
+    return configurations[method]
+
+
+def perturbation_configuration(condition: str) -> dict:
+    """Expose deterministic perturbation magnitudes and trigger rules."""
+
+    configurations = {
+        "static": {"kind": "none"},
+        "smooth_object": {
+            "shift_m": [0.0, 0.08, 0.0],
+            "trigger_phase": 1,
+            "ramp_phase_steps": [4, 24],
+        },
+        "sudden_object": {
+            "shift_m": [0.0, 0.08, 0.0],
+            "trigger_phase": 1,
+            "trigger_phase_step": 10,
+        },
+        "smooth_target": {
+            "shift_m": [0.0, -0.10, 0.0],
+            "trigger_phase": 4,
+            "ramp_phase_steps": [4, 24],
+        },
+        "sudden_target": {
+            "shift_m": [0.0, -0.10, 0.0],
+            "trigger_phase": 4,
+            "trigger_phase_step": 10,
+        },
+        "arm_offset": {
+            "shift_m": [0.0, 0.06, 0.0],
+            "active_phase": 5,
+            "active_phase_steps": [5, 25],
+        },
+    }
+    return configurations[condition]
 
 
 def sha256_file(path: Path) -> str:
@@ -127,7 +216,9 @@ def experiment_fingerprint(method: str, condition: str, seed: int) -> tuple[str,
         "source_sha256": source_fingerprint(),
         "dataset_sha256": manifest.get("dataset_sha256"),
         "method": method,
+        "policy_config": policy_configuration(method),
         "condition": condition,
+        "perturbation_config": perturbation_configuration(condition),
         "seed": seed,
         "max_steps": args.max_steps,
         "legacy_success_threshold_m": args.legacy_success_threshold,
@@ -137,7 +228,6 @@ def experiment_fingerprint(method: str, condition: str, seed: int) -> tuple[str,
         "stability_window_steps": args.stability_window,
         "stability_displacement_threshold_m": args.stability_displacement_threshold,
         "stability_speed_threshold_m_s": args.stability_speed_threshold,
-        "maximum_action_position_step_m": 0.02,
     }
     if method == "diffusion_policy":
         checkpoint = args.diffusion_checkpoint.resolve()
@@ -467,6 +557,7 @@ from essay2608.policy import (
     DiffusionActionPolicy,
     DynaMACPolicy,
     MaskOnlyPolicy,
+    SkillDynaMACPolicy,
     StaticMultiStreamPolicy,
     WorldGaussianPolicy,
 )
@@ -493,6 +584,7 @@ def make_policy(name: str):
     return {
         "world_gaussian": WorldGaussianPolicy,
         "static_multistream": StaticMultiStreamPolicy,
+        "skill_dynamac": SkillDynaMACPolicy,
         "mask_only": MaskOnlyPolicy,
         "full_dynamac": DynaMACPolicy,
     }[name]()

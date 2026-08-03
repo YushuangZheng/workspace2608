@@ -83,8 +83,8 @@ class MaskOnlyPolicy(StaticMultiStreamPolicy):
         return self.detector.connected
 
 
-class DynaMACPolicy(MaskOnlyPolicy):
-    """Mask invalid object frame and substitute a captured virtual EE frame."""
+class OnlineDynaMACPrototype(MaskOnlyPolicy):
+    """Project prototype with online relation masking and one virtual EE frame."""
 
     name = "full_dynamac"
     fitted_frames = ("world", "object", "target", "virtual_ee")
@@ -122,3 +122,8 @@ class DynaMACPolicy(MaskOnlyPolicy):
                 return ["target", "virtual_ee"]
             return ["target"]
         return ["object", "target"]
+
+
+# Backward-compatible name for saved configs and older scripts. New code should
+# use OnlineDynaMACPrototype so it is not confused with the paper-level method.
+DynaMACPolicy = OnlineDynaMACPrototype
