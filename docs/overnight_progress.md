@@ -72,7 +72,7 @@ Validation:
 
 ### Phase 2 — method provenance and skill-level baseline
 
-Status: in progress.
+Status: complete.
 
 Implementation completed before the full evaluation matrix:
 
@@ -106,3 +106,26 @@ Pre-commit validation so far:
   successes. Both 10 cm target shifts failed at 67.83 mm XY error, exposing the
   cost of over-selected static virtual streams; the result is retained rather
   than used to tune thresholds.
+
+Clean evaluation at implementation commit `c979a94`:
+
+- Command: `conda run -n env_isaaclab python scripts/eval_single_arm.py
+  --headless --methods world_gaussian static_multistream skill_dynamac
+  mask_only full_dynamac --conditions static smooth_object sudden_object
+  smooth_target sudden_target arm_offset --seeds 6200 6201 6202 --output_dir
+  outputs/single_arm_scientific/skill_baseline_v1`
+- Integrity: 90/90 unique combinations, 90 JSON and 90 NPZ files, all metrics
+  present, schema 3, one source hash, one commit, and the frozen dataset hash.
+- World Gaussian and Static Multi-stream: 0/18 stable-place successes each.
+- SkillDynaMAC: 10/18 successes and 8/15 recoveries. All object shifts
+  succeeded; all six target shifts failed; seed 6201 also failed static and arm
+  offset. Condition-balanced mean XY error is 25.95 mm and path is 1.152 m.
+- SkillDynaMAC's offline fixed link labels have 0.621 mean false-positive
+  fraction against scripted physical-link phases, zero false-negative fraction,
+  0.259 m mean raw frame-switch jump limited to 0.020 m, and zero forced phase
+  transitions.
+- Mask-only and the online project prototype: 18/18 successes and 15/15
+  recoveries each. These stronger engineering results do not make them
+  paper-faithful methods.
+
+Implementation commit: `c979a94 Add paper-faithful skill-level DynaMAC baseline`.

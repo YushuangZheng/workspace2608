@@ -20,8 +20,12 @@ Dynamic Environments* by von Hartz, Valada, and Boedecker.
 | Task-parameter selection | Normalize precision determinants across candidates at each time, take the time maximum, and threshold `omega` (Eq. 6) | Same normalization/max structure over 6-D covariances; fixed threshold 0.2 | Paper-faithful equation; threshold is a predeclared project choice because the paper does not specify it |
 | Execution | Fit and sequence one multi-stream policy per skill (Algorithm 1, lines 7–8) | One phase-clock controller uses a fixed selected frame set for each expert-labelled phase | Paper-inspired simplification |
 | Online mask | The paper derives links from demonstration skill distributions before fitting policies | `OnlineDynaMACPrototype` uses a runtime sliding window over object/EE translation and gripper state | New project prototype, not the paper algorithm |
+| Gripper gating and latching | Not specified as the primary link test; links are inferred per skill from precision | The online prototype clears on an open demonstrated gripper command and otherwise latches; SkillDynaMAC has no runtime gripper gate | New/incomplete project logic |
+| Frame activation | Selected task parameters are fixed for each learned skill (Algorithm 1) | SkillDynaMAC uses fixed training-only selections; the online prototype switches frames from runtime connection plus hardcoded phase 4 | First is paper-inspired; second is project-specific |
 | Release handling | Per-skill analysis permits links to end after placement (Fig. 3) | Current online prototype latches until an open-gripper command; `SkillDynaMACPolicy` changes only at phase boundaries | Incomplete project behavior |
 | Bimanual reduction | Fit two concurrent DynaMAC instances and add the opposite end effector as a candidate task parameter (Sec. III-C) | Existing bimanual controllers use handcrafted coordination and transfer logic | Paper-inspired engineering prototype, not a reproduction |
+| Perturbations | DynaBench changes valid task configurations and tests smooth/abrupt dynamics (Sec. IV) | Deterministic 8 cm object shifts, 10 cm target shifts, and a temporary 6 cm action offset in a custom Isaac Lab task | Project evaluation mechanism inspired by the paper, not DynaBench |
+| Metrics | The paper reports task success over 200 episodes and dynamic/static task groups | Composite stable placement, XY sensitivity, legacy 3-D error, recovery, path/action diagnostics, and connection decisions against scripted phases | Project metrics; no numerical equivalence to paper results |
 
 ## Three names with intentionally different meanings
 
@@ -91,6 +95,20 @@ end-effector path. The target failure is consistent with the target stream being
 diluted by several selected static virtual streams. These are engineering smoke
 results only. They neither validate the detected link labels nor support
 paper-level performance claims.
+
+The clean three-seed matrix at commit `c979a94` contains 90 unique trials (five
+methods, six conditions, three seeds), each with paired JSON/NPZ evidence and
+one common source/data fingerprint. SkillDynaMAC succeeded in 10/18 trials and
+recovered in 8/15 perturbed trials. It succeeded in all object-shift trials,
+failed all six target-shift trials, and had one additional static plus one arm
+offset placement failure on seed 6201. Its condition-balanced mean XY error was
+25.95 mm and mean path length 1.152 m. Comparing its fixed per-skill link labels
+against the repository's scripted physical-link phases yields a 0.621 mean false
+positive fraction and zero false-negative fraction; this comparison is an
+offline-label diagnostic, not an online detector rate. Mask-only and the online
+prototype succeeded in all 18 trials, whereas World and Static Multi-stream
+succeeded in none. With only three held-out seeds, these results are diagnostic
+and not a paper-ready estimate.
 
 ## Not implemented from the paper
 
