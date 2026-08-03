@@ -250,3 +250,25 @@ Validation:
 - 480 independent Isaac workers completed; transient Isaac plugin-exit warnings
   produced no missing artifact or metric
 - full matrix identity, count, fingerprint, path-partition, and hash audit passed
+
+### Phase 6 — bimanual handover skeleton
+
+Status: implementation and smoke validation in progress.
+
+Audit findings and minimum plan:
+
+- The existing `Essay2608-Bimanual-Handover-v0` already has two Frankas,
+  independent absolute Cartesian IK actions, independent grippers, a complete
+  13-state scripted expert, isolated-process collection, and five frozen v1
+  demonstrations.
+- The task observation manager exposes only joint state and prior action, so it
+  does not yet satisfy the explicit geometric observation contract.
+- Frozen v1 records a single kinematic `carrier` and cannot represent the short
+  `both` interval. It must remain immutable; the corrected schema will be
+  collected as `data/handover_static/v2`.
+- Add explicit left/right EE, object, target, and measured finger observations;
+  add state-aligned `none → left_only → both → right_only → none` supervision;
+  keep the physical carrier field for backward compatibility.
+- Unit-test the simulator-independent schema and v1 compatibility, run one
+  isolated headless smoke episode, then collect and independently audit five v2
+  episodes before freezing them.

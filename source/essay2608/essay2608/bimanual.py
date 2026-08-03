@@ -2,33 +2,17 @@
 
 from __future__ import annotations
 
-from enum import IntEnum
-
 import gymnasium as gym
 import torch
 from isaaclab.utils import math as math_utils
+
+from essay2608.data.handover_schema import HandoverState, handover_relation_label
 
 
 GRIPPER_OPEN = 1.0
 GRIPPER_CLOSE = -1.0
 HANDOVER_POSE = torch.tensor([0.48, 0.0, 0.42, 1.0, 0.0, 0.0, 0.0])
 HANDOVER_TARGET_POSE = torch.tensor([0.48, -0.20, 0.22, 1.0, 0.0, 0.0, 0.0])
-
-
-class HandoverState(IntEnum):
-    REST = 0
-    LEFT_APPROACH = 1
-    LEFT_GRASP = 2
-    LEFT_LIFT = 3
-    LEFT_TO_HANDOVER = 4
-    RIGHT_APPROACH = 5
-    RIGHT_GRASP = 6
-    TRANSFER = 7
-    LEFT_RELEASE = 8
-    RIGHT_TO_TARGET = 9
-    RIGHT_RELEASE = 10
-    RETREAT = 11
-    COMPLETE = 12
 
 
 def _asset_body_pose(env: gym.Env, asset_name: str, body_name: str) -> torch.Tensor:
@@ -123,6 +107,12 @@ class ScriptedHandover:
         if HandoverState.TRANSFER <= self.state <= HandoverState.RIGHT_RELEASE:
             return "right"
         return None
+
+    @property
+    def relation_label(self) -> str:
+        """Script supervision label, independent of the kinematic carrier."""
+
+        return handover_relation_label(self.state)
 
     @property
     def carrier_offset(self) -> tuple[torch.Tensor, torch.Tensor] | None:

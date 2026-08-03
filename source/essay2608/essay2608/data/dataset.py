@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from .handover_schema import RELATION_SEQUENCE, handover_relation_label
 from .transforms import quaternion_distance_radians, quaternion_mean, relative_pose
 
 
@@ -44,7 +45,13 @@ BIMANUAL_EXPECTED_KEYS = {
     "quaternion_order",
     "coordinate_frame",
 }
+BIMANUAL_RELATION_KEYS = {
+    "relation_label",
+    "left_gripper_state",
+    "right_gripper_state",
+}
 BIMANUAL_EXPECTED_STATE_SEQUENCE = list(range(13))
+BIMANUAL_EXPECTED_RELATION_SEQUENCE = list(RELATION_SEQUENCE)
 TRAY_EXPECTED_STATE_SEQUENCE = list(range(9))
 
 
@@ -91,6 +98,9 @@ class BimanualDemonstration:
     carrier: np.ndarray
     control_dt: float
     final_error: float
+    relation_label: np.ndarray | None = None
+    left_gripper_state: np.ndarray | None = None
+    right_gripper_state: np.ndarray | None = None
 
     @property
     def steps(self) -> int:
@@ -162,6 +172,11 @@ def load_bimanual_demo(path: Path) -> BimanualDemonstration:
             for name in BIMANUAL_EXPECTED_KEYS
             if name not in {"quaternion_order", "coordinate_frame"}
         }
+        relation_keys = BIMANUAL_RELATION_KEYS & set(archive.files)
+        if relation_keys and relation_keys != BIMANUAL_RELATION_KEYS:
+            missing_relation = BIMANUAL_RELATION_KEYS - relation_keys
+            raise ValueError(f"{path} has an incomplete relation schema: {sorted(missing_relation)}")
+        arrays.update({name: archive[name].copy() for name in relation_keys})
     return BimanualDemonstration(
         path=path,
         time=arrays["time"],
@@ -176,6 +191,9 @@ def load_bimanual_demo(path: Path) -> BimanualDemonstration:
         carrier=arrays["carrier"],
         control_dt=float(arrays["control_dt"]),
         final_error=float(arrays["final_error"]),
+        relation_label=arrays.get("relation_label"),
+        left_gripper_state=arrays.get("left_gripper_state"),
+        right_gripper_state=arrays.get("right_gripper_state"),
     )
 
 
@@ -227,6 +245,15 @@ def _state_sequence(states: np.ndarray) -> list[int]:
     for value in states[1:]:
         if int(value) != sequence[-1]:
             sequence.append(int(value))
+    return sequence
+
+
+def _value_sequence(values: np.ndarray) -> list[str]:
+    sequence = [str(values[0])]
+    for value in values[1:]:
+        value = str(value)
+        if value != sequence[-1]:
+            sequence.append(value)
     return sequence
 
 
@@ -365,7 +392,7 @@ def audit_bimanual_demonstration(
 ) -> dict[str, Any]:
     """Validate one complete handover and return manifest diagnostics."""
 
-    arrays = (
+    numeric_arrays = (
         demonstration.time,
         demonstration.state,
         demonstration.left_ee_pose,
@@ -377,13 +404,26 @@ def audit_bimanual_demonstration(
         demonstration.joint_vel,
         demonstration.carrier,
     )
-    if {len(array) for array in arrays} != {demonstration.steps}:
+    relation_arrays = (
+        demonstration.relation_label,
+        demonstration.left_gripper_state,
+        demonstration.right_gripper_state,
+    )
+    has_relation_schema = all(array is not None for array in relation_arrays)
+    if any(array is not None for array in relation_arrays) and not has_relation_schema:
+        raise ValueError(f"{demonstration.path.name} has an incomplete relation schema.")
+    if has_relation_schema:
+        numeric_arrays += (
+            demonstration.left_gripper_state,
+            demonstration.right_gripper_state,
+        )
+    if {len(array) for array in numeric_arrays} != {demonstration.steps}:
         raise ValueError(f"{demonstration.path.name} has inconsistent array lengths.")
     if demonstration.action.shape[1] != 16:
         raise ValueError(f"{demonstration.path.name} does not have a 16-D bimanual action.")
     if any(pose.shape[1] != 7 for pose in (demonstration.left_ee_pose, demonstration.right_ee_pose)):
         raise ValueError(f"{demonstration.path.name} has an invalid EE pose shape.")
-    if not all(np.all(np.isfinite(array)) for array in arrays):
+    if not all(np.all(np.isfinite(array)) for array in numeric_arrays):
         raise ValueError(f"{demonstration.path.name} contains non-finite values.")
     sequence = _state_sequence(demonstration.state)
     if sequence != BIMANUAL_EXPECTED_STATE_SEQUENCE:
@@ -402,8 +442,44 @@ def audit_bimanual_demonstration(
     if max(jumps.values()) >= reset_jump_threshold:
         raise ValueError(f"{demonstration.path.name} contains a reset-like jump: {jumps}")
 
-    left_mask = demonstration.carrier == 1
-    right_mask = demonstration.carrier == 2
+    relation_diagnostics: dict[str, Any] = {"relation_schema": "legacy_carrier_only"}
+    if has_relation_schema:
+        if demonstration.left_gripper_state.shape[1:] != (2,) or demonstration.right_gripper_state.shape[1:] != (2,):
+            raise ValueError(f"{demonstration.path.name} has invalid measured gripper states.")
+        if np.ptp(demonstration.left_gripper_state) < 0.02 or np.ptp(demonstration.right_gripper_state) < 0.02:
+            raise ValueError(f"{demonstration.path.name} does not measure both open and closed grippers.")
+        expected_relation = np.asarray(
+            [handover_relation_label(state) for state in demonstration.state],
+            dtype="U16",
+        )
+        if not np.array_equal(demonstration.relation_label, expected_relation):
+            raise ValueError(f"{demonstration.path.name} relation labels disagree with expert states.")
+        relation_sequence = _value_sequence(demonstration.relation_label)
+        if relation_sequence != BIMANUAL_EXPECTED_RELATION_SEQUENCE:
+            raise ValueError(
+                f"{demonstration.path.name} has incomplete relation labels: {relation_sequence}"
+            )
+        left_mask = np.isin(demonstration.relation_label, ["left_only", "both"])
+        right_mask = np.isin(demonstration.relation_label, ["both", "right_only"])
+        relation_diagnostics = {
+            "relation_schema": "four_value_state_aligned_v2",
+            "relation_sequence": relation_sequence,
+            "relation_counts": {
+                label: int(np.count_nonzero(demonstration.relation_label == label))
+                for label in ("none", "left_only", "both", "right_only")
+            },
+            "left_gripper_range": [
+                float(np.min(demonstration.left_gripper_state)),
+                float(np.max(demonstration.left_gripper_state)),
+            ],
+            "right_gripper_range": [
+                float(np.min(demonstration.right_gripper_state)),
+                float(np.max(demonstration.right_gripper_state)),
+            ],
+        }
+    else:
+        left_mask = demonstration.carrier == 1
+        right_mask = demonstration.carrier == 2
     if not left_mask.any() or not right_mask.any():
         raise ValueError(f"{demonstration.path.name} does not contain both carrier assignments.")
     left_connection = _pose_stability(
@@ -431,6 +507,7 @@ def audit_bimanual_demonstration(
         "left_object_connection_stability": left_connection,
         "right_object_connection_stability": right_connection,
         "cross_arm_handover_stability": cross_arm,
+        **relation_diagnostics,
     }
 
 
@@ -462,6 +539,7 @@ def audit_bimanual_dataset(
     return {
         "entries": entries,
         "dataset_sha256": dataset_digest(entries),
+        "relation_schemas": sorted({entry["relation_schema"] for entry in entries}),
         "minimum_initial_object_distance_m": minimum_distance,
         "max_final_error_m": max(entry["final_error"] for entry in entries),
         "max_step_position_jump_m": max(max(entry["max_step_position_jump"].values()) for entry in entries),
