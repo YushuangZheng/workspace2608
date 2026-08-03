@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import subprocess
@@ -34,7 +35,17 @@ parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(GEOMET
 parser.add_argument("--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS))
 parser.add_argument("--seeds", nargs="+", type=int, default=[6200])
 parser.add_argument("--max_steps", type=int, default=900)
-parser.add_argument("--success_threshold", type=float, default=0.06)
+parser.add_argument("--success_xy_threshold", type=float, default=0.01)
+parser.add_argument(
+    "--success_xy_sensitivity",
+    type=float,
+    nargs="+",
+    default=[0.005, 0.01, 0.02],
+)
+parser.add_argument("--support_height_tolerance", type=float, default=0.01)
+parser.add_argument("--stability_window", type=int, default=25)
+parser.add_argument("--stability_displacement_threshold", type=float, default=0.005)
+parser.add_argument("--stability_speed_threshold", type=float, default=0.05)
 parser.add_argument(
     "--diffusion_checkpoint",
     type=Path,
@@ -53,6 +64,85 @@ parser.add_argument("--worker_seed", type=int, help=argparse.SUPPRESS)
 parser.add_argument("--result_path", type=Path, help=argparse.SUPPRESS)
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
+
+
+EVALUATION_SCHEMA_VERSION = 2
+
+
+def sha256_file(path: Path) -> str:
+    """Return a streaming content hash for cache identity."""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def source_fingerprint() -> str:
+    """Hash every source file that can change one single-arm rollout."""
+
+    root = Path(__file__).resolve().parents[1]
+    paths = [Path(__file__).resolve()]
+    package = root / "source" / "essay2608" / "essay2608"
+    for relative in ("policy", "eval", "data"):
+        paths.extend(sorted((package / relative).glob("*.py")))
+    paths.extend(
+        [
+            package / "expert.py",
+            package
+            / "tasks"
+            / "manager_based"
+            / "dynamic_pick_place"
+            / "dynamic_pick_place_env_cfg.py",
+        ]
+    )
+    digest = hashlib.sha256()
+    for path in sorted(set(paths)):
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def source_git_commit() -> str:
+    """Record the repository revision alongside the content-addressed source hash."""
+
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def experiment_fingerprint(method: str, condition: str, seed: int) -> tuple[str, dict]:
+    """Fingerprint code, frozen data, checkpoint, and all rollout settings."""
+
+    manifest = json.loads((args.data_dir.resolve() / "manifest.json").read_text(encoding="utf-8"))
+    payload = {
+        "schema_version": EVALUATION_SCHEMA_VERSION,
+        "task_id": TASK_ID,
+        "source_git_commit": source_git_commit(),
+        "source_sha256": source_fingerprint(),
+        "dataset_sha256": manifest.get("dataset_sha256"),
+        "method": method,
+        "condition": condition,
+        "seed": seed,
+        "max_steps": args.max_steps,
+        "success_xy_threshold_m": args.success_xy_threshold,
+        "success_xy_sensitivity_m": sorted(set(args.success_xy_sensitivity)),
+        "support_height_tolerance_m": args.support_height_tolerance,
+        "stability_window_steps": args.stability_window,
+        "stability_displacement_threshold_m": args.stability_displacement_threshold,
+        "stability_speed_threshold_m_s": args.stability_speed_threshold,
+        "maximum_action_position_step_m": 0.02,
+    }
+    if method == "diffusion_policy":
+        checkpoint = args.diffusion_checkpoint.resolve()
+        payload["diffusion_checkpoint"] = str(checkpoint)
+        payload["diffusion_checkpoint_sha256"] = sha256_file(checkpoint)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest(), payload
 
 
 def offline_stream_diagnostics(data_dir: Path) -> dict:
@@ -123,15 +213,7 @@ def wilson_interval(successes: int, trials: int, z: float = 1.959963984540054) -
 def failure_reason(metrics: dict) -> str:
     """Classify one unsuccessful rollout using mutually exclusive causes."""
 
-    if metrics["success"]:
-        return "success"
-    if metrics["environment_done"]:
-        return "environment_terminated"
-    if not metrics["policy_complete"]:
-        return "policy_incomplete"
-    if metrics["final_error_m"] >= args.success_threshold:
-        return "final_error_above_threshold"
-    return "unknown"
+    return str(metrics.get("failure_reason", "unknown"))
 
 
 def aggregate_trials(trials: list[dict]) -> dict:
@@ -155,13 +237,19 @@ def aggregate_trials(trials: list[dict]) -> dict:
             successes = sum(bool(item["success"]) for item in metrics)
             recovery = [item["recovery_success"] for item in metrics if item["recovery_success"] is not None]
             interval_seed = 2608 + 100 * method_index + condition_index
+            sensitivity_keys = sorted(metrics[0]["xy_success_sensitivity"])
             summary[method][condition] = {
                 "num_trials": len(metrics),
                 "success_rate": successes / len(metrics),
                 "success_rate_ci95_wilson": wilson_interval(successes, len(metrics)),
-                "mean_final_error_m": float(np.mean([item["final_error_m"] for item in metrics])),
-                "final_error_m_statistics": bootstrap_mean_interval(
-                    [item["final_error_m"] for item in metrics], interval_seed
+                "mean_final_xy_error_m": float(
+                    np.mean([item["final_xy_error_m"] for item in metrics])
+                ),
+                "final_xy_error_m_statistics": bootstrap_mean_interval(
+                    [item["final_xy_error_m"] for item in metrics], interval_seed
+                ),
+                "mean_final_error_3d_m": float(
+                    np.mean([item["final_error_3d_m"] for item in metrics])
                 ),
                 "mean_path_length_m": float(np.mean([item["path_length_m"] for item in metrics])),
                 "path_length_m_statistics": bootstrap_mean_interval(
@@ -179,6 +267,20 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 ),
                 "mean_mask_false_negative_rate": float(
                     np.mean([item["mask_false_negative_rate"] for item in metrics])
+                ),
+                "xy_success_sensitivity": {
+                    threshold: float(
+                        np.mean([item["xy_success_sensitivity"][threshold] for item in metrics])
+                    )
+                    for threshold in sensitivity_keys
+                },
+                "mean_max_raw_policy_action_jump_m": float(
+                    np.mean([item["max_raw_policy_action_jump_m"] for item in metrics])
+                ),
+                "mean_max_rate_limited_policy_action_jump_m": float(
+                    np.mean(
+                        [item["max_rate_limited_policy_action_jump_m"] for item in metrics]
+                    )
                 ),
                 "failure_reasons": dict(Counter(failure_reason(item) for item in metrics)),
             }
@@ -207,7 +309,10 @@ def aggregate_by_method(trials: list[dict]) -> dict:
                     "recovery_rate": (
                         sum(bool(item["recovery_success"]) for item in dynamic) / len(dynamic) if dynamic else None
                     ),
-                    "mean_final_error_m": sum(item["final_error_m"] for item in selected) / len(selected),
+                    "mean_final_xy_error_m": sum(item["final_xy_error_m"] for item in selected)
+                    / len(selected),
+                    "mean_final_error_3d_m": sum(item["final_error_3d_m"] for item in selected)
+                    / len(selected),
                     "mean_path_length_m": sum(item["path_length_m"] for item in selected) / len(selected),
                     "mean_inference_ms": sum(item["mean_inference_ms"] for item in selected) / len(selected),
                 }
@@ -222,8 +327,11 @@ def aggregate_by_method(trials: list[dict]) -> dict:
             "recovery_rate_statistics": bootstrap_mean_interval(
                 [row["recovery_rate"] for row in seed_rows if row["recovery_rate"] is not None], interval_seed + 1
             ),
-            "final_error_m_statistics": bootstrap_mean_interval(
-                [row["mean_final_error_m"] for row in seed_rows], interval_seed + 2
+            "final_xy_error_m_statistics": bootstrap_mean_interval(
+                [row["mean_final_xy_error_m"] for row in seed_rows], interval_seed + 2
+            ),
+            "final_error_3d_m_statistics": bootstrap_mean_interval(
+                [row["mean_final_error_3d_m"] for row in seed_rows], interval_seed + 5
             ),
             "path_length_m_statistics": bootstrap_mean_interval(
                 [row["mean_path_length_m"] for row in seed_rows], interval_seed + 3
@@ -250,12 +358,14 @@ def run_controller() -> int:
             for method in args.methods:
                 trial_index += 1
                 result_path = trial_dir / f"{method}__{condition}__seed_{seed}.json"
+                fingerprint, fingerprint_payload = experiment_fingerprint(method, condition, seed)
                 if args.resume and result_path.is_file():
                     cached = json.loads(result_path.read_text(encoding="utf-8"))
                     if (
                         cached.get("method") == method
                         and cached.get("condition") == condition
                         and cached.get("seed") == seed
+                        and cached.get("experiment_fingerprint") == fingerprint
                         and "metrics" in cached
                     ):
                         print(
@@ -265,6 +375,10 @@ def run_controller() -> int:
                         )
                         trials.append(cached)
                         continue
+                    print(
+                        f"[study] invalidate stale cache method={method} condition={condition} seed={seed}",
+                        flush=True,
+                    )
                 print(
                     f"\n[study] trial={trial_index}/{total} method={method} "
                     f"condition={condition} seed={seed}",
@@ -293,6 +407,8 @@ def run_controller() -> int:
                             "condition": condition,
                             "seed": seed,
                             "worker_returncode": result.returncode,
+                            "experiment_fingerprint": fingerprint,
+                            "experiment_config": fingerprint_payload,
                         }
                     )
                     continue
@@ -305,7 +421,17 @@ def run_controller() -> int:
         "methods": args.methods,
         "conditions": args.conditions,
         "seeds": args.seeds,
-        "success_threshold_m": args.success_threshold,
+        "evaluation_schema_version": EVALUATION_SCHEMA_VERSION,
+        "success_definition": {
+            "xy_threshold_m": args.success_xy_threshold,
+            "xy_sensitivity_thresholds_m": sorted(set(args.success_xy_sensitivity)),
+            "support_height": "median final support height in frozen demonstrations",
+            "support_height_tolerance_m": args.support_height_tolerance,
+            "released_gripper_required": True,
+            "stability_window_steps": args.stability_window,
+            "stability_displacement_threshold_m": args.stability_displacement_threshold,
+            "stability_speed_threshold_m_s": args.stability_speed_threshold,
+        },
         "stream_diagnostics": diagnostics,
         "ablation": aggregate_trials(trials),
         "condition_balanced_method_statistics": aggregate_by_method(trials),
@@ -332,7 +458,7 @@ import torch
 
 import essay2608
 from essay2608.data.dataset import load_dataset
-from essay2608.eval import EpisodeTrace, PerturbationController
+from essay2608.eval import EpisodeTrace, PerturbationController, SuccessCriteria
 from essay2608.expert import get_scene_poses
 from essay2608.policy import (
     DiffusionActionPolicy,
@@ -391,7 +517,6 @@ def run_worker() -> None:
     perturbation = PerturbationController(args.worker_condition, env)
     trace = EpisodeTrace(control_dt=control_dt)
     environment_done = False
-    last_error = float(np.linalg.norm(observation.object_pose[:3] - observation.target_pose[:3]))
 
     for _ in range(args.max_steps):
         phase_before = policy.phase
@@ -414,8 +539,6 @@ def run_worker() -> None:
             inference_ms,
             scene_status.active or action_status.active,
         )
-        last_error = float(np.linalg.norm(observation.object_pose[:3] - observation.target_pose[:3]))
-
         action_tensor = torch.as_tensor(action, dtype=torch.float32, device=env.unwrapped.device).unsqueeze(0)
         _, _, terminated, truncated, _ = env.step(action_tensor)
         if bool((terminated | truncated).any().item()):
@@ -424,26 +547,49 @@ def run_worker() -> None:
         if policy.complete:
             break
 
-    if not environment_done:
-        final_observation = numpy_observation(env)
-        final_error = float(np.linalg.norm(final_observation.object_pose[:3] - final_observation.target_pose[:3]))
-    else:
-        final_error = last_error
+    # Always read the post-step scene state.  The previous implementation used
+    # the pre-step error on termination, making terminal trials one control step
+    # stale.  The configured horizon ends before the normal time-limit reset.
+    final_observation = numpy_observation(env)
+    support_height = float(
+        np.median(
+            np.concatenate(
+                [
+                    demonstration.object_pose[-args.stability_window :, 2]
+                    for demonstration in demonstrations
+                ]
+            )
+        )
+    )
+    criteria = SuccessCriteria(
+        xy_threshold_m=args.success_xy_threshold,
+        xy_sensitivity_thresholds_m=tuple(sorted(set(args.success_xy_sensitivity))),
+        support_height_m=support_height,
+        support_height_tolerance_m=args.support_height_tolerance,
+        stability_window_steps=args.stability_window,
+        stability_displacement_m=args.stability_displacement_threshold,
+        stability_speed_m_s=args.stability_speed_threshold,
+    )
 
     metrics = trace.summary(
-        final_error=final_error,
-        success_threshold=args.success_threshold,
+        final_object_position=final_observation.object_pose[:3],
+        final_target_position=final_observation.target_pose[:3],
+        criteria=criteria,
         policy_complete=policy.complete,
         environment_done=environment_done,
         forced_transitions=policy.forced_transitions,
         perturbation_started=perturbation.event_started,
     )
-    metrics["failure_reason"] = failure_reason(metrics)
+    fingerprint, fingerprint_payload = experiment_fingerprint(
+        args.worker_method, args.worker_condition, args.worker_seed
+    )
     result = {
         "method": args.worker_method,
         "condition": args.worker_condition,
         "seed": args.worker_seed,
         "dataset_sha256": manifest["dataset_sha256"],
+        "experiment_fingerprint": fingerprint,
+        "experiment_config": fingerprint_payload,
         "perturbation_started": perturbation.event_started,
         "perturbation_finished": perturbation.event_finished,
         "metrics": metrics,

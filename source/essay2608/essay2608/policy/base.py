@@ -71,6 +71,7 @@ class PhaseClockPolicy(SingleArmPolicy):
 
     position_threshold = 0.018
     maximum_hold_steps = 200
+    maximum_action_position_step = 0.02
 
     def __init__(self, bins: int = 25) -> None:
         self.bins = int(bins)
@@ -93,6 +94,7 @@ class PhaseClockPolicy(SingleArmPolicy):
         self.total_step = 0
         self._complete = False
         self.forced_transitions = 0
+        self._last_action_position = observation.ee_pose[:3].astype(np.float64, copy=True)
         self._on_reset(observation)
 
     def _on_reset(self, observation: PolicyObservation) -> None:
@@ -139,9 +141,28 @@ class PhaseClockPolicy(SingleArmPolicy):
     def act(self, observation: PolicyObservation) -> PolicyStep:
         if self._complete:
             raise RuntimeError("Cannot act after policy completion.")
-        step = self._compute_action(observation)
-        self._advance_clock(observation, step.action[:3])
-        return step
+        raw_step = self._compute_action(observation)
+        raw_action = raw_step.action.astype(np.float64, copy=True)
+        delta = raw_action[:3] - self._last_action_position
+        distance = float(np.linalg.norm(delta))
+        limited = distance > self.maximum_action_position_step
+        action = raw_action.copy()
+        if limited:
+            action[:3] = self._last_action_position + delta * (
+                self.maximum_action_position_step / distance
+            )
+        self._last_action_position = action[:3].copy()
+        diagnostics = {
+            **raw_step.diagnostics,
+            "raw_action_position": raw_action[:3].tolist(),
+            "policy_action_position": action[:3].tolist(),
+            "action_rate_limited": limited,
+            "maximum_action_position_step_m": self.maximum_action_position_step,
+        }
+        # Reach gating uses the phase endpoint, not the intermediate limited
+        # command, so smoothing cannot cause an early phase transition.
+        self._advance_clock(observation, raw_action[:3])
+        return PolicyStep(action=action, diagnostics=diagnostics)
 
     @abstractmethod
     def _compute_action(self, observation: PolicyObservation) -> PolicyStep:
