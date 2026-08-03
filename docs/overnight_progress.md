@@ -211,3 +211,20 @@ Clean reproduction at implementation commit `1143f17`:
   relation loss and reports 40 ms post-event loss. Miss never connects.
 
 Implementation commit: `1143f17 Prototype bidirectional online relation estimation`.
+
+### Phase 5 — expanded single-arm evaluation
+
+Status: preparing frozen evaluation commit.
+
+- Reserved ten new held-out simulator seeds: 6300–6309. These were not used in
+  implementation smoke tests or threshold calibration.
+- Stable method set: World Gaussian, Static Multi-stream, SkillDynaMAC,
+  Mask-only, legacy online prototype, and bidirectional relation prototype.
+- Condition set: the six existing perturbations plus `drop_after_grasp` and
+  `close_without_grasp`.
+- Added an exact destination-phase path partition to every trial and aggregate;
+  schema 5 also retains onset/release/loss delay, action jump, maximum speed,
+  inference time, recovery, and failure taxonomy.
+- Planned matrix: 6 methods × 8 conditions × 10 seeds = 480 isolated Isaac Lab
+  processes under a new output directory. No result will be used to alter
+  thresholds or success criteria.

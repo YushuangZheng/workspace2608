@@ -65,3 +65,34 @@ def test_phase_policy_limits_cartesian_command_jump() -> None:
     displacement = np.linalg.norm(step.action[:3] - current.ee_pose[:3])
     assert displacement <= policy.maximum_action_position_step + 1.0e-12
     assert step.diagnostics["action_rate_limited"]
+
+
+def test_phase_path_partition_assigns_jump_to_destination_phase() -> None:
+    trace = EpisodeTrace(control_dt=0.02)
+    action = np.asarray([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+    for position, phase in ((0.0, 0), (0.1, 1), (0.3, 1), (0.6, 2)):
+        current = observation()
+        current = PolicyObservation(
+            ee_pose=np.concatenate(([position, 0.0, 0.35], current.ee_pose[3:7])),
+            object_pose=current.object_pose,
+            target_pose=current.target_pose,
+        )
+        trace.append(
+            current,
+            action,
+            {"phase": phase},
+            inference_ms=0.1,
+            perturbation_active=False,
+        )
+    metrics = trace.summary(
+        final_object_position=current.object_pose[:3],
+        final_target_position=current.target_pose[:3],
+        criteria=SuccessCriteria(),
+        policy_complete=True,
+        environment_done=False,
+        forced_transitions=0,
+        perturbation_started=False,
+    )
+    assert np.isclose(metrics["phase_path_length_m"]["1"], 0.3)
+    assert np.isclose(metrics["phase_path_length_m"]["2"], 0.3)
+    assert np.isclose(sum(metrics["phase_path_length_m"].values()), metrics["path_length_m"])

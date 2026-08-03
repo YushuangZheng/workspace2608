@@ -77,7 +77,7 @@ AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 
 
-EVALUATION_SCHEMA_VERSION = 4
+EVALUATION_SCHEMA_VERSION = 5
 
 
 @lru_cache(maxsize=1)
@@ -382,6 +382,7 @@ def aggregate_trials(trials: list[dict]) -> dict:
             ]
             interval_seed = 2608 + 100 * method_index + condition_index
             sensitivity_keys = sorted(metrics[0]["xy_success_sensitivity"])
+            phase_keys = sorted(metrics[0]["phase_path_length_m"], key=int)
             summary[method][condition] = {
                 "num_trials": len(metrics),
                 "success_rate": successes / len(metrics),
@@ -398,6 +399,15 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 "mean_path_length_m": float(np.mean([item["path_length_m"] for item in metrics])),
                 "path_length_m_statistics": bootstrap_mean_interval(
                     [item["path_length_m"] for item in metrics], interval_seed + 1000
+                ),
+                "mean_phase_path_length_m": {
+                    phase: float(
+                        np.mean([item["phase_path_length_m"][phase] for item in metrics])
+                    )
+                    for phase in phase_keys
+                },
+                "mean_max_ee_speed_m_s": float(
+                    np.mean([item["max_ee_speed_m_s"] for item in metrics])
                 ),
                 "mean_inference_ms": float(np.mean([item["mean_inference_ms"] for item in metrics])),
                 "inference_ms_statistics": bootstrap_mean_interval(

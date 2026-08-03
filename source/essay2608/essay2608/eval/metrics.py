@@ -111,6 +111,10 @@ class EpisodeTrace:
 
         ee_jumps = self._jumps(ee)
         path_length = float(np.sum(ee_jumps))
+        phase_path_length = np.zeros(10, dtype=np.float64)
+        if len(phases) > 1:
+            np.add.at(phase_path_length, phases[1:], ee_jumps)
+        phase_step_counts = np.bincount(phases, minlength=10)
         speed = ee_jumps / self.control_dt
         applied_action_jump = self._jumps(actions[:, :3])
         raw_action_jump = self._jumps(np.asarray(self.raw_action_positions))
@@ -265,6 +269,12 @@ class EpisodeTrace:
                 "stability_speed_m_s": criteria.stability_speed_m_s,
             },
             "path_length_m": path_length,
+            "phase_path_length_m": {
+                str(index): float(value) for index, value in enumerate(phase_path_length)
+            },
+            "phase_step_counts": {
+                str(index): int(value) for index, value in enumerate(phase_step_counts)
+            },
             "max_ee_speed_m_s": float(np.max(speed)),
             "max_action_position_jump_m": float(np.max(applied_action_jump)),
             "max_raw_policy_action_jump_m": float(np.max(raw_action_jump)),
