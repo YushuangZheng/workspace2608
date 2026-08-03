@@ -253,7 +253,7 @@ Validation:
 
 ### Phase 6 — bimanual handover skeleton
 
-Status: implementation and smoke validation in progress.
+Status: complete.
 
 Audit findings and minimum plan:
 
@@ -272,3 +272,34 @@ Audit findings and minimum plan:
 - Unit-test the simulator-independent schema and v1 compatibility, run one
   isolated headless smoke episode, then collect and independently audit five v2
   episodes before freezing them.
+
+Accepted results:
+
+- Pure tests pass without starting Isaac; the handover schema exposes the exact
+  `none → left_only → both → right_only → none` sequence and rejects a corrupted
+  transfer label. Frozen v1 remains loadable through `legacy_carrier_only`.
+- Headless seed 7300 completed in 575 steps at 10.62 mm final error. Runtime
+  inspection confirmed the six required observation shapes and 16-D action.
+- Formal v2 accepted five successes from eight isolated attempts at seeds 7400,
+  7403, 7404, 7406, and 7407. Rejected workers contributed no data.
+- All five trajectories contain states 0–12, all four labels, exactly 15 `both`
+  steps, measured 0–40 mm gripper motion, continuous 20 ms timestamps, and no
+  reset-like jump.
+- Frozen hash:
+  `91706df18abfea606c9e6836f1864e675610633ce5cb0c3c23846a1ea4f5fe18`.
+  Maximum final error is 11.04 mm; minimum start separation is 13.91 mm.
+- Collection and audit both refuse to overwrite v2 after `FROZEN`; the manifest
+  remained unchanged. `DynaMAC.pdf`, single-arm v1, and handover v1 were not
+  modified.
+- `docs/bimanual_handover_setup.md` records the contract, commands, audit, and
+  scientific limitations. The cube remains a gravity-disabled geometric
+  attachment, so this is infrastructure rather than contact-rich evidence.
+
+Validation:
+
+- `conda run -n env_isaaclab python -m pytest -q` — 20 passed
+- one independent headless smoke worker — success
+- eight formal independent workers — five accepted, three rejected by the
+  unchanged success gate
+- pre-freeze and post-freeze full dataset audits — pass with identical digest
+- frozen overwrite/refreeze counterexamples — both refused, manifest unchanged
