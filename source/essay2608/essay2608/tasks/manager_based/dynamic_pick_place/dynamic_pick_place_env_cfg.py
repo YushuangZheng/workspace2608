@@ -1,7 +1,7 @@
 """Dynamic pick-and-place environment for essay2608."""
 
 from isaaclab.utils import configclass
-from isaaclab_tasks.manager_based.manipulation.lift.config.franka.joint_pos_env_cfg import (
+from isaaclab_tasks.manager_based.manipulation.lift.config.franka.ik_abs_env_cfg import (
     FrankaCubeLiftEnvCfg,
 )
 
@@ -18,7 +18,7 @@ class DynamicPickPlaceEnvCfg(FrankaCubeLiftEnvCfg):
         self.scene.env_spacing = 2.5
 
         # Longer episode for later scripted demonstrations.
-        self.episode_length_s = 12.0
+        self.episode_length_s = 20.0
 
         # Deterministic observations during initial development.
         self.observations.policy.enable_corruption = False
