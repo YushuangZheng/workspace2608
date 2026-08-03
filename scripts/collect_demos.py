@@ -37,10 +37,24 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 
+def require_mutable_output(output_dir: Path) -> None:
+    """Refuse to write into a versioned frozen dataset."""
+
+    frozen_marker = output_dir / "FROZEN"
+    if frozen_marker.exists():
+        raise RuntimeError(f"Refusing to overwrite frozen dataset: {output_dir}")
+    manifest_path = output_dir / "manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("frozen", False):
+            raise RuntimeError(f"Refusing to overwrite frozen dataset: {output_dir}")
+
+
 def run_collection_workers() -> int:
     """Collect each attempt in a fresh process to avoid reset deadlocks."""
 
     output_dir = Path(args_cli.output_dir).resolve()
+    require_mutable_output(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     saved_demos = 0
@@ -281,6 +295,7 @@ def force_same_step_autoreset(env: gym.Env) -> None:
 
 def main() -> None:
     output_dir = Path(args_cli.output_dir).resolve()
+    require_mutable_output(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     env_cfg = parse_env_cfg(

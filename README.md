@@ -5,6 +5,10 @@
 This project/repository serves as a template for building projects or extensions based on Isaac Lab.
 It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
 
+The active research track is a single-arm DynaMAC minimal loop for dynamic pick-and-place. The accepted static
+dataset is frozen at `data/pick_place_static/v1`; see [docs/single_arm_minimal_loop.md](docs/single_arm_minimal_loop.md)
+for the reproducible audit, analysis, training, and dynamic ablation commands.
+
 **Key Features:**
 
 - `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.

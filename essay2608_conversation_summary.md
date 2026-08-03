@@ -1,8 +1,8 @@
 # Essay2608：DynaMAC 核心机制复现与 Isaac Lab 项目整理
 
-> 更新时间：2026-08-03  
-> 项目用户：`zys`  
-> 项目路径：`/home/zys/workspace/essay2608`  
+> 更新时间：2026-08-03
+> 项目用户：`zys`
+> 项目路径：`/home/zys/workspace/essay2608`
 > 当前主线：在 Isaac Lab 中自行复现 DynaMAC 的核心机制，而非严格复现原论文的 RLBench / RLBench2 benchmark。
 
 ---
@@ -905,3 +905,27 @@ source/essay2608/essay2608/policy/dynamac/
 ## 24. 一句话总结
 
 > Essay2608 当前已在 Isaac Lab 中完成从环境、Franka 绝对位姿 IK、脚本化专家到 5 条静态演示采集的完整链路；下一步是用真实采集数据验证物体中心轨迹低方差和抓取后 Object–EE 刚性连接现象，然后实现 Gaussian Streams、Product-of-Experts、动态参考系屏蔽和虚拟末端参考系。
+
+---
+
+## 25. 2026-08-03 单臂最小闭环更新
+
+静态演示已完成自动验收并冻结：
+
+```text
+data/pick_place_static/v1
+dataset_sha256: 8956857d034694090ec0d1bf39c33364f95cac723954ac3baedcbd1fd8e479f8
+```
+
+冻结 manifest 已记录每条数据的 SHA-256、seed、初始位姿、状态序列、步数、最终误差、最大单步位姿跳变、抓取后 Object–EE 稳定性和验收时 Git commit。采集器会拒绝覆盖包含 `FROZEN` 标记的数据目录。
+
+单臂最小闭环已经实现：
+
+- world/object/target 相对坐标方差分析；
+- World Gaussian；
+- Static object/target Gaussian Multi-stream + PoE；
+- Mask-only；
+- Full DynaMAC（连接检测、动态 mask、virtual EE frame）；
+- 6 种静态/动态条件的独立进程评测和诊断指标。
+
+seed `6200` 的首轮工程验收中，World Gaussian 与 Static Multi-stream 为 `0/6`，Mask-only 与 Full DynaMAC 为 `6/6`。Full DynaMAC 相比 Mask-only 的平均轨迹长度从约 `1.333 m` 降至 `1.039 m`，推理时间约 `0.236 ms`。这些只是单 seed 最小闭环结果，不能作为论文统计结论；投稿实验仍需至少三个随机种子、置信区间和失败案例分析。

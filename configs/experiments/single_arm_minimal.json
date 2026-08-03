@@ -1,0 +1,20 @@
+{
+  "dataset": "data/pick_place_static/v1",
+  "methods": [
+    "world_gaussian",
+    "static_multistream",
+    "mask_only",
+    "full_dynamac"
+  ],
+  "conditions": [
+    "static",
+    "smooth_object",
+    "sudden_object",
+    "smooth_target",
+    "sudden_target",
+    "arm_offset"
+  ],
+  "success_threshold_m": 0.06,
+  "minimum_report_seeds": 3,
+  "minimal_debug_seeds": [6200]
+}
