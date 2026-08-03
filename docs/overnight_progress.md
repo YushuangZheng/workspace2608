@@ -132,7 +132,7 @@ Implementation commit: `c979a94 Add paper-faithful skill-level DynaMAC baseline`
 
 ### Phase 3 — automatic skill segmentation diagnostic
 
-Status: complete pending clean-commit reproduction.
+Status: complete.
 
 - Added a source-level velocity diagnostic using both end-effector linear and
   angular speeds, shared training-only quantile calibration, persistent
@@ -159,3 +159,8 @@ Validation:
   transitions, candidates, and alignment
 - `python -m compileall -q source/essay2608/essay2608 scripts tests`
 - `git diff --check`
+
+Clean reproduction: `outputs/single_arm_scientific/segmentation_v1_clean` at
+commit `7bfdfc4`, source hash `30cded39e7941bf39070079771db321fcbb8effb311094fec530fa6b38d348c4`,
+analysis fingerprint
+`867c512ca7a7ecee6a6905cd71303d9ed749534cd207a7afd7949c7d983dd3eb`.

@@ -76,10 +76,15 @@ to TAPAS or transfer to a new task.
 ```bash
 conda run -n env_isaaclab python scripts/analyze_segmentation.py \
   --data_dir data/pick_place_static/v1 \
-  --output_dir outputs/single_arm_scientific/segmentation_v1
+  --output_dir outputs/single_arm_scientific/segmentation_v1_clean
 ```
 
 The output contains `analysis.json`, `velocity_boundaries.png`, and
 `boundary_alignment.png`. The JSON stores the immutable dataset hash, every
 parameter, per-demo interval and boundary, alignment membership, source content
 hash, Git revision, and an analysis fingerprint.
+
+The accepted clean run records commit `7bfdfc4`, source hash
+`30cded39e7941bf39070079771db321fcbb8effb311094fec530fa6b38d348c4`, and
+analysis fingerprint
+`867c512ca7a7ecee6a6905cd71303d9ed749534cd207a7afd7949c7d983dd3eb`.
