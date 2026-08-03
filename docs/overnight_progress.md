@@ -214,7 +214,7 @@ Implementation commit: `1143f17 Prototype bidirectional online relation estimati
 
 ### Phase 5 — expanded single-arm evaluation
 
-Status: preparing frozen evaluation commit.
+Status: complete.
 
 - Reserved ten new held-out simulator seeds: 6300–6309. These were not used in
   implementation smoke tests or threshold calibration.
@@ -228,3 +228,25 @@ Status: preparing frozen evaluation commit.
 - Planned matrix: 6 methods × 8 conditions × 10 seeds = 480 isolated Isaac Lab
   processes under a new output directory. No result will be used to alter
   thresholds or success criteria.
+
+Accepted matrix at commit `3673dd2`:
+
+- 480/480 unique complete trials, 480 JSON/NPZ pairs, ten 48-trial seed slices,
+  one source/data hash, schema 5, and phase-path residual ≤ `6.67e-16 m`.
+- Regular six-condition success: World 0/60, Static 9/60, SkillDynaMAC 38/60,
+  Mask-only 51/60, legacy Full 51/60, RelationDynaMAC 51/60.
+- All methods fail all drop and miss task trials. RelationDynaMAC nevertheless
+  revokes every drop in 40 ms and rejects every empty closure; legacy online
+  methods revoke only after 0.88–0.91 s and falsely connect in every miss.
+- Regular-condition mean path: Mask 1.222 m, legacy Full 1.084 m, Relation 1.117
+  m. Relation compute remains below 1 ms but is 3.6× legacy Full.
+- Added `docs/single_arm_final_report.md` with Wilson intervals, seed-balanced
+  bootstrap results, phase paths, action/speed/compute, failure taxonomy, and
+  explicit claim limits.
+
+Validation:
+
+- `conda run -n env_isaaclab python -m pytest -q` — 17 passed before freeze
+- 480 independent Isaac workers completed; transient Isaac plugin-exit warnings
+  produced no missing artifact or metric
+- full matrix identity, count, fingerprint, path-partition, and hash audit passed
