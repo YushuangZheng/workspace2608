@@ -12,6 +12,7 @@ import numpy as np
 class SuccessCriteria:
     """Placement semantics that avoid conflating support height with XY error."""
 
+    legacy_3d_threshold_m: float = 0.06
     xy_threshold_m: float = 0.01
     xy_sensitivity_thresholds_m: tuple[float, ...] = (0.005, 0.01, 0.02)
     support_height_m: float = 0.021
@@ -148,6 +149,11 @@ class EpisodeTrace:
         semantic_base = bool(
             policy_complete and not environment_done and on_support and released and stable
         )
+        legacy_success = bool(
+            policy_complete
+            and not environment_done
+            and final_error_3d < criteria.legacy_3d_threshold_m
+        )
         sensitivity = {
             f"{threshold:.6f}": bool(semantic_base and final_xy_error < threshold)
             for threshold in criteria.xy_sensitivity_thresholds_m
@@ -170,6 +176,8 @@ class EpisodeTrace:
 
         return {
             "success": success,
+            "stable_place_success": success,
+            "legacy_success_3d": legacy_success,
             "recovery_success": success if perturbation_started else None,
             "failure_reason": failure_reason,
             "policy_complete": bool(policy_complete),
@@ -186,6 +194,7 @@ class EpisodeTrace:
             "settling_max_speed_m_s": settling_speed,
             "xy_success_sensitivity": sensitivity,
             "success_criteria": {
+                "legacy_3d_threshold_m": criteria.legacy_3d_threshold_m,
                 "xy_threshold_m": criteria.xy_threshold_m,
                 "support_height_m": criteria.support_height_m,
                 "support_height_tolerance_m": criteria.support_height_tolerance_m,

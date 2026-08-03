@@ -35,6 +35,7 @@ parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(GEOMET
 parser.add_argument("--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS))
 parser.add_argument("--seeds", nargs="+", type=int, default=[6200])
 parser.add_argument("--max_steps", type=int, default=900)
+parser.add_argument("--legacy_success_threshold", type=float, default=0.06)
 parser.add_argument("--success_xy_threshold", type=float, default=0.01)
 parser.add_argument(
     "--success_xy_sensitivity",
@@ -129,6 +130,7 @@ def experiment_fingerprint(method: str, condition: str, seed: int) -> tuple[str,
         "condition": condition,
         "seed": seed,
         "max_steps": args.max_steps,
+        "legacy_success_threshold_m": args.legacy_success_threshold,
         "success_xy_threshold_m": args.success_xy_threshold,
         "success_xy_sensitivity_m": sorted(set(args.success_xy_sensitivity)),
         "support_height_tolerance_m": args.support_height_tolerance,
@@ -423,6 +425,7 @@ def run_controller() -> int:
         "seeds": args.seeds,
         "evaluation_schema_version": EVALUATION_SCHEMA_VERSION,
         "success_definition": {
+            "legacy_3d_threshold_m": args.legacy_success_threshold,
             "xy_threshold_m": args.success_xy_threshold,
             "xy_sensitivity_thresholds_m": sorted(set(args.success_xy_sensitivity)),
             "support_height": "median final support height in frozen demonstrations",
@@ -562,6 +565,7 @@ def run_worker() -> None:
         )
     )
     criteria = SuccessCriteria(
+        legacy_3d_threshold_m=args.legacy_success_threshold,
         xy_threshold_m=args.success_xy_threshold,
         xy_sensitivity_thresholds_m=tuple(sorted(set(args.success_xy_sensitivity))),
         support_height_m=support_height,

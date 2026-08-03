@@ -39,6 +39,8 @@ def test_semantic_success_ignores_fixed_target_height_residual() -> None:
         perturbation_started=False,
     )
     assert metrics["success"]
+    assert metrics["stable_place_success"]
+    assert metrics["legacy_success_3d"]
     assert metrics["final_error_3d_m"] > 0.059
     assert metrics["final_xy_error_m"] < 0.01
     assert not metrics["xy_success_sensitivity"]["0.005000"]

@@ -39,7 +39,8 @@ checkpoint.
 
 ## Semantic success and command continuity
 
-The old 60 mm 3-D radius is retained only as a diagnostic. It was invalid as a success criterion because the target
+The old 60 mm 3-D radius is retained as `legacy_success_3d` for comparison only. It was invalid as a primary
+success criterion because the target
 command uses `z = 0.08 m`, while a released cube rests with its center near `z = 0.021 m`; every correct placement
 therefore carried an almost fixed 59 mm vertical residual. The primary success definition now requires:
 
@@ -51,6 +52,10 @@ therefore carried an almost fixed 59 mm vertical residual. The primary success d
 The evaluator also reports composite success at 5, 10, and 20 mm XY thresholds. A common Cartesian rate limiter
 bounds every policy command to 20 mm per control step. Raw policy intent, limited policy command, command after the
 controlled perturbation, and frame-switch diagnostics are stored separately.
+
+The additive phase audit in `docs/single_arm_scientific_audit.md` shows that Full's aggregate path reduction is
+coupled to shorter phase-4/5 execution. Full is shorter in only 10/18 paired trials and longer in every seed-6202
+condition, so the virtual frame does not support a seed-independent efficiency claim.
 
 ## Three-seed controlled result
 
