@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
 
-METHODS = ("world_gaussian", "static_multistream", "mask_only", "full_dynamac")
+GEOMETRIC_METHODS = ("world_gaussian", "static_multistream", "mask_only", "full_dynamac")
+METHODS = (*GEOMETRIC_METHODS, "diffusion_policy")
 CONDITIONS = (
     "static",
     "smooth_object",
@@ -27,11 +30,22 @@ TASK_ID = "Essay2608-Dynamic-Pick-Place-v0"
 parser = argparse.ArgumentParser()
 parser.add_argument("--data_dir", type=Path, default=Path("data/pick_place_static/v1"))
 parser.add_argument("--output_dir", type=Path, default=Path("outputs/single_arm_minimal/v1"))
-parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(METHODS))
+parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(GEOMETRIC_METHODS))
 parser.add_argument("--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS))
 parser.add_argument("--seeds", nargs="+", type=int, default=[6200])
 parser.add_argument("--max_steps", type=int, default=900)
 parser.add_argument("--success_threshold", type=float, default=0.06)
+parser.add_argument(
+    "--diffusion_checkpoint",
+    type=Path,
+    default=Path("outputs/diffusion/v1/checkpoint.pt"),
+)
+parser.add_argument(
+    "--resume",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="Reuse complete per-trial JSON files already present in output_dir.",
+)
 parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
 parser.add_argument("--worker_method", choices=METHODS, help=argparse.SUPPRESS)
 parser.add_argument("--worker_condition", choices=CONDITIONS, help=argparse.SUPPRESS)
@@ -75,15 +89,60 @@ def offline_stream_diagnostics(data_dir: Path) -> dict:
     return {"phases": phases}
 
 
+def bootstrap_mean_interval(values: list[float], seed: int, samples: int = 20000) -> dict:
+    """Return a deterministic non-parametric 95% interval for a mean."""
+
+    import numpy as np
+
+    array = np.asarray(values, dtype=np.float64)
+    if not len(array):
+        return {"mean": None, "std": None, "ci95": [None, None]}
+    mean = float(np.mean(array))
+    std = float(np.std(array, ddof=1)) if len(array) > 1 else 0.0
+    if len(array) == 1:
+        return {"mean": mean, "std": std, "ci95": [mean, mean]}
+    generator = np.random.default_rng(seed)
+    indices = generator.integers(0, len(array), size=(samples, len(array)))
+    bootstrap_means = np.mean(array[indices], axis=1)
+    low, high = np.quantile(bootstrap_means, [0.025, 0.975])
+    return {"mean": mean, "std": std, "ci95": [float(low), float(high)]}
+
+
+def wilson_interval(successes: int, trials: int, z: float = 1.959963984540054) -> list[float | None]:
+    """Return the Wilson 95% confidence interval for a Bernoulli rate."""
+
+    if trials == 0:
+        return [None, None]
+    proportion = successes / trials
+    denominator = 1.0 + z * z / trials
+    centre = (proportion + z * z / (2.0 * trials)) / denominator
+    margin = z * math.sqrt(proportion * (1.0 - proportion) / trials + z * z / (4.0 * trials**2))
+    return [max(0.0, centre - margin / denominator), min(1.0, centre + margin / denominator)]
+
+
+def failure_reason(metrics: dict) -> str:
+    """Classify one unsuccessful rollout using mutually exclusive causes."""
+
+    if metrics["success"]:
+        return "success"
+    if metrics["environment_done"]:
+        return "environment_terminated"
+    if not metrics["policy_complete"]:
+        return "policy_incomplete"
+    if metrics["final_error_m"] >= args.success_threshold:
+        return "final_error_above_threshold"
+    return "unknown"
+
+
 def aggregate_trials(trials: list[dict]) -> dict:
-    """Aggregate one or more seeds by method and condition."""
+    """Aggregate one or more seeds by method and condition with uncertainty."""
 
     import numpy as np
 
     summary = {}
-    for method in args.methods:
+    for method_index, method in enumerate(args.methods):
         summary[method] = {}
-        for condition in args.conditions:
+        for condition_index, condition in enumerate(args.conditions):
             selected = [
                 trial
                 for trial in trials
@@ -93,26 +152,87 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 summary[method][condition] = {"num_trials": 0}
                 continue
             metrics = [trial["metrics"] for trial in selected]
+            successes = sum(bool(item["success"]) for item in metrics)
+            recovery = [item["recovery_success"] for item in metrics if item["recovery_success"] is not None]
+            interval_seed = 2608 + 100 * method_index + condition_index
             summary[method][condition] = {
                 "num_trials": len(metrics),
-                "success_rate": float(np.mean([item["success"] for item in metrics])),
+                "success_rate": successes / len(metrics),
+                "success_rate_ci95_wilson": wilson_interval(successes, len(metrics)),
                 "mean_final_error_m": float(np.mean([item["final_error_m"] for item in metrics])),
+                "final_error_m_statistics": bootstrap_mean_interval(
+                    [item["final_error_m"] for item in metrics], interval_seed
+                ),
                 "mean_path_length_m": float(np.mean([item["path_length_m"] for item in metrics])),
+                "path_length_m_statistics": bootstrap_mean_interval(
+                    [item["path_length_m"] for item in metrics], interval_seed + 1000
+                ),
                 "mean_inference_ms": float(np.mean([item["mean_inference_ms"] for item in metrics])),
+                "inference_ms_statistics": bootstrap_mean_interval(
+                    [item["mean_inference_ms"] for item in metrics], interval_seed + 2000
+                ),
                 "connection_detection_rate": float(np.mean([item["connection_detected"] for item in metrics])),
-                "recovery_rate": float(
-                    np.mean([item["recovery_success"] for item in metrics if item["recovery_success"] is not None])
-                )
-                if any(item["recovery_success"] is not None for item in metrics)
-                else None,
+                "recovery_rate": float(np.mean(recovery)) if recovery else None,
+                "recovery_rate_ci95_wilson": wilson_interval(sum(bool(value) for value in recovery), len(recovery)),
                 "mean_mask_false_positive_rate": float(
                     np.mean([item["mask_false_positive_rate"] for item in metrics])
                 ),
                 "mean_mask_false_negative_rate": float(
                     np.mean([item["mask_false_negative_rate"] for item in metrics])
                 ),
+                "failure_reasons": dict(Counter(failure_reason(item) for item in metrics)),
             }
     return summary
+
+
+def aggregate_by_method(trials: list[dict]) -> dict:
+    """Aggregate condition-balanced outcomes using seeds as independent units."""
+
+    paper_summary = {}
+    for method_index, method in enumerate(args.methods):
+        seed_rows = []
+        for seed in args.seeds:
+            selected = [
+                trial["metrics"]
+                for trial in trials
+                if trial.get("method") == method and trial.get("seed") == seed and "metrics" in trial
+            ]
+            if len(selected) != len(args.conditions):
+                continue
+            dynamic = [item for item in selected if item["recovery_success"] is not None]
+            seed_rows.append(
+                {
+                    "seed": seed,
+                    "success_rate": sum(bool(item["success"]) for item in selected) / len(selected),
+                    "recovery_rate": (
+                        sum(bool(item["recovery_success"]) for item in dynamic) / len(dynamic) if dynamic else None
+                    ),
+                    "mean_final_error_m": sum(item["final_error_m"] for item in selected) / len(selected),
+                    "mean_path_length_m": sum(item["path_length_m"] for item in selected) / len(selected),
+                    "mean_inference_ms": sum(item["mean_inference_ms"] for item in selected) / len(selected),
+                }
+            )
+        interval_seed = 52608 + method_index * 100
+        paper_summary[method] = {
+            "num_complete_seeds": len(seed_rows),
+            "seed_rows": seed_rows,
+            "success_rate_statistics": bootstrap_mean_interval(
+                [row["success_rate"] for row in seed_rows], interval_seed
+            ),
+            "recovery_rate_statistics": bootstrap_mean_interval(
+                [row["recovery_rate"] for row in seed_rows if row["recovery_rate"] is not None], interval_seed + 1
+            ),
+            "final_error_m_statistics": bootstrap_mean_interval(
+                [row["mean_final_error_m"] for row in seed_rows], interval_seed + 2
+            ),
+            "path_length_m_statistics": bootstrap_mean_interval(
+                [row["mean_path_length_m"] for row in seed_rows], interval_seed + 3
+            ),
+            "inference_ms_statistics": bootstrap_mean_interval(
+                [row["mean_inference_ms"] for row in seed_rows], interval_seed + 4
+            ),
+        }
+    return paper_summary
 
 
 def run_controller() -> int:
@@ -130,6 +250,21 @@ def run_controller() -> int:
             for method in args.methods:
                 trial_index += 1
                 result_path = trial_dir / f"{method}__{condition}__seed_{seed}.json"
+                if args.resume and result_path.is_file():
+                    cached = json.loads(result_path.read_text(encoding="utf-8"))
+                    if (
+                        cached.get("method") == method
+                        and cached.get("condition") == condition
+                        and cached.get("seed") == seed
+                        and "metrics" in cached
+                    ):
+                        print(
+                            f"[study] reuse trial={trial_index}/{total} method={method} "
+                            f"condition={condition} seed={seed}",
+                            flush=True,
+                        )
+                        trials.append(cached)
+                        continue
                 print(
                     f"\n[study] trial={trial_index}/{total} method={method} "
                     f"condition={condition} seed={seed}",
@@ -173,6 +308,7 @@ def run_controller() -> int:
         "success_threshold_m": args.success_threshold,
         "stream_diagnostics": diagnostics,
         "ablation": aggregate_trials(trials),
+        "condition_balanced_method_statistics": aggregate_by_method(trials),
         "trials": trials,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -198,7 +334,13 @@ import essay2608
 from essay2608.data.dataset import load_dataset
 from essay2608.eval import EpisodeTrace, PerturbationController
 from essay2608.expert import get_scene_poses
-from essay2608.policy import DynaMACPolicy, MaskOnlyPolicy, StaticMultiStreamPolicy, WorldGaussianPolicy
+from essay2608.policy import (
+    DiffusionActionPolicy,
+    DynaMACPolicy,
+    MaskOnlyPolicy,
+    StaticMultiStreamPolicy,
+    WorldGaussianPolicy,
+)
 from essay2608.policy.base import PolicyObservation
 from isaaclab_tasks.utils import parse_env_cfg
 
@@ -217,6 +359,8 @@ def numpy_observation(env: gym.Env) -> PolicyObservation:
 def make_policy(name: str):
     """Construct one ablation policy."""
 
+    if name == "diffusion_policy":
+        return DiffusionActionPolicy(args.diffusion_checkpoint)
     return {
         "world_gaussian": WorldGaussianPolicy,
         "static_multistream": StaticMultiStreamPolicy,
@@ -294,6 +438,7 @@ def run_worker() -> None:
         forced_transitions=policy.forced_transitions,
         perturbation_started=perturbation.event_started,
     )
+    metrics["failure_reason"] = failure_reason(metrics)
     result = {
         "method": args.worker_method,
         "condition": args.worker_condition,

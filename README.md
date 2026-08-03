@@ -1,13 +1,15 @@
-# Template for Isaac Lab Projects
+# Essay2608: Dynamic Multi-arm Coordination in Isaac Lab
 
 ## Overview
 
-This project/repository serves as a template for building projects or extensions based on Isaac Lab.
-It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
+This repository implements a staged DynaMAC study in custom Isaac Lab tasks. It contains a completed single-arm
+pick-and-place loop, bimanual Handover, Bimanual Lift Tray, and a later-stage low-dimensional conditional diffusion
+baseline. All accepted demonstration datasets are versioned and hash-frozen.
 
-The active research track is a single-arm DynaMAC minimal loop for dynamic pick-and-place. The accepted static
-dataset is frozen at `data/pick_place_static/v1`; see [docs/single_arm_minimal_loop.md](docs/single_arm_minimal_loop.md)
-for the reproducible audit, analysis, training, and dynamic ablation commands.
+Reproduction guides:
+
+- [Single-arm minimal loop](docs/single_arm_minimal_loop.md)
+- [Bimanual minimal loop](docs/bimanual_minimal_loop.md)
 
 **Key Features:**
 
@@ -28,6 +30,7 @@ for the reproducible audit, analysis, training, and dynamic ablation commands.
     ```bash
     # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
     python -m pip install -e source/essay2608
+    ```
 
 - Verify that the extension is correctly installed by:
 
