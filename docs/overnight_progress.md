@@ -167,7 +167,7 @@ analysis fingerprint
 
 ### Phase 4 — bidirectional online relation estimation
 
-Status: complete pending clean-commit reproduction.
+Status: complete.
 
 - Preserved `KinematicConnectionDetector` as the legacy implementation and
   added a phase-independent four-state `OnlineRelationEstimator`.
@@ -197,3 +197,17 @@ Validation so far:
   isolated workers, complete JSON/NPZ trials
 - `python -m compileall -q source/essay2608/essay2608 scripts tests`
 - `git diff --check`
+
+Clean reproduction at implementation commit `1143f17`:
+
+- `outputs/single_arm_scientific/relation_calibration_v1_clean`: source hash
+  `23056a2b48bdca97620f545ba5c73a47e22545d62dc227e769093fcf44786a11`,
+  analysis fingerprint
+  `d74669c3ece5682d3c4d76ff276899867a87774f1976cb81a2359c245ca195cb`.
+- `outputs/single_arm_scientific/relation_smoke_v1_clean`: 8/8 complete unique
+  JSON/NPZ pairs, schema 4, common source hash
+  `66fd9063d7032306e1d0ba8c5187e6248b546a2fc749567b6103772f9f6454ca`.
+- The six regular task outcomes remain 6/6; only drop is marked as expecting
+  relation loss and reports 40 ms post-event loss. Miss never connects.
+
+Implementation commit: `1143f17 Prototype bidirectional online relation estimation`.

@@ -130,5 +130,11 @@ conda run -n env_isaaclab python scripts/eval_single_arm.py --headless \
   --output_dir outputs/single_arm_scientific/relation_smoke_v1_clean
 ```
 
-The accepted runs are regenerated after the implementation commit so their
-source commit and content fingerprints identify clean code.
+The accepted runs use clean implementation commit `1143f17`. The calibration
+replay records source hash
+`23056a2b48bdca97620f545ba5c73a47e22545d62dc227e769093fcf44786a11`
+and analysis fingerprint
+`d74669c3ece5682d3c4d76ff276899867a87774f1976cb81a2359c245ca195cb`.
+All eight simulator trials share source hash
+`66fd9063d7032306e1d0ba8c5187e6248b546a2fc749567b6103772f9f6454ca`
+and schema 4; every condition has one JSON/NPZ pair.
