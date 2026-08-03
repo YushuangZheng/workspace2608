@@ -1,0 +1,38 @@
+{
+  "task_id": "Essay2608-Dynamic-Pick-Place-v0",
+  "num_demos": 5,
+  "quaternion_order": "wxyz",
+  "coordinate_frame": "local_environment",
+  "demos": [
+    {
+      "file": "demo_000.npz",
+      "steps": 296,
+      "control_dt": 0.019999999552965164,
+      "final_error": 0.05909458547830582
+    },
+    {
+      "file": "demo_001.npz",
+      "steps": 297,
+      "control_dt": 0.019999999552965164,
+      "final_error": 0.05910126492381096
+    },
+    {
+      "file": "demo_002.npz",
+      "steps": 291,
+      "control_dt": 0.019999999552965164,
+      "final_error": 0.059173885732889175
+    },
+    {
+      "file": "demo_003.npz",
+      "steps": 294,
+      "control_dt": 0.019999999552965164,
+      "final_error": 0.05907158926129341
+    },
+    {
+      "file": "demo_004.npz",
+      "steps": 291,
+      "control_dt": 0.019999999552965164,
+      "final_error": 0.05917159467935562
+    }
+  ]
+}

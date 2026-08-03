@@ -49,8 +49,15 @@ def main() -> None:
         device=env.unwrapped.device,
     )
 
-    # Step the simulation so that sensors and buffers are updated.
-    for step in range(100):
+    # 无头模式运行100步后自动退出；
+    # GUI模式持续运行，直到关闭窗口或按Ctrl+C。
+    max_steps = 100 if args_cli.headless else None
+    step = 0
+
+    while simulation_app.is_running():
+        if max_steps is not None and step >= max_steps:
+            break
+
         obs, reward, terminated, truncated, info = env.step(actions)
 
         if step == 5:
@@ -73,10 +80,12 @@ def main() -> None:
                 target_command[0].cpu().tolist(),
             )
 
-        if step % 20 == 0:
+        if step % 100 == 0:
             print(f"Simulation step: {step}")
 
-    print("100 simulation steps completed successfully")
+        step += 1
+
+    print(f"Simulation finished after {step} steps")
     env.close()
 
 
