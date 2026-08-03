@@ -303,3 +303,14 @@ Validation:
   unchanged success gate
 - pre-freeze and post-freeze full dataset audits — pass with identical digest
 - frozen overwrite/refreeze counterexamples — both refused, manifest unchanged
+
+### Final handoff
+
+Status: complete.
+
+- `docs/overnight_final_report.md` consolidates all phase results, commit and
+  reproduction provenance, solved/open questions, exact claim boundaries, the
+  project-owned research direction, and the next-day top three checks.
+- The final repository acceptance reruns pure tests, syntax compilation, frozen
+  dataset audits, the 480-trial identity audit, protected-asset hashes, and a
+  clean-worktree check before closing the goal.
