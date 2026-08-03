@@ -9,13 +9,27 @@ from .dataset import (
     load_bimanual_dataset,
     load_dataset,
 )
+from .segmentation import (
+    SegmentationConfig,
+    SegmentationTrace,
+    analyze_segmentation,
+    calibrate_speed_thresholds,
+    end_effector_speeds,
+    segment_demonstration,
+)
 
 __all__ = [
     "BimanualDemonstration",
     "Demonstration",
+    "SegmentationConfig",
+    "SegmentationTrace",
+    "analyze_segmentation",
     "audit_bimanual_dataset",
     "audit_dataset",
     "audit_tray_dataset",
+    "calibrate_speed_thresholds",
+    "end_effector_speeds",
     "load_bimanual_dataset",
     "load_dataset",
+    "segment_demonstration",
 ]

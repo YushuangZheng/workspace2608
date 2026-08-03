@@ -129,3 +129,33 @@ Clean evaluation at implementation commit `c979a94`:
   paper-faithful methods.
 
 Implementation commit: `c979a94 Add paper-faithful skill-level DynaMAC baseline`.
+
+### Phase 3 — automatic skill segmentation diagnostic
+
+Status: complete pending clean-commit reproduction.
+
+- Added a source-level velocity diagnostic using both end-effector linear and
+  angular speeds, shared training-only quantile calibration, persistent
+  low-speed intervals, short-run removal, close-run merging, endpoint-aware
+  candidate extraction, and reference-free cross-demo alignment.
+- Added a thin analysis/visualization entry point with dataset/source/config
+  fingerprinting and two plots.
+- All five frozen demonstrations produce five automatic segments and four
+  boundary clusters with 5/5 support. The aligned boundary time standard
+  deviation averages 39 ms.
+- Candidate times differ from the nearest manual controller transition by
+  211 ms on average because grasp/release dwell centers are events while manual
+  states label the dwell edges.
+- The result supports coarse approach-and-grasp, transport-and-place, and
+  retreat macros, but velocity alone cannot isolate gripper semantics and does
+  not reproduce TAPAS.
+
+Validation:
+
+- `conda run -n env_isaaclab python -m pytest -q` — 11 passed
+- `conda run -n env_isaaclab python scripts/analyze_segmentation.py ...` — five
+  demos, segment counts `[5, 5, 5, 5, 5]`, four fully supported clusters
+- Both generated figures inspected for complete traces, thresholds, manual
+  transitions, candidates, and alignment
+- `python -m compileall -q source/essay2608/essay2608 scripts tests`
+- `git diff --check`
