@@ -58,6 +58,7 @@ class BimanualRelationIntervention:
         action: torch.Tensor,
         state: HandoverState,
         truth_label: str,
+        left_pose: torch.Tensor,
         right_pose: torch.Tensor,
     ) -> InterventionDecision:
         """Override only commands needed to realize the declared counterfactual."""
@@ -106,6 +107,13 @@ class BimanualRelationIntervention:
             if state == HandoverState.TRANSFER:
                 self.transfer_steps += 1
                 if self.transfer_steps <= round(2.0 / self.dt):
+                    # Follow the measured hand poses instead of pulling two
+                    # stiff Cartesian controllers back to stale hold targets.
+                    # Both grippers remain closed throughout the extension.
+                    modified[:, :7] = left_pose
+                    modified[:, 7] = GRIPPER_CLOSE
+                    modified[:, 8:15] = right_pose
+                    modified[:, 15] = GRIPPER_CLOSE
                     active = True
                     event = "both_hold_extended"
                     hold_phase_clock = True

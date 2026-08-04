@@ -452,6 +452,7 @@ def main_worker() -> None:
                 action=base_action,
                 state=state,
                 truth_label=truth.label,
+                left_pose=left,
                 right_pose=right,
             )
             if decision.hold_phase_clock and expert.state == state:

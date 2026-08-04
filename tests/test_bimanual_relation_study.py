@@ -22,6 +22,10 @@ def right_pose() -> torch.Tensor:
     return torch.asarray([[0.5, 0.0, 0.3, 1.0, 0.0, 0.0, 0.0]])
 
 
+def left_pose() -> torch.Tensor:
+    return torch.asarray([[0.4, 0.0, 0.3, 1.0, 0.0, 0.0, 0.0]])
+
+
 def test_receiver_delay_holds_grasp_clock_then_allows_settle() -> None:
     intervention = BimanualRelationIntervention("receiver_delayed", 0.1)
     decisions = [
@@ -29,6 +33,7 @@ def test_receiver_delay_holds_grasp_clock_then_allows_settle() -> None:
             action=action(),
             state=HandoverState.RIGHT_GRASP,
             truth_label="left_only",
+            left_pose=left_pose(),
             right_pose=right_pose(),
         )
         for _ in range(21)
@@ -46,10 +51,27 @@ def test_one_arm_pause_freezes_pose_without_opening_gripper() -> None:
         action=action(),
         state=HandoverState.RIGHT_TO_TARGET,
         truth_label="right_only",
+        left_pose=left_pose(),
         right_pose=right_pose(),
     )
     assert decision.active and decision.hold_phase_clock
     assert torch.equal(decision.action[:, 8:15], right_pose())
+    assert decision.action[0, 15].item() == -1.0
+
+
+def test_prolonged_hold_tracks_both_measured_poses() -> None:
+    intervention = BimanualRelationIntervention("prolonged_both_hold", 0.1)
+    decision = intervention.apply(
+        action=action(),
+        state=HandoverState.TRANSFER,
+        truth_label="both",
+        left_pose=left_pose(),
+        right_pose=right_pose(),
+    )
+    assert decision.active and decision.hold_phase_clock
+    assert torch.equal(decision.action[:, :7], left_pose())
+    assert torch.equal(decision.action[:, 8:15], right_pose())
+    assert decision.action[0, 7].item() == -1.0
     assert decision.action[0, 15].item() == -1.0
 
 
