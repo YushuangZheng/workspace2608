@@ -14,6 +14,8 @@ import numpy as np
 TASK_ID = "Essay2608-Bimanual-Physical-Handover-v0"
 V2_SEEDS = tuple(range(7800, 7820))
 V2_SOURCE_SHA256 = "e8622016ff485fced50d0f3b32ccefaad06f34dd7748d3a5e1cca950066b6801"
+V3_SEEDS = tuple(range(8000, 8020))
+V3_SOURCE_SHA256 = "2e52bf2a0c961e5c79a4ca4a709bcb6416c3cca3e8f6ccf17dcc11339889d31c"
 EXPECTED_LIFECYCLE = ("none", "left_only", "both", "right_only", "none")
 
 STEP_ALIGNED_KEYS = {

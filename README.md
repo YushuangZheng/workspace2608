@@ -23,6 +23,7 @@
 - [真实物理双臂交接 v2 预注册协议](docs/physical_handover_protocol_v2.md)
 - [真实物理双臂交接 v2 正式报告](docs/physical_handover_report_v2.md)
 - [真实物理双臂交接 v3 预注册协议](docs/physical_handover_protocol_v3.md)
+- [真实物理双臂交接 v3 正式报告](docs/physical_handover_report_v3.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)
@@ -123,6 +124,7 @@ conda run -n env_isaaclab python scripts/eval_physical_handover.py \
 
 ```bash
 conda run -n env_isaaclab python scripts/audit_physical_handover_results.py
+# 审计当前通过严格门槛的 v3：追加 --version v3
 ```
 
 验证双臂交接 v2 冻结数据：
@@ -191,9 +193,9 @@ git diff --check
 本仓库复现的是自定义 Isaac Lab 任务中的相对几何、动态参考系和关系生命周期机制，
 不是 TAPAS、MiDiGaP、RLBench、DynaBench 或论文完整黎曼策略的逐项复现。
 旧的 `handover_static/v1/v2` 仍使用几何附着，只能作为接口和数据骨架。新增物理任务
-已经产生真实接触关系转移：v1 正式结果为 `6/20`；修复发送臂追逐被推动物体的问题后，
-v2 正式结果为 `18/20`，达到最小科学验收线，但没有达到 `20/20` 数据采集门槛，因而
-仍未采集 `handover_physical/v1`。不能把 v2 表述为完全稳定，也不能把成功样本事后挑选
-为训练集。所有论文表述应同时遵守[夜间研发最终报告](docs/overnight_final_report.md)、
-[v1 正式报告](docs/physical_handover_report.md)和
-[v2 正式报告](docs/physical_handover_report_v2.md)中的声明边界。
+已经产生真实接触关系转移：v1、v2、v3 正式结果依次为 `6/20`、`18/20`、`20/20`。
+v3 达到严格数据采集门槛，但这只证明冻结扰动分布上的脚本专家，不等于学习策略完成，
+也不能外推为任意分布上的 100% 鲁棒。所有论文表述应同时遵守
+[夜间研发最终报告](docs/overnight_final_report.md)、[v1 正式报告](docs/physical_handover_report.md)、
+[v2 正式报告](docs/physical_handover_report_v2.md)和
+[v3 正式报告](docs/physical_handover_report_v3.md)中的声明边界。
