@@ -1,0 +1,12 @@
+{
+  "tau_m": 0.001,
+  "tau_omega": 0.2,
+  "link_fraction_threshold": 0.5,
+  "minimum_link_run": 3,
+  "position_variance_floor": 1e-08,
+  "rotation_variance_floor": 1e-08,
+  "maximum_modes": 3,
+  "minimum_mode_size": 2,
+  "clustering_length": 20,
+  "random_seed": 2608
+}

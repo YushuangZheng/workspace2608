@@ -1,253 +1,74 @@
-# Essay2608：Isaac Lab 中的动态多机械臂协作
+# DynaMAC 论文算法复现
 
-## 项目概览
+这个仓库现在只做一件事：复现论文 *One Hand Watches The Other: Dynamic Multi-Agent
+Cooperation for Sample-Efficient Bimanual Manipulation in Dynamic Environments* 中公开的
+DynaMAC 算法。过去的在线关系检测、故障恢复状态机和大量 Isaac Lab 验证脚本已经退出
+主代码；历史结论压缩在一份中文日志中，完整旧文件仍可从 Git 历史恢复。
 
-本仓库在自定义 Isaac Lab 任务中分阶段研究 DynaMAC。当前包含：
+## 只需要看的文件
 
-- 已完成科学审计的单臂动态抓取与放置闭环；
-- 双臂交接（Handover）环境、专家和冻结数据；
-- 双臂托盘搬运（Lift Tray）工程原型；
-- 一个低维条件扩散基线。
+1. `source/essay2608/essay2608/policy/dynamac.py`：DynaMAC 全部核心；
+2. `scripts/run.py`：唯一运行入口；
+3. `configs/dynamac.json`：全部阈值和数值选择；
+4. `tests/test_dynamac_reproduction.py`：公式与 Algorithm 1 验证；
+5. `logs/research_log.md`：论文理解、实验记录、已知边界。
 
-所有正式验收的演示数据集均带版本号、逐文件 SHA-256 和冻结标记。
-当前结论、限制与复现入口见：
+`policy/` 只放策略。目前有完整 DynaMAC 和一个明确标注为低维工程对照的 Diffusion
+Policy。没有用空壳文件假装已经实现 ACT；以后新增 ACT、DP 官方版等策略，也只能放在
+这个目录，并必须独立标注复现范围。
 
-- [夜间研发最终报告](docs/overnight_final_report.md)
-- [单臂代表性轨迹可视化审计](docs/trace_visual_audit.md)
-- [RelationDynaMAC 单臂恢复图](docs/recovery_graph.md)
-- [Oracle relation 恢复消融](docs/oracle_recovery_ablation.md)
-- [单臂关系恢复实验预注册协议](docs/recovery_protocol.md)
-- [单臂关系触发式恢复正式报告](docs/recovery_final_report.md)
-- [真实物理双臂交接 v1 预注册协议](docs/physical_handover_protocol.md)
-- [真实物理双臂交接 v1 正式报告](docs/physical_handover_report.md)
-- [真实物理双臂交接 v2 预注册协议](docs/physical_handover_protocol_v2.md)
-- [真实物理双臂交接 v2 正式报告](docs/physical_handover_report_v2.md)
-- [真实物理双臂交接 v3 预注册协议](docs/physical_handover_protocol_v3.md)
-- [真实物理双臂交接 v3 正式报告](docs/physical_handover_report_v3.md)
-- [真实物理双臂交接数据集 v1 预注册协议](docs/physical_handover_dataset_protocol.md)
-- [真实物理双臂交接数据集 v1 冻结报告](docs/physical_handover_dataset_report.md)
-- [双臂在线关系生命周期估计器](docs/bimanual_relation_estimator.md)
-- [双臂在线关系估计正式协议 v1](docs/bimanual_relation_protocol.md)
-- [双臂在线关系估计正式报告 v1](docs/bimanual_relation_report_v1.md)
-- [双臂在线关系估计正式协议 v2](docs/bimanual_relation_protocol_v2.md)
-- [双臂在线关系估计正式报告 v2](docs/bimanual_relation_report_v2.md)
-- [双臂关系门控恢复开发记录](docs/bimanual_recovery_development.md)
-- [双臂关系门控恢复正式协议 v1](docs/bimanual_recovery_protocol.md)
-- [双臂关系门控恢复收尾说明](docs/bimanual_recovery_handoff.md)
-- [单臂最终评测报告](docs/single_arm_final_report.md)
-- [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
-- [方法来源与实现边界](docs/method_provenance.md)
-- [文档更新记录](docs/documentation_changelog.md)
+## 实现覆盖
 
-## 主要能力
+`DynaMAC` 逐项实现：
 
-- 与 Isaac Lab 主仓库隔离，项目代码和数据可独立维护；
-- 两台 Franka 的独立绝对位姿 IK 与夹爪控制；
-- 冻结数据、内容寻址实验缓存和可复现实验指纹；
-- 世界、物体、目标及虚拟末端参考系下的高斯策略；
-- 运行时参考系屏蔽、双向关系估计和机制反例；
-- 逐次试验 JSON/NPZ 证据、阶段路径、动作跳变和失败分类。
+- 公式 (1)：`R3 × S3` 位姿到局部任务参数坐标系；
+- 公式 (2)：黎曼高斯 marginal 随当前任务参数位姿变回世界系；
+- 公式 (3)：在共同世界切空间通过 Log/Exp 迭代完成 Product-of-Experts；
+- 公式 (5)：六维协方差的 geometric mean standard deviation；
+- 公式 (6)：逐时刻相对精度归一化并取时间最大值；
+- Algorithm 1：离线技能序列、链接过滤、累积虚拟末端帧、任务参数选择、逐技能
+  DiGaP/MiDiGaP 拟合与顺序执行；
+- MiDiGaP：真正的 Karcher/Fréchet 均值、对角切空间协方差、`M^T` 上的 Riemannian
+  k-means+BIC，以及按演示集合交集估计的跨技能模态转移与整条模态路径选择；
+- 双臂：左右两套独立 DynaMAC，并将对侧末端加入候选任务参数，不使用联合动作策略、
+  固定 leader 或额外协调器；
+- 单文件、无 pickle checkpoint 与内容指纹。
 
-## 安装
+这里严格遵守论文的真实推理语义：链接与有效流集合在训练时按技能固定；推理时只更新
+已保留参考系的当前位姿，并按离散时间索引切技能。它不会在线确认抓取、滑移或接触，也
+不会自动恢复失败。此前的在线扩展不能再使用 `DynaMAC` 名称。
 
-1. 按照 [Isaac Lab 安装指南](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html)
-   安装 Isaac Sim 与 Isaac Lab。建议使用 conda 或 uv 环境。
-2. 将本仓库放在 Isaac Lab 主目录之外。
-3. 使用带 Isaac Lab 的 Python 解释器，以可编辑模式安装扩展：
+运动学链接由实际观测到的末端轨迹与参考帧的相对位姿判定；控制目标轨迹只用于拟合策略
+分布，两者不会混用。新技能的虚拟末端帧在该技能第一条观测到达时冻结。
+
+## 运行
 
 ```bash
-python -m pip install -e source/essay2608
+python -m pip install -e '.[test]'
+
+# 不写模型，只验证随附五条单臂和五条双臂演示能走完整训练链
+python scripts/run.py verify
+
+# 保存单臂 checkpoint
+python scripts/run.py fit --task single --output outputs/single_dynamac.npz
+
+# 保存左右两套双臂 checkpoint
+python scripts/run.py fit --task bimanual --output outputs/bimanual_dynamac
+
+# 检查 checkpoint 内的链接、流选择和模态
+python scripts/run.py inspect outputs/single_dynamac.npz
+
+pytest -q
 ```
 
-本项目验证时使用的环境为：
+随附 `data/dynamac_demos.npz` 把原来分散的文件压为一个无 pickle 包，包含五条单臂和
+五条真实接触双臂交接。它只用于接口与算法结构验证：技能标签由旧脚本状态合并而来，
+不是 TAPAS 输出，任务参数变化也不足以复现论文 DynaBench 的成功率。
 
-```text
-/home/zys/miniconda3/envs/env_isaaclab/bin/python
-```
+## “完整复现”的边界
 
-也可统一使用：
-
-```bash
-conda run -n env_isaaclab python <脚本>
-```
-
-## 环境注册检查
-
-列出任务：
-
-```bash
-python scripts/list_envs.py
-```
-
-关键任务标识：
-
-```text
-Essay2608-Dynamic-Pick-Place-v0
-Essay2608-Bimanual-Handover-v0
-Essay2608-Bimanual-Physical-Handover-v0
-Essay2608-Bimanual-Lift-Tray-v0
-```
-
-使用零动作或随机动作检查环境：
-
-```bash
-python scripts/zero_agent.py --task=<TASK_NAME>
-python scripts/random_agent.py --task=<TASK_NAME>
-```
-
-## 核心复现命令
-
-验证单臂冻结数据：
-
-```bash
-conda run -n env_isaaclab python scripts/audit_dataset.py \
-  --data_dir data/pick_place_static/v1
-```
-
-运行单臂完整评测：
-
-```bash
-conda run -n env_isaaclab python scripts/eval_single_arm.py --headless \
-  --methods world_gaussian static_multistream skill_dynamac mask_only \
-  full_dynamac relation_dynamac \
-  --conditions static smooth_object sudden_object smooth_target sudden_target \
-  arm_offset drop_after_grasp close_without_grasp \
-  --seeds 6300 6301 6302 6303 6304 6305 6306 6307 6308 6309 \
-  --output_dir outputs/single_arm_scientific/v1
-```
-
-审计预注册的单臂关系恢复正式结果：
-
-```bash
-conda run -n env_isaaclab python scripts/audit_recovery_results.py
-```
-
-复现真实物理双臂交接开发样本：
-
-```bash
-conda run -n env_isaaclab python scripts/eval_physical_handover.py \
-  --headless --seeds 7400 --max_steps 1400 \
-  --output_dir outputs/physical_handover/dev_reproduction
-```
-
-只读审计 v2 正式 JSON/NPZ：
-
-```bash
-conda run -n env_isaaclab python scripts/audit_physical_handover_results.py
-# 审计当前通过严格门槛的 v3：追加 --version v3
-```
-
-只读审计冻结的真实物理交接数据集：
-
-```bash
-conda run -n env_isaaclab python scripts/audit_physical_handover_dataset.py \
-  --data_dir data/handover_physical/v1
-```
-
-复现双臂在线关系估计器的离线开发回放：
-
-```bash
-conda run -n env_isaaclab python scripts/analyze_bimanual_relation_estimator.py \
-  --data_dir data/handover_physical/v1 \
-  --output_dir outputs/bimanual_relation/offline_dev_v4
-```
-
-运行七类真实物理在线关系干预：
-
-```bash
-conda run -n env_isaaclab python scripts/eval_bimanual_relation.py --headless \
-  --conditions normal receiver_miss receiver_delayed giver_releases_early \
-    receiver_grasps_then_loses prolonged_both_hold one_arm_paused \
-  --seeds 8302 --output_dir outputs/bimanual_relation/online_dev_final_seed8302
-```
-
-只读审计双臂在线关系估计 v2 正式结果：
-
-```bash
-conda run -n env_isaaclab python scripts/audit_bimanual_relation_results.py \
-  --protocol configs/experiments/bimanual_relation_protocol_v2.json \
-  --results_dir outputs/bimanual_relation/formal_v2
-```
-
-验证双臂交接 v2 冻结数据：
-
-```bash
-conda run -n env_isaaclab python scripts/audit_handover_dataset.py \
-  --data_dir data/handover_static/v2
-```
-
-运行纯单元测试：
-
-```bash
-conda run -n env_isaaclab python -m pytest -q
-```
-
-## IDE 配置（可选）
-
-在 VS Code 中按 `Ctrl+Shift+P`，选择 `Tasks: Run Task`，运行
-`setup_python_env`，并按提示填写 Isaac Sim 的绝对路径。任务会生成
-`.vscode/.python.env`，帮助 Pylance 索引 Isaac Sim 和 Omniverse 模块。
-
-若 Pylance 未能索引扩展，可在 `.vscode/settings.json` 的
-`python.analysis.extraPaths` 中添加：
-
-```json
-{
-  "python.analysis.extraPaths": [
-    "<path-to-ext-repo>/source/essay2608"
-  ]
-}
-```
-
-若索引内容过多导致 Pylance 崩溃，应从 `extraPaths` 中排除未使用的
-`omni.anim.*`、`omni.kit.*`、`omni.graph.*` 等扩展，而不是扩大系统交换区作为首选方案。
-
-## 作为 Omniverse 扩展加载（可选）
-
-1. 打开 `Window` → `Extensions`。
-2. 在扩展管理器设置中加入本仓库的 `source` 目录。
-3. 同时加入 Isaac Lab 的 `IsaacLab/source` 目录。
-4. 刷新后，在 `Third Party` 分类中启用 `essay2608`。
-
-示例界面扩展位于：
-`source/essay2608/essay2608/ui_extension_example.py`。
-
-## 代码格式与检查
-
-仓库提供 pre-commit 配置：
-
-```bash
-pip install pre-commit
-pre-commit run --all-files
-```
-
-最低验收命令：
-
-```bash
-conda run -n env_isaaclab python -m pytest -q
-conda run -n env_isaaclab python -m compileall -q \
-  source/essay2608/essay2608 scripts tests
-git diff --check
-```
-
-## 科学声明边界
-
-本仓库复现的是自定义 Isaac Lab 任务中的相对几何、动态参考系和关系生命周期机制，
-不是 TAPAS、MiDiGaP、RLBench、DynaBench 或论文完整黎曼策略的逐项复现。
-旧的 `handover_static/v1/v2` 仍使用几何附着，只能作为接口和数据骨架。新增物理任务
-已经产生真实接触关系转移：v1、v2、v3 正式结果依次为 `6/20`、`18/20`、`20/20`。
-v3 达到严格数据采集门槛，并已由独立 seed 冻结 20 条 `handover_physical/v1`；这只证明
-冻结扰动分布上的脚本专家和数据链路，不等于学习策略完成，也不能外推为任意分布上的
-100% 鲁棒。双臂关系估计器已通过七条件、十个未见 seed 的 v2 正式评测。关系门控恢复
-监督层已完成冻结开发验证和正式协议，但 v1 正式矩阵按用户指令在 95/200 条时中止，
-没有 summary、没有执行硬审计，不能声称正式通过。这些结论只分别证明在线关系检测和
-开发阶段恢复机制，不等于完整双臂 DynaMAC 学习策略完成。所有论文表述应同时遵守
-[夜间研发最终报告](docs/overnight_final_report.md)、[v1 正式报告](docs/physical_handover_report.md)、
-[v2 正式报告](docs/physical_handover_report_v2.md)和
-[v3 正式报告](docs/physical_handover_report_v3.md)、
-[物理数据冻结报告](docs/physical_handover_dataset_report.md)和
-[双臂在线关系估计说明](docs/bimanual_relation_estimator.md)、
-[双臂在线关系估计 v1 负结果](docs/bimanual_relation_report_v1.md)与
-[双臂在线关系估计 v2 正式报告](docs/bimanual_relation_report_v2.md)、
-[双臂关系恢复开发记录](docs/bimanual_recovery_development.md)和
-[双臂关系恢复收尾说明](docs/bimanual_recovery_handoff.md)中的声明边界。
+这里的“完整”指论文正文公开的 DynaMAC 算法和其 MiDiGaP 数学实例，而不是声称已经
+重跑论文的 RLBench2/DynaBench、真机视觉或表 I–IV。论文官网指向的官方 DynaMAC
+GitHub 仓库截至 2026-08-04 仍只有 `Coming soon`，MiDiGaP 官网同样尚未发布代码；
+TAPAS 分段、DINO 位姿感知、RLBench2 任务和真机控制是外部依赖，不属于 Algorithm 1
+本体。所有无法从论文唯一确定的数值选择都显式放在配置和研究日志中。

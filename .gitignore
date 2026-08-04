@@ -56,6 +56,8 @@ _build
 # RL-Games
 **/runs/*
 **/logs/*
+!/logs/
+!/logs/research_log.md
 **/recordings/*
 
 # Pre-Trained Checkpoints
@@ -63,9 +65,6 @@ _build
 
 # Teleop Recorded Dataset
 /datasets/
-
-# Tests
-tests/
 
 # Docker history
 .isaac-lab-docker-history

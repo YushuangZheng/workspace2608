@@ -1,90 +1,36 @@
-"""Geometric and generative policies for the single- and dual-arm tasks."""
+"""策略实现；非策略工具不得放入本目录。"""
 
-from .bimanual import BimanualGaussianPolicy, BimanualPolicyObservation
+from .diffusion_policy import DiffusionPolicy, DiffusionPolicyConfig
 from .dynamac import (
+    BimanualDynaMAC,
+    BimanualDynaMACAction,
+    DynaMAC,
+    DynaMACAction,
+    DynaMACConfig,
+    DynaMACDemonstration,
+    DynaMACObservation,
     DynaMACPolicy,
-    MaskOnlyPolicy,
-    OnlineDynaMACPrototype,
-    OracleRelationRecoveryPolicy,
-    RelationDynaMACPolicy,
-    RelationDynaMACRecoveryPolicy,
+    GaussianMarginal,
+    geometric_mean_standard_deviation,
+    product_of_experts,
+    task_parameter_scores,
+    transform_marginal,
 )
-from .diffusion import DiffusionActionPolicy
-from .gaussian import WorldGaussianPolicy
-from .multistream import StaticMultiStreamPolicy
-from .skill_dynamac import SkillDynaMACPolicy
-from .relation import (
-    OnlineRelationEstimator,
-    RelationEstimate,
-    RelationEstimatorConfig,
-    RelationSample,
-    RelationState,
-    calibrate_relation_estimator,
-    replay_relation_estimator,
-)
-from .bimanual_relation import (
-    BimanualOnlineRelationEstimator,
-    BimanualRelationEstimate,
-    BimanualRelationEstimatorConfig,
-    BimanualRelationSample,
-    calibrate_bimanual_relation_estimator,
-    replay_bimanual_relation_estimator,
-)
-from .bimanual_recovery import (
-    BimanualRecoveryConfig,
-    BimanualRecoveryDecision,
-    BimanualRecoveryState,
-    BimanualRecoveryTrigger,
-    BimanualRelationRecoveryController,
-)
-from .recovery import (
-    RecoveryConfig,
-    RecoveryDecision,
-    RecoveryState,
-    RecoveryTrigger,
-    RelationRecoveryController,
-    calibrate_recovery_config,
-    privileged_grasp_relation,
-)
-from .tray import TrayGaussianPolicy
 
 __all__ = [
-    "BimanualGaussianPolicy",
-    "BimanualPolicyObservation",
+    "BimanualDynaMAC",
+    "BimanualDynaMACAction",
+    "DiffusionPolicy",
+    "DiffusionPolicyConfig",
+    "DynaMAC",
+    "DynaMACAction",
+    "DynaMACConfig",
+    "DynaMACDemonstration",
+    "DynaMACObservation",
     "DynaMACPolicy",
-    "DiffusionActionPolicy",
-    "MaskOnlyPolicy",
-    "OnlineDynaMACPrototype",
-    "OnlineRelationEstimator",
-    "BimanualOnlineRelationEstimator",
-    "BimanualRelationEstimate",
-    "BimanualRelationEstimatorConfig",
-    "BimanualRelationSample",
-    "BimanualRecoveryConfig",
-    "BimanualRecoveryDecision",
-    "BimanualRecoveryState",
-    "BimanualRecoveryTrigger",
-    "BimanualRelationRecoveryController",
-    "OracleRelationRecoveryPolicy",
-    "RelationDynaMACPolicy",
-    "RelationDynaMACRecoveryPolicy",
-    "RelationEstimate",
-    "RelationEstimatorConfig",
-    "RelationSample",
-    "RelationState",
-    "RecoveryConfig",
-    "RecoveryDecision",
-    "RecoveryState",
-    "RecoveryTrigger",
-    "RelationRecoveryController",
-    "calibrate_recovery_config",
-    "privileged_grasp_relation",
-    "SkillDynaMACPolicy",
-    "StaticMultiStreamPolicy",
-    "TrayGaussianPolicy",
-    "WorldGaussianPolicy",
-    "calibrate_relation_estimator",
-    "calibrate_bimanual_relation_estimator",
-    "replay_relation_estimator",
-    "replay_bimanual_relation_estimator",
+    "GaussianMarginal",
+    "geometric_mean_standard_deviation",
+    "product_of_experts",
+    "task_parameter_scores",
+    "transform_marginal",
 ]
