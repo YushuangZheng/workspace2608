@@ -17,6 +17,10 @@ from .segmentation import (
     end_effector_speeds,
     segment_demonstration,
 )
+from .physical_handover import (
+    audit_physical_handover_dataset,
+    audit_physical_handover_demonstration,
+)
 
 __all__ = [
     "BimanualDemonstration",
@@ -26,6 +30,8 @@ __all__ = [
     "analyze_segmentation",
     "audit_bimanual_dataset",
     "audit_dataset",
+    "audit_physical_handover_dataset",
+    "audit_physical_handover_demonstration",
     "audit_tray_dataset",
     "calibrate_speed_thresholds",
     "end_effector_speeds",
