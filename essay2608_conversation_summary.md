@@ -34,7 +34,7 @@
 当前最终平台决策为：
 
 \[
-oxed{	ext{Isaac Lab 外部项目}+	ext{Isaac Lab 自采静态演示}+	ext{DynaMAC 核心机制}}
+\boxed{\text{Isaac Lab 外部项目}+\text{Isaac Lab 自采静态演示}+\text{DynaMAC 核心机制}}
 \]
 
 不再优先搭建 RLBench，也不直接把 RLBench2 数据导入 Isaac Lab 训练。
@@ -54,9 +54,9 @@
 例如抓杯子时，模型学习：
 
 \[
-T_{	ext{ee}}^{	ext{cup}}
+T_{\text{ee}}^{\text{cup}}
 =
-\left(T_{	ext{cup}}^Wight)^{-1}T_{	ext{ee}}^W
+\left(T_{\text{cup}}^W\right)^{-1}T_{\text{ee}}^W
 \]
 
 而不是只记住末端在世界坐标系中的固定位置。
@@ -81,7 +81,7 @@ T_{	ext{ee}}^{	ext{cup}}
 
 \[
 {}^A T_B =
-egin{bmatrix}
+\begin{bmatrix}
 {}^A R_B & {}^A p_B \\
 0 & 1
 \end{bmatrix}
@@ -184,8 +184,7 @@ p(A\mid o)
 因此：
 
 \[
-	ext{扩散模型}
-eq	ext{绝对坐标模型}
+\text{扩散模型}\neq\text{绝对坐标模型}
 \]
 
 ### 4.2 流匹配是否学习相对位置
@@ -193,7 +192,7 @@ eq	ext{绝对坐标模型}
 也不一定。流匹配学习速度场：
 
 \[
-rac{dA_	au}{d	au}=v_	heta(A_	au,	au,o)
+\frac{dA_\tau}{d\tau}=v_\theta(A_\tau,\tau,o)
 \]
 
 但动作 \(A\) 仍可以是绝对、相对、关节或潜空间表示。
@@ -201,8 +200,7 @@ eq	ext{绝对坐标模型}
 因此：
 
 \[
-	ext{流匹配}
-eq	ext{相对坐标模型}
+\text{流匹配}\neq\text{相对坐标模型}
 \]
 
 ### 4.3 泛化来源
@@ -248,7 +246,7 @@ MiDiGaP 本身已经采用物体中心相对坐标；DynaMAC 相比已有多流�
 更准确的总结是：
 
 \[
-oxed{	ext{相对几何}+	ext{动态参考系的因果解耦}}
+\boxed{\text{相对几何}+\text{动态参考系的因果解耦}}
 \]
 
 ---
@@ -330,7 +328,7 @@ DynaMAC 自动处理：
 从固定候选参考系扩展为动态关系图：
 
 \[
-	ext{Task Graph}+	ext{Dynamic Relation Graph}+	ext{Generative Policy}
+\text{Task Graph}+\text{Dynamic Relation Graph}+\text{Generative Policy}
 \]
 
 长期可能包括：
@@ -368,7 +366,7 @@ DynaMAC 自动处理：
 ### 9.2 当前最终路线
 
 \[
-oxed{	ext{Isaac Lab 为唯一主平台，重新搭任务并自采演示}}
+\boxed{\text{Isaac Lab 为唯一主平台，重新搭任务并自采演示}}
 \]
 
 RLBench2 只用于：
@@ -768,7 +766,7 @@ scripts/analyze_relative_frames.py
 \[
 T_{\mathrm{ee}}^{\mathrm{object}}
 =
-\left(T_{\mathrm{object}}ight)^{-1}T_{\mathrm{ee}}
+\left(T_{\mathrm{object}}\right)^{-1}T_{\mathrm{ee}}
 \]
 
 输出目录：

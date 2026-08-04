@@ -15,6 +15,7 @@
     "arm_offset"
   ],
   "success_definition": {
+    "legacy_3d_threshold_m": 0.06,
     "xy_threshold_m": 0.01,
     "xy_sensitivity_thresholds_m": [0.005, 0.01, 0.02],
     "support_height_tolerance_m": 0.01,

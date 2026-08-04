@@ -20,7 +20,7 @@ parser.add_argument("--num_demos", type=int, default=5)
 parser.add_argument("--max_steps", type=int, default=1500)
 parser.add_argument("--max_attempts", type=int, default=20)
 parser.add_argument("--seed", type=int, default=7208)
-parser.add_argument("--output_dir", type=Path, default=Path("data/handover_static/v1"))
+parser.add_argument("--output_dir", type=Path, default=Path("data/handover_static/v2"))
 parser.add_argument("--success_threshold", type=float, default=0.06)
 parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
 AppLauncher.add_app_launcher_args(parser)
@@ -77,11 +77,13 @@ def run_controller() -> int:
 
     manifest = {
         "task_id": TASK_ID,
+        "dataset_schema_version": 2,
         "num_demos": len(entries),
         "attempts": attempts,
         "base_seed": args.seed,
         "quaternion_order": "wxyz",
         "coordinate_frame": "local_environment",
+        "relation_labels": ["none", "left_only", "both", "right_only"],
         "demos": entries,
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -130,6 +132,10 @@ def run_worker() -> None:
     print(f"[handover] action_shape={env.unwrapped.action_space.shape}", flush=True)
     control_dt = env_cfg.sim.dt * env_cfg.decimation
     expert = ScriptedHandover(control_dt, env.unwrapped.device)
+    left_robot = env.unwrapped.scene["left_robot"]
+    right_robot = env.unwrapped.scene["right_robot"]
+    left_finger_ids, _ = left_robot.find_joints("panda_finger_joint.*")
+    right_finger_ids, _ = right_robot.find_joints("panda_finger_joint.*")
     records = {
         key: []
         for key in (
@@ -142,6 +148,9 @@ def run_worker() -> None:
             "joint_pos",
             "joint_vel",
             "carrier",
+            "relation_label",
+            "left_gripper_state",
+            "right_gripper_state",
         )
     }
     complete = False
@@ -164,6 +173,7 @@ def run_worker() -> None:
                     flush=True,
                 )
             state = int(expert.state)
+            relation_label = expert.relation_label
             action, complete = expert.compute(left, right, object_pose, target)
             carrier = expert.carrier
             carrier_offset = expert.carrier_offset
@@ -172,8 +182,6 @@ def run_worker() -> None:
             elif carrier == "right":
                 write_attached_object(env, right, carrier_offset)
             simulator_action = actions_to_robot_root_frames(env, action)
-            left_robot = env.unwrapped.scene["left_robot"]
-            right_robot = env.unwrapped.scene["right_robot"]
             records["state"].append(state)
             records["left_ee_pose"].append(_row(left))
             records["right_ee_pose"].append(_row(right))
@@ -187,6 +195,9 @@ def run_worker() -> None:
                 np.concatenate((_row(left_robot.data.joint_vel), _row(right_robot.data.joint_vel)))
             )
             records["carrier"].append({None: 0, "left": 1, "right": 2}[carrier])
+            records["relation_label"].append(relation_label)
+            records["left_gripper_state"].append(_row(left_robot.data.joint_pos[:, left_finger_ids]))
+            records["right_gripper_state"].append(_row(right_robot.data.joint_pos[:, right_finger_ids]))
             if step_index == 0:
                 print("[handover] stepping initial action", flush=True)
             _, _, terminated, truncated, _ = env.step(simulator_action)
@@ -214,6 +225,9 @@ def run_worker() -> None:
             joint_pos=np.asarray(records["joint_pos"], dtype=np.float32),
             joint_vel=np.asarray(records["joint_vel"], dtype=np.float32),
             carrier=np.asarray(records["carrier"], dtype=np.int64),
+            relation_label=np.asarray(records["relation_label"], dtype="U16"),
+            left_gripper_state=np.asarray(records["left_gripper_state"], dtype=np.float32),
+            right_gripper_state=np.asarray(records["right_gripper_state"], dtype=np.float32),
             control_dt=np.asarray(control_dt, dtype=np.float32),
             final_error=np.asarray(final_error, dtype=np.float32),
             quaternion_order=np.asarray("wxyz"),
@@ -228,7 +242,16 @@ def run_worker() -> None:
             }
         )
     (output_dir / "manifest.json").write_text(
-        json.dumps({"task_id": TASK_ID, "num_demos": len(entries), "demos": entries}, indent=2),
+        json.dumps(
+            {
+                "task_id": TASK_ID,
+                "dataset_schema_version": 2,
+                "num_demos": len(entries),
+                "relation_labels": ["none", "left_only", "both", "right_only"],
+                "demos": entries,
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
     print(

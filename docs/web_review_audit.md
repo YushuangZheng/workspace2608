@@ -1,54 +1,53 @@
-# Audit of the external GPT review
+# 外部 GPT 点评审计
 
-The review was checked against the current source, frozen data, and saved rollout traces. Its observations were not
-treated as facts until reproduced locally.
+本审计把外部点评逐项与当前源码、冻结数据和保存的 rollout 轨迹对照。只有在本地
+复现后，点评中的判断才被当作事实。
 
-## Confirmed and corrected
+## 已确认并修正
 
-1. **The old 60 mm 3-D success radius was scientifically misleading.** The target command has `z = 0.08 m`, while
-   a released cube rests with its center at about `z = 0.021 m`. Successful placements therefore had a nearly fixed
-   59 mm vertical residual even when XY error was only 1.5--6.1 mm. Success now requires XY error below 10 mm, the
-   object on the demonstrated support height, an open gripper, and low displacement/velocity over the final 25
-   control steps. Results also report 5/10/20 mm XY sensitivity and retain 3-D error only as a diagnostic.
-2. **Resume cache validation was incomplete.** Each trial now stores and validates a SHA-256 fingerprint covering
-   the Git commit, frozen dataset, relevant source files, method, condition, seed, perturbation implementation, all
-   success thresholds, rollout length, action-rate limit, and the diffusion checkpoint when applicable. Old result
-   files without this fingerprint are invalidated automatically.
-3. **The phase-4 to phase-5 command switch was discontinuous.** In the reproduced seed-6202 Full DynaMAC static
-   trial, the raw desired-position jump was about 406 mm. A common Cartesian command-rate limiter now bounds every
-   policy to 20 mm per control step. Raw policy intent, limited policy command, post-perturbation command, EE speed,
-   and frame-switch diagnostics are stored separately. `scripts/analyze_action_transitions.py` produces the JSON
-   audit and plots.
-4. **A terminated rollout used a pre-step final error.** The worker now reads the scene after the last executed step
-   for every rollout. The normal evaluation horizon remains shorter than the environment time limit, preventing a
-   routine timeout autoreset from contaminating that read.
-5. **The old documentation overstated a one-seed path result.** The result is now reported as a
-   three-evaluation-seed mean, with an explicit warning that the path benefit is seed-dependent. The strict rerun
-   still reverses slightly for seed 6202 after command-rate limiting.
+1. **旧版 60 mm 三维成功半径在科学上具有误导性。** 目标命令为
+   `z = 0.08 m`，释放后的方块中心约为 `z = 0.021 m`。所以即使 XY 误差只有
+   1.5–6.1 mm，正确放置仍带有接近 59 mm 的固定竖直残差。现在成功要求 XY
+   误差低于 10 mm、物体处于演示支撑高度、夹爪张开，且最后 25 个控制步的位移和
+   速度足够低；同时报告 5/10/20 mm XY 灵敏度，三维误差只作为诊断。
+2. **恢复运行时的缓存验证不完整。** 每条试验现在保存并验证 SHA-256 指纹，覆盖
+   Git 提交、冻结数据、相关源码、方法、条件、seed、扰动实现、全部成功阈值、
+   rollout 长度、动作限速以及所用扩散 checkpoint。缺少指纹的旧结果自动失效。
+3. **阶段 4 到 5 的命令切换不连续。** 在复现的 seed 6202 Full DynaMAC 静态
+   试验中，原始期望位置跳变约 406 mm。共享笛卡尔限速器现在把每个策略限制为每
+   控制步 20 mm；原始意图、限速命令、扰动后命令、末端速度和参考系切换分别记录。
+   `scripts/analyze_action_transitions.py` 可生成 JSON 审计和图。
+4. **一个终止 rollout 使用了执行前的最终误差。** worker 现在始终在最后一个已执行
+   step 之后重新读取场景。正常评测时域保持短于环境时间上限，避免常规 timeout
+   自动复位污染读数。
+5. **旧文档夸大了单 seed 路径结果。** 现在按三个评测 seed 报告均值，并明确说明
+   路径收益依赖 seed。命令限速后的严格重跑在 seed 6202 仍出现轻微反转。
 
-## Checked and not reproduced as defects
+## 已检查但未复现为缺陷
 
-- The virtual frame is defined independently for every training demonstration at the first phase-4 sample, exactly
-  as the review recommends. At runtime it is reset per episode and captured again on the phase-4 transition.
-- Evaluation performs exactly one `env.step()` per policy action. Trace rows intentionally contain the pre-action
-  state and the action about to execute; the final post-action scene state is read separately.
-- The reported inference metric times only `policy.act()`. Documentation calls it policy computation time rather
-  than end-to-end control latency.
+- 训练时每条演示都在首次阶段 4 样本独立定义虚拟参考系；运行时每个 episode 复位，
+  并在阶段 4 转移时重新捕获，符合点评建议。
+- 每个策略动作只调用一次 `env.step()`。轨迹行有意保存动作前状态及即将执行的动作，
+  最后的动作后场景状态另行读取。
+- 推理指标只计时 `policy.act()`；文档称其为“策略计算时间”，而非端到端控制延迟。
 
-## Remaining claim boundaries
+## 仍然存在的声明边界
 
-- The connection detector is deliberately a 3-D positional coupling proxy with gripper gating, not the paper's full
-  6-D precision-matrix detector. It showed no false positives in this task, but robustness to rotational slip remains
-  future work.
-- The three seeds vary evaluation initialization while all models use the same frozen five-demo training set. They
-  measure test-time robustness for that dataset, not variance across independently sampled five-demo training sets.
-  No 5-shot sample-efficiency claim should be made without multiple frozen training datasets.
-- Bimanual results are still one-seed pilots using geometric virtual attachment, not contact-rich grasp validation.
+- 旧连接检测器只是带夹爪门控的三维位置耦合代理，不是论文完整六维精度矩阵检测器。
+  后续新增的双向六维估计器已单独记录在
+  [在线关系估计器](online_relation_estimator.md)，但旋转滑移和接触仍需更多验证。
+- 三个 seed 只改变评测初始化，全部模型仍用同一冻结五演示训练集；不能据此主张多个
+  独立训练集上的方差或 5-shot 样本效率。
+- 双臂结果仍主要使用几何虚拟附着，不是接触丰富的抓取验证。
 
-## Corrected regression result
+## 修正后的回归结果
 
-The corrected matrix contains 72/72 complete rollouts over seeds `6200--6202`. Under the 10 mm semantic criterion,
-World Gaussian and Static Multi-stream score 0/18, while Mask-only and Full DynaMAC score 18/18 with 3.01 and
-2.98 mm mean XY error. Both dynamic methods score 17/18 at 5 mm and 18/18 at 10/20 mm. Full retains an 8.5% lower
-mean path length than Mask-only, with the documented seed-6202 reversal. Across Full trials, the largest raw desired
-jump is about 406 mm, the largest rate-limited policy jump is 20 mm, and maximum measured EE speed is about 1.01 m/s.
+修正矩阵包含 seed `6200–6202` 上 72/72 条完整 rollout。按 10 mm 语义成功标准，
+World Gaussian 与 Static Multi-stream 均为 0/18，Mask-only 与 Full DynaMAC
+均为 18/18，平均 XY 误差分别为 3.01 和 2.98 mm。两种动态方法在 5 mm 下均为
+17/18，在 10/20 mm 下均为 18/18。Full 的平均路径仍比 Mask-only 低 8.5%，
+但存在已记录的 seed 6202 反转。Full 所有试验中，最大原始期望跳变约 406 mm，
+最大限速策略跳变为 20 mm，最大实测末端速度约 1.01 m/s。
+
+后续 10 seed、六方法、八条件的最终结果以
+[单臂扩展评测](single_arm_final_report.md) 为准。

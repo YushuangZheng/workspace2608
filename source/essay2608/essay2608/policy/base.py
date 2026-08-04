@@ -33,6 +33,9 @@ class PolicyObservation:
     ee_pose: np.ndarray
     object_pose: np.ndarray
     target_pose: np.ndarray
+    gripper_opening_m: float | None = None
+    gripper_velocity_m_s: float | None = None
+    object_contact: bool | None = None
 
 
 @dataclass(frozen=True)

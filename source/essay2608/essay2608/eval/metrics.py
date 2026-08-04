@@ -12,6 +12,7 @@ import numpy as np
 class SuccessCriteria:
     """Placement semantics that avoid conflating support height with XY error."""
 
+    legacy_3d_threshold_m: float = 0.06
     xy_threshold_m: float = 0.01
     xy_sensitivity_thresholds_m: tuple[float, ...] = (0.005, 0.01, 0.02)
     support_height_m: float = 0.021
@@ -34,11 +35,16 @@ class EpisodeTrace:
     inference_ms: list[float] = field(default_factory=list)
     connected: list[bool] = field(default_factory=list)
     perturbation_active: list[bool] = field(default_factory=list)
+    perturbation_events: list[bool] = field(default_factory=list)
     active_frames: list[list[str]] = field(default_factory=list)
     stream_weights: list[dict[str, float]] = field(default_factory=list)
     raw_action_positions: list[np.ndarray] = field(default_factory=list)
     policy_action_positions: list[np.ndarray] = field(default_factory=list)
     action_rate_limited: list[bool] = field(default_factory=list)
+    relation_states: list[str] = field(default_factory=list)
+    relation_confidence: list[float] = field(default_factory=list)
+    gripper_opening_m: list[float] = field(default_factory=list)
+    gripper_velocity_m_s: list[float] = field(default_factory=list)
 
     def append(
         self,
@@ -47,6 +53,7 @@ class EpisodeTrace:
         diagnostics: dict[str, Any],
         inference_ms: float,
         perturbation_active: bool,
+        perturbation_event: bool = False,
     ) -> None:
         self.ee_positions.append(observation.ee_pose[:3].copy())
         self.object_positions.append(observation.object_pose[:3].copy())
@@ -56,6 +63,7 @@ class EpisodeTrace:
         self.inference_ms.append(float(inference_ms))
         self.connected.append(bool(diagnostics.get("connected", False)))
         self.perturbation_active.append(bool(perturbation_active))
+        self.perturbation_events.append(bool(perturbation_event))
         self.active_frames.append(list(diagnostics.get("active_frames", [])))
         self.stream_weights.append(dict(diagnostics.get("stream_weights", {})))
         self.raw_action_positions.append(
@@ -65,6 +73,18 @@ class EpisodeTrace:
             np.asarray(diagnostics.get("policy_action_position", action[:3]), dtype=np.float64)
         )
         self.action_rate_limited.append(bool(diagnostics.get("action_rate_limited", False)))
+        self.relation_states.append(str(diagnostics.get("relation_state", "NOT_APPLICABLE")))
+        self.relation_confidence.append(float(diagnostics.get("relation_confidence", 0.0)))
+        self.gripper_opening_m.append(
+            float(observation.gripper_opening_m)
+            if observation.gripper_opening_m is not None
+            else float("nan")
+        )
+        self.gripper_velocity_m_s.append(
+            float(observation.gripper_velocity_m_s)
+            if observation.gripper_velocity_m_s is not None
+            else float("nan")
+        )
 
     @staticmethod
     def _jumps(positions: np.ndarray) -> np.ndarray:
@@ -81,6 +101,7 @@ class EpisodeTrace:
         environment_done: bool,
         forced_transitions: int,
         perturbation_started: bool,
+        relation_loss_expected: bool = False,
     ) -> dict[str, Any]:
         ee = np.asarray(self.ee_positions)
         actions = np.asarray(self.actions)
@@ -90,12 +111,58 @@ class EpisodeTrace:
 
         ee_jumps = self._jumps(ee)
         path_length = float(np.sum(ee_jumps))
+        phase_path_length = np.zeros(10, dtype=np.float64)
+        if len(phases) > 1:
+            np.add.at(phase_path_length, phases[1:], ee_jumps)
+        phase_step_counts = np.bincount(phases, minlength=10)
         speed = ee_jumps / self.control_dt
         applied_action_jump = self._jumps(actions[:, :3])
         raw_action_jump = self._jumps(np.asarray(self.raw_action_positions))
         policy_action_jump = self._jumps(np.asarray(self.policy_action_positions))
         false_positive = float(np.mean(connected & ~expected_connected)) if len(connected) else 0.0
         false_negative = float(np.mean(~connected & expected_connected)) if len(connected) else 0.0
+        expected_onsets = np.flatnonzero(expected_connected)
+        observed_onsets = np.flatnonzero(connected)
+        expected_onset = int(expected_onsets[0]) if len(expected_onsets) else None
+        observed_onset = int(observed_onsets[0]) if len(observed_onsets) else None
+        onset_delay_steps = (
+            observed_onset - expected_onset
+            if expected_onset is not None and observed_onset is not None
+            else None
+        )
+        expected_releases = np.flatnonzero(expected_connected[:-1] & ~expected_connected[1:]) + 1
+        expected_release = int(expected_releases[0]) if len(expected_releases) else None
+        observed_release = None
+        if expected_release is not None and observed_onset is not None:
+            releases = np.flatnonzero(~connected[expected_release:])
+            if len(releases):
+                observed_release = expected_release + int(releases[0])
+        release_delay_steps = (
+            observed_release - expected_release
+            if expected_release is not None and observed_release is not None
+            else None
+        )
+        relation_transition_steps = [
+            index
+            for index in range(1, len(self.relation_states))
+            if self.relation_states[index] != self.relation_states[index - 1]
+        ]
+        event_steps = np.flatnonzero(np.asarray(self.perturbation_events, dtype=bool))
+        perturbation_event_step = int(event_steps[0]) if len(event_steps) else None
+        post_event_loss_step = None
+        if (
+            relation_loss_expected
+            and perturbation_event_step is not None
+            and np.any(connected[: perturbation_event_step + 1])
+        ):
+            losses = np.flatnonzero(~connected[perturbation_event_step:])
+            if len(losses):
+                post_event_loss_step = perturbation_event_step + int(losses[0])
+        post_event_loss_delay_steps = (
+            post_event_loss_step - perturbation_event_step
+            if perturbation_event_step is not None and post_event_loss_step is not None
+            else None
+        )
 
         frame_switch_steps = [
             index
@@ -148,6 +215,11 @@ class EpisodeTrace:
         semantic_base = bool(
             policy_complete and not environment_done and on_support and released and stable
         )
+        legacy_success = bool(
+            policy_complete
+            and not environment_done
+            and final_error_3d < criteria.legacy_3d_threshold_m
+        )
         sensitivity = {
             f"{threshold:.6f}": bool(semantic_base and final_xy_error < threshold)
             for threshold in criteria.xy_sensitivity_thresholds_m
@@ -170,6 +242,8 @@ class EpisodeTrace:
 
         return {
             "success": success,
+            "stable_place_success": success,
+            "legacy_success_3d": legacy_success,
             "recovery_success": success if perturbation_started else None,
             "failure_reason": failure_reason,
             "policy_complete": bool(policy_complete),
@@ -186,6 +260,7 @@ class EpisodeTrace:
             "settling_max_speed_m_s": settling_speed,
             "xy_success_sensitivity": sensitivity,
             "success_criteria": {
+                "legacy_3d_threshold_m": criteria.legacy_3d_threshold_m,
                 "xy_threshold_m": criteria.xy_threshold_m,
                 "support_height_m": criteria.support_height_m,
                 "support_height_tolerance_m": criteria.support_height_tolerance_m,
@@ -194,6 +269,12 @@ class EpisodeTrace:
                 "stability_speed_m_s": criteria.stability_speed_m_s,
             },
             "path_length_m": path_length,
+            "phase_path_length_m": {
+                str(index): float(value) for index, value in enumerate(phase_path_length)
+            },
+            "phase_step_counts": {
+                str(index): int(value) for index, value in enumerate(phase_step_counts)
+            },
             "max_ee_speed_m_s": float(np.max(speed)),
             "max_action_position_jump_m": float(np.max(applied_action_jump)),
             "max_raw_policy_action_jump_m": float(np.max(raw_action_jump)),
@@ -206,6 +287,29 @@ class EpisodeTrace:
             "connection_detected": bool(np.any(connected)),
             "mask_false_positive_rate": false_positive,
             "mask_false_negative_rate": false_negative,
+            "connection_onset_step": observed_onset,
+            "expected_connection_onset_step": expected_onset,
+            "connection_onset_delay_steps": onset_delay_steps,
+            "connection_onset_delay_s": (
+                onset_delay_steps * self.control_dt if onset_delay_steps is not None else None
+            ),
+            "connection_release_step": observed_release,
+            "expected_connection_release_step": expected_release,
+            "connection_release_delay_steps": release_delay_steps,
+            "connection_release_delay_s": (
+                release_delay_steps * self.control_dt if release_delay_steps is not None else None
+            ),
+            "relation_state_transition_steps": relation_transition_steps,
+            "maximum_relation_confidence": float(max(self.relation_confidence, default=0.0)),
+            "perturbation_event_step": perturbation_event_step,
+            "post_event_relation_loss_expected": relation_loss_expected,
+            "post_event_connection_loss_step": post_event_loss_step,
+            "post_event_connection_loss_delay_steps": post_event_loss_delay_steps,
+            "post_event_connection_loss_delay_s": (
+                post_event_loss_delay_steps * self.control_dt
+                if post_event_loss_delay_steps is not None
+                else None
+            ),
             "max_object_stream_weight": float(max(object_weights, default=0.0)),
             "forced_phase_transitions": int(forced_transitions),
         }
@@ -222,7 +326,15 @@ class EpisodeTrace:
             "inference_ms": np.asarray(self.inference_ms, dtype=np.float32),
             "connected": np.asarray(self.connected, dtype=np.bool_),
             "perturbation_active": np.asarray(self.perturbation_active, dtype=np.bool_),
+            "perturbation_event": np.asarray(self.perturbation_events, dtype=np.bool_),
             "raw_action_position": np.asarray(self.raw_action_positions, dtype=np.float32),
             "policy_action_position": np.asarray(self.policy_action_positions, dtype=np.float32),
             "action_rate_limited": np.asarray(self.action_rate_limited, dtype=np.bool_),
+            "relation_state": np.asarray(self.relation_states, dtype="U32"),
+            "relation_confidence": np.asarray(self.relation_confidence, dtype=np.float32),
+            "gripper_opening_m": np.asarray(self.gripper_opening_m, dtype=np.float32),
+            "gripper_velocity_m_s": np.asarray(
+                self.gripper_velocity_m_s,
+                dtype=np.float32,
+            ),
         }

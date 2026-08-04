@@ -1,142 +1,163 @@
-# Essay2608: Dynamic Multi-arm Coordination in Isaac Lab
+# Essay2608：Isaac Lab 中的动态多机械臂协作
 
-## Overview
+## 项目概览
 
-This repository implements a staged DynaMAC study in custom Isaac Lab tasks. It contains a completed single-arm
-pick-and-place loop, bimanual Handover, Bimanual Lift Tray, and a later-stage low-dimensional conditional diffusion
-baseline. All accepted demonstration datasets are versioned and hash-frozen.
+本仓库在自定义 Isaac Lab 任务中分阶段研究 DynaMAC。当前包含：
 
-Reproduction guides:
+- 已完成科学审计的单臂动态抓取与放置闭环；
+- 双臂交接（Handover）环境、专家和冻结数据；
+- 双臂托盘搬运（Lift Tray）工程原型；
+- 一个低维条件扩散基线。
 
-- [Single-arm minimal loop](docs/single_arm_minimal_loop.md)
-- [Bimanual minimal loop](docs/bimanual_minimal_loop.md)
+所有正式验收的演示数据集均带版本号、逐文件 SHA-256 和冻结标记。
+当前结论、限制与复现入口见：
 
-**Key Features:**
+- [夜间研发最终报告](docs/overnight_final_report.md)
+- [单臂最终评测报告](docs/single_arm_final_report.md)
+- [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
+- [方法来源与实现边界](docs/method_provenance.md)
+- [文档更新记录](docs/documentation_changelog.md)
 
-- `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.
-- `Flexibility` This template is set up to allow your code to be run as an extension in Omniverse.
+## 主要能力
 
-**Keywords:** extension, template, isaaclab
+- 与 Isaac Lab 主仓库隔离，项目代码和数据可独立维护；
+- 两台 Franka 的独立绝对位姿 IK 与夹爪控制；
+- 冻结数据、内容寻址实验缓存和可复现实验指纹；
+- 世界、物体、目标及虚拟末端参考系下的高斯策略；
+- 运行时参考系屏蔽、双向关系估计和机制反例；
+- 逐次试验 JSON/NPZ 证据、阶段路径、动作跳变和失败分类。
 
-## Installation
+## 安装
 
-- Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
-  We recommend using the conda or uv installation as it simplifies calling Python scripts from the terminal.
-
-- Clone or copy this project/repository separately from the Isaac Lab installation (i.e. outside the `IsaacLab` directory):
-
-- Using a python interpreter that has Isaac Lab installed, install the library in editable mode using:
-
-    ```bash
-    # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python -m pip install -e source/essay2608
-    ```
-
-- Verify that the extension is correctly installed by:
-
-    - Listing the available tasks:
-
-        Note: It the task name changes, it may be necessary to update the search pattern `"Template-"`
-        (in the `scripts/list_envs.py` file) so that it can be listed.
-
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/list_envs.py
-        ```
-
-    - Running a task:
-
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
-        ```
-
-    - Running a task with dummy agents:
-
-        These include dummy agents that output zero or random agents. They are useful to ensure that the environments are configured correctly.
-
-        - Zero-action agent
-
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/zero_agent.py --task=<TASK_NAME>
-            ```
-        - Random-action agent
-
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/random_agent.py --task=<TASK_NAME>
-            ```
-
-### Set up IDE (Optional)
-
-To setup the IDE, please follow these instructions:
-
-- Run VSCode Tasks, by pressing `Ctrl+Shift+P`, selecting `Tasks: Run Task` and running the `setup_python_env` in the drop down menu.
-  When running this task, you will be prompted to add the absolute path to your Isaac Sim installation.
-
-If everything executes correctly, it should create a file .python.env in the `.vscode` directory.
-The file contains the python paths to all the extensions provided by Isaac Sim and Omniverse.
-This helps in indexing all the python modules for intelligent suggestions while writing code.
-
-### Setup as Omniverse Extension (Optional)
-
-We provide an example UI extension that will load upon enabling your extension defined in `source/essay2608/essay2608/ui_extension_example.py`.
-
-To enable your extension, follow these steps:
-
-1. **Add the search path of this project/repository** to the extension manager:
-    - Navigate to the extension manager using `Window` -> `Extensions`.
-    - Click on the **Hamburger Icon**, then go to `Settings`.
-    - In the `Extension Search Paths`, enter the absolute path to the `source` directory of this project/repository.
-    - If not already present, in the `Extension Search Paths`, enter the path that leads to Isaac Lab's extension directory directory (`IsaacLab/source`)
-    - Click on the **Hamburger Icon**, then click `Refresh`.
-
-2. **Search and enable your extension**:
-    - Find your extension under the `Third Party` category.
-    - Toggle it to enable your extension.
-
-## Code formatting
-
-We have a pre-commit template to automatically format your code.
-To install pre-commit:
+1. 按照 [Isaac Lab 安装指南](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html)
+   安装 Isaac Sim 与 Isaac Lab。建议使用 conda 或 uv 环境。
+2. 将本仓库放在 Isaac Lab 主目录之外。
+3. 使用带 Isaac Lab 的 Python 解释器，以可编辑模式安装扩展：
 
 ```bash
-pip install pre-commit
+python -m pip install -e source/essay2608
 ```
 
-Then you can run pre-commit with:
+本项目验证时使用的环境为：
+
+```text
+/home/zys/miniconda3/envs/env_isaaclab/bin/python
+```
+
+也可统一使用：
 
 ```bash
-pre-commit run --all-files
+conda run -n env_isaaclab python <脚本>
 ```
 
-## Troubleshooting
+## 环境注册检查
 
-### Pylance Missing Indexing of Extensions
+列出任务：
 
-In some VsCode versions, the indexing of part of the extensions is missing.
-In this case, add the path to your extension in `.vscode/settings.json` under the key `"python.analysis.extraPaths"`.
+```bash
+python scripts/list_envs.py
+```
+
+关键任务标识：
+
+```text
+Essay2608-Dynamic-Pick-Place-v0
+Essay2608-Bimanual-Handover-v0
+Essay2608-Bimanual-Lift-Tray-v0
+```
+
+使用零动作或随机动作检查环境：
+
+```bash
+python scripts/zero_agent.py --task=<TASK_NAME>
+python scripts/random_agent.py --task=<TASK_NAME>
+```
+
+## 核心复现命令
+
+验证单臂冻结数据：
+
+```bash
+conda run -n env_isaaclab python scripts/audit_dataset.py \
+  --data_dir data/pick_place_static/v1
+```
+
+运行单臂完整评测：
+
+```bash
+conda run -n env_isaaclab python scripts/eval_single_arm.py --headless \
+  --methods world_gaussian static_multistream skill_dynamac mask_only \
+  full_dynamac relation_dynamac \
+  --conditions static smooth_object sudden_object smooth_target sudden_target \
+  arm_offset drop_after_grasp close_without_grasp \
+  --seeds 6300 6301 6302 6303 6304 6305 6306 6307 6308 6309 \
+  --output_dir outputs/single_arm_scientific/v1
+```
+
+验证双臂交接 v2 冻结数据：
+
+```bash
+conda run -n env_isaaclab python scripts/audit_handover_dataset.py \
+  --data_dir data/handover_static/v2
+```
+
+运行纯单元测试：
+
+```bash
+conda run -n env_isaaclab python -m pytest -q
+```
+
+## IDE 配置（可选）
+
+在 VS Code 中按 `Ctrl+Shift+P`，选择 `Tasks: Run Task`，运行
+`setup_python_env`，并按提示填写 Isaac Sim 的绝对路径。任务会生成
+`.vscode/.python.env`，帮助 Pylance 索引 Isaac Sim 和 Omniverse 模块。
+
+若 Pylance 未能索引扩展，可在 `.vscode/settings.json` 的
+`python.analysis.extraPaths` 中添加：
 
 ```json
 {
-    "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/essay2608"
-    ]
+  "python.analysis.extraPaths": [
+    "<path-to-ext-repo>/source/essay2608"
+  ]
 }
 ```
 
-### Pylance Crash
+若索引内容过多导致 Pylance 崩溃，应从 `extraPaths` 中排除未使用的
+`omni.anim.*`、`omni.kit.*`、`omni.graph.*` 等扩展，而不是扩大系统交换区作为首选方案。
 
-If you encounter a crash in `pylance`, it is probable that too many files are indexed and you run out of memory.
-A possible solution is to exclude some of omniverse packages that are not used in your project.
-To do so, modify `.vscode/settings.json` and comment out packages under the key `"python.analysis.extraPaths"`
-Some examples of packages that can likely be excluded are:
+## 作为 Omniverse 扩展加载（可选）
 
-```json
-"<path-to-isaac-sim>/extscache/omni.anim.*"         // Animation packages
-"<path-to-isaac-sim>/extscache/omni.kit.*"          // Kit UI tools
-"<path-to-isaac-sim>/extscache/omni.graph.*"        // Graph UI tools
-"<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
-...
+1. 打开 `Window` → `Extensions`。
+2. 在扩展管理器设置中加入本仓库的 `source` 目录。
+3. 同时加入 Isaac Lab 的 `IsaacLab/source` 目录。
+4. 刷新后，在 `Third Party` 分类中启用 `essay2608`。
+
+示例界面扩展位于：
+`source/essay2608/essay2608/ui_extension_example.py`。
+
+## 代码格式与检查
+
+仓库提供 pre-commit 配置：
+
+```bash
+pip install pre-commit
+pre-commit run --all-files
 ```
+
+最低验收命令：
+
+```bash
+conda run -n env_isaaclab python -m pytest -q
+conda run -n env_isaaclab python -m compileall -q \
+  source/essay2608/essay2608 scripts tests
+git diff --check
+```
+
+## 科学声明边界
+
+本仓库复现的是自定义 Isaac Lab 任务中的相对几何、动态参考系和关系生命周期机制，
+不是 TAPAS、MiDiGaP、RLBench、DynaBench 或论文完整黎曼策略的逐项复现。
+双臂环境当前仍使用几何附着，不能作为接触丰富的真实抓取证据。所有论文表述均应以
+[夜间研发最终报告](docs/overnight_final_report.md) 中的“支持与不支持”边界为准。

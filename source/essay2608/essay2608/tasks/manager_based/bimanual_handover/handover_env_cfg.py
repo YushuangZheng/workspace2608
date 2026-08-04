@@ -1,6 +1,7 @@
 """OpenArm bimanual handover environment for dynamic cross-arm coordination."""
 
 import isaaclab.sim as sim_utils
+import torch
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
@@ -16,9 +17,46 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
+from isaaclab.utils import math as math_utils
 
 import isaaclab.envs.mdp as mdp
 from isaaclab_assets.robots.franka import FRANKA_PANDA_HIGH_PD_CFG
+
+
+TARGET_POSE = (0.48, -0.20, 0.22, 1.0, 0.0, 0.0, 0.0)
+
+
+def ee_pose(env, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Return the configured Cartesian tool pose in local environment coordinates."""
+
+    robot = env.scene[asset_cfg.name]
+    body_id = asset_cfg.body_ids[0]
+    orientation = robot.data.body_quat_w[:, body_id]
+    offset = torch.tensor((0.0, 0.0, 0.107), device=robot.device).repeat(env.num_envs, 1)
+    position = robot.data.body_pos_w[:, body_id] + math_utils.quat_apply(orientation, offset)
+    position -= env.scene.env_origins
+    return torch.cat((position, orientation), dim=-1)
+
+
+def object_pose(env, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Return object pose in local environment coordinates."""
+
+    asset = env.scene[asset_cfg.name]
+    position = asset.data.root_pos_w - env.scene.env_origins
+    return torch.cat((position, asset.data.root_quat_w), dim=-1)
+
+
+def target_pose(env) -> torch.Tensor:
+    """Return the fixed placement target in local environment coordinates."""
+
+    return torch.tensor(TARGET_POSE, device=env.device).repeat(env.num_envs, 1)
+
+
+def gripper_state(env, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Return both measured finger joint positions for one gripper."""
+
+    robot = env.scene[asset_cfg.name]
+    return robot.data.joint_pos[:, asset_cfg.joint_ids]
 
 
 @configclass
@@ -106,14 +144,36 @@ class ActionsCfg:
 
 @configclass
 class ObservationsCfg:
-    """Low-dimensional proprioceptive observations used for diagnostics."""
+    """Explicit geometric and measured-gripper handover observations."""
 
     @configclass
     class PolicyCfg(ObsGroup):
-        left_joint_pos = ObsTerm(func=mdp.joint_pos_rel, params={"asset_cfg": SceneEntityCfg("left_robot")})
-        left_joint_vel = ObsTerm(func=mdp.joint_vel_rel, params={"asset_cfg": SceneEntityCfg("left_robot")})
-        right_joint_pos = ObsTerm(func=mdp.joint_pos_rel, params={"asset_cfg": SceneEntityCfg("right_robot")})
-        right_joint_vel = ObsTerm(func=mdp.joint_vel_rel, params={"asset_cfg": SceneEntityCfg("right_robot")})
+        left_ee_pose = ObsTerm(
+            func=ee_pose,
+            params={"asset_cfg": SceneEntityCfg("left_robot", body_names=["panda_hand"])},
+        )
+        right_ee_pose = ObsTerm(
+            func=ee_pose,
+            params={"asset_cfg": SceneEntityCfg("right_robot", body_names=["panda_hand"])},
+        )
+        object_pose = ObsTerm(func=object_pose, params={"asset_cfg": SceneEntityCfg("object")})
+        target_pose = ObsTerm(func=target_pose)
+        left_gripper_state = ObsTerm(
+            func=gripper_state,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "left_robot", joint_names=["panda_finger_joint.*"]
+                )
+            },
+        )
+        right_gripper_state = ObsTerm(
+            func=gripper_state,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "right_robot", joint_names=["panda_finger_joint.*"]
+                )
+            },
+        )
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self) -> None:
