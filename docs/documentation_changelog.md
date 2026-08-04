@@ -1,5 +1,13 @@
 # 文档更新记录
 
+## 2026-08-04：RelationDynaMAC 恢复研究 Phase 0
+
+- 新增 `docs/trace_visual_audit.md`，记录十个固定代表性 trial 的轨迹重建视频、失败分类复核和证据边界；
+- 视频与 manifest 写入新的 `outputs/recovery_scientific/trace_audit_v1`，冻结单臂结果保持只读；
+- 审计发现冻结 v1 在环境终止 trial 中缺少动作后的终端观测。新评测 schema 已把终端快照与 action-aligned 序列分开持久化，避免添加没有对应动作的伪 step；
+- 十个样本的 failure taxonomy 语义均一致；Relation 空抓旧 NPZ 的最后观测与 JSON 终端误差不对齐，已在文档和 manifest 中显式保留，未回写冻结结果；
+- 新增渲染、active-frame 重建、终端对齐和失败语义回归测试。全部文档继续使用中文，代码字段保持原始英文标识。
+
 ## 2026-08-04：全部用户可见研究记录统一为中文
 
 ### 更新目的

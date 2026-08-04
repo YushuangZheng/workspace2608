@@ -45,6 +45,9 @@ class EpisodeTrace:
     relation_confidence: list[float] = field(default_factory=list)
     gripper_opening_m: list[float] = field(default_factory=list)
     gripper_velocity_m_s: list[float] = field(default_factory=list)
+    terminal_ee_position: np.ndarray | None = None
+    terminal_object_position: np.ndarray | None = None
+    terminal_target_position: np.ndarray | None = None
 
     def append(
         self,
@@ -85,6 +88,13 @@ class EpisodeTrace:
             if observation.gripper_velocity_m_s is not None
             else float("nan")
         )
+
+    def set_terminal_observation(self, observation) -> None:
+        """Persist the post-step terminal snapshot separately from action-aligned samples."""
+
+        self.terminal_ee_position = np.asarray(observation.ee_pose[:3], dtype=np.float64).copy()
+        self.terminal_object_position = np.asarray(observation.object_pose[:3], dtype=np.float64).copy()
+        self.terminal_target_position = np.asarray(observation.target_pose[:3], dtype=np.float64).copy()
 
     @staticmethod
     def _jumps(positions: np.ndarray) -> np.ndarray:
@@ -184,6 +194,10 @@ class EpisodeTrace:
 
         final_object_position = np.asarray(final_object_position, dtype=np.float64)
         final_target_position = np.asarray(final_target_position, dtype=np.float64)
+        # Keep metrics and the separately persisted terminal snapshot aligned,
+        # including trials that terminate between two action-aligned samples.
+        self.terminal_object_position = final_object_position.copy()
+        self.terminal_target_position = final_target_position.copy()
         final_xy_error = float(
             np.linalg.norm(final_object_position[:2] - final_target_position[:2])
         )
@@ -252,6 +266,8 @@ class EpisodeTrace:
             "final_xy_error_m": final_xy_error,
             "final_error_3d_m": final_error_3d,
             "final_object_height_m": float(final_object_position[2]),
+            "final_object_position_m": final_object_position.tolist(),
+            "final_target_position_m": final_target_position.tolist(),
             "support_height_error_m": support_height_error,
             "object_on_support": on_support,
             "gripper_released": released,
@@ -317,7 +333,7 @@ class EpisodeTrace:
     def arrays(self) -> dict[str, np.ndarray]:
         """Return numeric arrays suitable for NPZ persistence."""
 
-        return {
+        arrays = {
             "ee_position": np.asarray(self.ee_positions, dtype=np.float32),
             "object_position": np.asarray(self.object_positions, dtype=np.float32),
             "target_position": np.asarray(self.target_positions, dtype=np.float32),
@@ -338,3 +354,10 @@ class EpisodeTrace:
                 dtype=np.float32,
             ),
         }
+        if self.terminal_object_position is not None:
+            arrays["terminal_object_position"] = np.asarray(self.terminal_object_position, dtype=np.float32)
+        if self.terminal_target_position is not None:
+            arrays["terminal_target_position"] = np.asarray(self.terminal_target_position, dtype=np.float32)
+        if self.terminal_ee_position is not None:
+            arrays["terminal_ee_position"] = np.asarray(self.terminal_ee_position, dtype=np.float32)
+        return arrays

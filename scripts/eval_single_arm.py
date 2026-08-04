@@ -732,6 +732,7 @@ def run_worker() -> None:
     # the pre-step error on termination, making terminal trials one control step
     # stale.  The configured horizon ends before the normal time-limit reset.
     final_observation = numpy_observation(env)
+    trace.set_terminal_observation(final_observation)
     support_height = float(
         np.median(
             np.concatenate(

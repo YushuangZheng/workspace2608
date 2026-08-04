@@ -47,6 +47,19 @@ def test_semantic_success_ignores_fixed_target_height_residual() -> None:
     assert metrics["xy_success_sensitivity"]["0.010000"]
 
 
+def test_terminal_snapshot_is_separate_from_action_aligned_trace() -> None:
+    trace = EpisodeTrace(control_dt=0.02)
+    current = observation()
+    action = np.asarray([0.55, 0.2, 0.23, 0.0, 1.0, 0.0, 0.0, 1.0])
+    trace.append(current, action, {"phase": 9}, inference_ms=0.1, perturbation_active=False)
+    terminal = observation(object_position=(0.70, -0.1, 0.021))
+    trace.set_terminal_observation(terminal)
+    arrays = trace.arrays()
+    assert arrays["object_position"].shape == (1, 3)
+    assert arrays["terminal_object_position"].shape == (3,)
+    assert np.allclose(arrays["terminal_object_position"], terminal.object_pose[:3])
+
+
 class _JumpPolicy(PhaseClockPolicy):
     def fit(self, demonstrations) -> None:
         del demonstrations
