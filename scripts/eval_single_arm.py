@@ -23,6 +23,8 @@ GEOMETRIC_METHODS = (
     "mask_only",
     "full_dynamac",
     "relation_dynamac",
+    "relation_dynamac_recovery",
+    "oracle_relation_recovery",
 )
 METHODS = (*GEOMETRIC_METHODS, "diffusion_policy")
 CONDITIONS = (
@@ -34,6 +36,13 @@ CONDITIONS = (
     "arm_offset",
     "drop_after_grasp",
     "close_without_grasp",
+    "drop_lift_early",
+    "drop_transport_middle",
+    "drop_before_lower",
+    "miss_small_shift",
+    "miss_large_shift",
+    "edge_grasp",
+    "normal_no_failure",
 )
 TASK_ID = "Essay2608-Dynamic-Pick-Place-v0"
 
@@ -77,7 +86,7 @@ AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 
 
-EVALUATION_SCHEMA_VERSION = 5
+EVALUATION_SCHEMA_VERSION = 7
 
 
 @lru_cache(maxsize=1)
@@ -90,6 +99,18 @@ def calibrated_relation_configuration() -> dict:
     demonstrations, _ = load_dataset(args.data_dir, verify_hashes=True)
     config, _ = calibrate_relation_estimator(demonstrations)
     return config.as_dict()
+
+
+@lru_cache(maxsize=1)
+def calibrated_recovery_configuration() -> dict:
+    """Load the frozen-data regrasp alignment once in the controller process."""
+
+    from essay2608.data.dataset import load_dataset
+    from essay2608.policy.recovery import calibrate_recovery_config
+
+    demonstrations, _ = load_dataset(args.data_dir, verify_hashes=True)
+    config, diagnostics = calibrate_recovery_config(demonstrations)
+    return {**config.as_dict(), "calibration_diagnostics": diagnostics}
 
 
 def policy_configuration(method: str) -> dict:
@@ -140,6 +161,26 @@ def policy_configuration(method: str) -> dict:
             "virtual_frame": "captured_on_connected_transition",
             "frame_activation": "mask_while_connected_virtual_in_phase_4",
         },
+        "relation_dynamac_recovery": {
+            **common,
+            "estimator": calibrated_relation_configuration(),
+            "actual_gripper_joint_feedback": True,
+            "contact_sensor_available": False,
+            "virtual_frame": "captured_on_connected_transition",
+            "frame_activation": "mask_while_connected_virtual_in_phase_4",
+            "recovery": calibrated_recovery_configuration(),
+        },
+        "oracle_relation_recovery": {
+            **common,
+            "relation_input": "current_privileged_geometry_and_gripper_occupancy",
+            "future_information": False,
+            "target_action_from_oracle": False,
+            "occupied_opening_range_m": [0.020, 0.063],
+            "maximum_ee_object_distance_m": 0.040,
+            "virtual_frame": "captured_on_oracle_connected_transition",
+            "frame_activation": "mask_while_oracle_connected_virtual_in_phase_4",
+            "recovery": calibrated_recovery_configuration(),
+        },
         "diffusion_policy": {
             **common,
             "execution_horizon": 4,
@@ -149,51 +190,12 @@ def policy_configuration(method: str) -> dict:
     return configurations[method]
 
 
-def perturbation_configuration(condition: str) -> dict:
+def perturbation_configuration(condition: str, seed: int) -> dict:
     """Expose deterministic perturbation magnitudes and trigger rules."""
 
-    configurations = {
-        "static": {"kind": "none"},
-        "smooth_object": {
-            "shift_m": [0.0, 0.08, 0.0],
-            "trigger_phase": 1,
-            "ramp_phase_steps": [4, 24],
-        },
-        "sudden_object": {
-            "shift_m": [0.0, 0.08, 0.0],
-            "trigger_phase": 1,
-            "trigger_phase_step": 10,
-        },
-        "smooth_target": {
-            "shift_m": [0.0, -0.10, 0.0],
-            "trigger_phase": 4,
-            "ramp_phase_steps": [4, 24],
-        },
-        "sudden_target": {
-            "shift_m": [0.0, -0.10, 0.0],
-            "trigger_phase": 4,
-            "trigger_phase_step": 10,
-        },
-        "arm_offset": {
-            "shift_m": [0.0, 0.06, 0.0],
-            "active_phase": 5,
-            "active_phase_steps": [5, 25],
-        },
-        "drop_after_grasp": {
-            "shift_m": [0.0, 0.18, 0.0],
-            "trigger_phase": 5,
-            "trigger_phase_step": 10,
-            "place_on_support": True,
-            "gripper_command_unchanged": True,
-        },
-        "close_without_grasp": {
-            "shift_m": [0.0, -0.18, 0.0],
-            "trigger_phase": 3,
-            "place_on_support": True,
-            "gripper_command_unchanged": True,
-        },
-    }
-    return configurations[condition]
+    from essay2608.eval.perturbations import perturbation_parameters
+
+    return perturbation_parameters(condition, seed)
 
 
 def sha256_file(path: Path) -> str:
@@ -255,7 +257,7 @@ def experiment_fingerprint(method: str, condition: str, seed: int) -> tuple[str,
         "method": method,
         "policy_config": policy_configuration(method),
         "condition": condition,
-        "perturbation_config": perturbation_configuration(condition),
+        "perturbation_config": perturbation_configuration(condition, seed),
         "seed": seed,
         "max_steps": args.max_steps,
         "legacy_success_threshold_m": args.legacy_success_threshold,
@@ -351,6 +353,12 @@ def aggregate_trials(trials: list[dict]) -> dict:
     import numpy as np
 
     summary = {}
+    baseline_condition = "normal_no_failure" if "normal_no_failure" in args.conditions else "static"
+    baseline_paths = {
+        (trial.get("method"), trial.get("seed")): trial["metrics"]["path_length_m"]
+        for trial in trials
+        if trial.get("condition") == baseline_condition and "metrics" in trial
+    }
     for method_index, method in enumerate(args.methods):
         summary[method] = {}
         for condition_index, condition in enumerate(args.conditions):
@@ -380,6 +388,16 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 for item in metrics
                 if item["post_event_connection_loss_delay_s"] is not None
             ]
+            recovery_times = [
+                item["time_to_recover_s"]
+                for item in metrics
+                if item.get("time_to_recover_s") is not None
+            ]
+            extra_paths = [
+                item["metrics"]["path_length_m"] - baseline_paths[(method, item["seed"])]
+                for item in selected
+                if (method, item["seed"]) in baseline_paths
+            ]
             interval_seed = 2608 + 100 * method_index + condition_index
             sensitivity_keys = sorted(metrics[0]["xy_success_sensitivity"])
             phase_keys = sorted(metrics[0]["phase_path_length_m"], key=int)
@@ -400,6 +418,11 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 "path_length_m_statistics": bootstrap_mean_interval(
                     [item["path_length_m"] for item in metrics], interval_seed + 1000
                 ),
+                "mean_extra_path_length_m": float(np.mean(extra_paths)) if extra_paths else None,
+                "extra_path_length_m_statistics": bootstrap_mean_interval(
+                    extra_paths,
+                    interval_seed + 1500,
+                ),
                 "mean_phase_path_length_m": {
                     phase: float(
                         np.mean([item["phase_path_length_m"][phase] for item in metrics])
@@ -416,6 +439,19 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 "connection_detection_rate": float(np.mean([item["connection_detected"] for item in metrics])),
                 "recovery_rate": float(np.mean(recovery)) if recovery else None,
                 "recovery_rate_ci95_wilson": wilson_interval(sum(bool(value) for value in recovery), len(recovery)),
+                "recovery_trigger_rate": float(
+                    np.mean([item.get("recovery_triggered", False) for item in metrics])
+                ),
+                "false_recovery_trigger_rate": float(
+                    np.mean([item.get("false_recovery_trigger", False) for item in metrics])
+                ),
+                "mean_time_to_recover_s": float(np.mean(recovery_times)) if recovery_times else None,
+                "mean_regrasp_attempt_count": float(
+                    np.mean([item.get("regrasp_attempt_count", 0) for item in metrics])
+                ),
+                "recovery_failure_rate": float(
+                    np.mean([item.get("recovery_failed", False) for item in metrics])
+                ),
                 "mean_mask_false_positive_rate": float(
                     np.mean([item["mask_false_positive_rate"] for item in metrics])
                 ),
@@ -633,28 +669,39 @@ from essay2608.policy import (
     DiffusionActionPolicy,
     DynaMACPolicy,
     MaskOnlyPolicy,
+    OracleRelationRecoveryPolicy,
     RelationDynaMACPolicy,
+    RelationDynaMACRecoveryPolicy,
     SkillDynaMACPolicy,
     StaticMultiStreamPolicy,
     WorldGaussianPolicy,
+    privileged_grasp_relation,
 )
 from essay2608.policy.base import PolicyObservation
 from isaaclab_tasks.utils import parse_env_cfg
 
 
-def numpy_observation(env: gym.Env) -> PolicyObservation:
+def numpy_observation(env: gym.Env, privileged_contact: bool = False) -> PolicyObservation:
     """Read the first environment into the policy's NumPy observation."""
 
     ee_pose, object_pose, target_pose = get_scene_poses(env)
     robot = env.unwrapped.scene["robot"]
     gripper_opening = float(torch.sum(robot.data.joint_pos[0, -2:]).item())
     gripper_velocity = float(torch.sum(robot.data.joint_vel[0, -2:]).item())
+    object_contact = None
+    if privileged_contact:
+        object_contact = privileged_grasp_relation(
+            ee_pose[0].detach().cpu().numpy(),
+            object_pose[0].detach().cpu().numpy(),
+            gripper_opening,
+        )
     return PolicyObservation(
         ee_pose=ee_pose[0].detach().cpu().numpy().astype(np.float64),
         object_pose=object_pose[0].detach().cpu().numpy().astype(np.float64),
         target_pose=target_pose[0].detach().cpu().numpy().astype(np.float64),
         gripper_opening_m=gripper_opening,
         gripper_velocity_m_s=gripper_velocity,
+        object_contact=object_contact,
     )
 
 
@@ -670,6 +717,8 @@ def make_policy(name: str):
         "mask_only": MaskOnlyPolicy,
         "full_dynamac": DynaMACPolicy,
         "relation_dynamac": RelationDynaMACPolicy,
+        "relation_dynamac_recovery": RelationDynaMACRecoveryPolicy,
+        "oracle_relation_recovery": OracleRelationRecoveryPolicy,
     }[name]()
 
 
@@ -690,9 +739,10 @@ def run_worker() -> None:
     env.reset(seed=args.worker_seed)
     control_dt = env_cfg.sim.dt * env_cfg.decimation
 
-    observation = numpy_observation(env)
+    uses_oracle = args.worker_method == "oracle_relation_recovery"
+    observation = numpy_observation(env, privileged_contact=uses_oracle)
     policy.reset(observation)
-    perturbation = PerturbationController(args.worker_condition, env)
+    perturbation = PerturbationController(args.worker_condition, env, seed=args.worker_seed)
     trace = EpisodeTrace(control_dt=control_dt)
     environment_done = False
 
@@ -702,7 +752,7 @@ def run_worker() -> None:
         event_started_before = perturbation.event_started
         scene_status = perturbation.update_scene(phase_before, phase_step_before)
         perturbation_event = perturbation.event_started and not event_started_before
-        observation = numpy_observation(env)
+        observation = numpy_observation(env, privileged_contact=uses_oracle)
 
         start = time.perf_counter()
         policy_step = policy.act(observation)
@@ -725,13 +775,16 @@ def run_worker() -> None:
         if bool((terminated | truncated).any().item()):
             environment_done = True
             break
+        if getattr(policy, "recovery_failed", False):
+            break
         if policy.complete:
             break
 
     # Always read the post-step scene state.  The previous implementation used
     # the pre-step error on termination, making terminal trials one control step
     # stale.  The configured horizon ends before the normal time-limit reset.
-    final_observation = numpy_observation(env)
+    final_observation = numpy_observation(env, privileged_contact=uses_oracle)
+    trace.set_terminal_observation(final_observation)
     support_height = float(
         np.median(
             np.concatenate(
@@ -761,7 +814,13 @@ def run_worker() -> None:
         environment_done=environment_done,
         forced_transitions=policy.forced_transitions,
         perturbation_started=perturbation.event_started,
-        relation_loss_expected=args.worker_condition == "drop_after_grasp",
+        relation_loss_expected=args.worker_condition
+        in {
+            "drop_after_grasp",
+            "drop_lift_early",
+            "drop_transport_middle",
+            "drop_before_lower",
+        },
     )
     fingerprint, fingerprint_payload = experiment_fingerprint(
         args.worker_method, args.worker_condition, args.worker_seed

@@ -16,7 +16,130 @@ CONDITIONS = (
     "arm_offset",
     "drop_after_grasp",
     "close_without_grasp",
+    "drop_lift_early",
+    "drop_transport_middle",
+    "drop_before_lower",
+    "miss_small_shift",
+    "miss_large_shift",
+    "edge_grasp",
+    "normal_no_failure",
 )
+
+RECOVERY_CONDITIONS = (
+    "drop_lift_early",
+    "drop_transport_middle",
+    "drop_before_lower",
+    "miss_small_shift",
+    "miss_large_shift",
+    "edge_grasp",
+    "normal_no_failure",
+)
+
+
+def recovery_condition_parameters(condition: str, seed: int) -> dict:
+    """Return preregistered seed-deterministic parameters for one recovery condition."""
+
+    if condition not in RECOVERY_CONDITIONS:
+        raise ValueError(f"Not a recovery-protocol condition: {condition}")
+    directions = (
+        ("front", np.asarray([1.0, 0.0, 0.0])),
+        ("back", np.asarray([-1.0, 0.0, 0.0])),
+        ("left", np.asarray([0.0, 1.0, 0.0])),
+        ("right", np.asarray([0.0, -1.0, 0.0])),
+    )
+    direction_name, direction = directions[(int(seed) // 4) % len(directions)]
+    common = {
+        "condition": condition,
+        "seed": int(seed),
+        "direction": direction_name,
+        "place_on_support": True,
+    }
+    drop_triggers = {
+        "drop_lift_early": (4, 8),
+        "drop_transport_middle": (5, 12),
+        "drop_before_lower": (5, 22),
+    }
+    if condition in drop_triggers:
+        distance = (0.05, 0.10, 0.15, 0.20)[int(seed) % 4]
+        phase, phase_step = drop_triggers[condition]
+        return {
+            **common,
+            "kind": "drop",
+            "trigger_phase": phase,
+            "trigger_phase_step": phase_step,
+            "distance_m": distance,
+            "shift_m": (direction * distance).tolist(),
+            "force_open_steps": 3 if int(seed) % 2 else 0,
+        }
+    if condition == "normal_no_failure":
+        return {
+            "condition": condition,
+            "seed": int(seed),
+            "kind": "none",
+        }
+    distance = {
+        "miss_small_shift": 0.030,
+        "miss_large_shift": 0.100,
+        "edge_grasp": 0.018,
+    }[condition]
+    return {
+        **common,
+        "kind": "miss",
+        "trigger_phase": 3,
+        "trigger_phase_step": 0,
+        "distance_m": distance,
+        "shift_m": (direction * distance).tolist(),
+        "edge_case": condition == "edge_grasp",
+    }
+
+
+def perturbation_parameters(condition: str, seed: int) -> dict:
+    """Expose every old and preregistered perturbation parameter for fingerprinting."""
+
+    if condition in RECOVERY_CONDITIONS:
+        return recovery_condition_parameters(condition, seed)
+    configurations = {
+        "static": {"kind": "none"},
+        "smooth_object": {
+            "shift_m": [0.0, 0.08, 0.0],
+            "trigger_phase": 1,
+            "ramp_phase_steps": [4, 24],
+        },
+        "sudden_object": {
+            "shift_m": [0.0, 0.08, 0.0],
+            "trigger_phase": 1,
+            "trigger_phase_step": 10,
+        },
+        "smooth_target": {
+            "shift_m": [0.0, -0.10, 0.0],
+            "trigger_phase": 4,
+            "ramp_phase_steps": [4, 24],
+        },
+        "sudden_target": {
+            "shift_m": [0.0, -0.10, 0.0],
+            "trigger_phase": 4,
+            "trigger_phase_step": 10,
+        },
+        "arm_offset": {
+            "shift_m": [0.0, 0.06, 0.0],
+            "active_phase": 5,
+            "active_phase_steps": [5, 25],
+        },
+        "drop_after_grasp": {
+            "shift_m": [0.0, 0.18, 0.0],
+            "trigger_phase": 5,
+            "trigger_phase_step": 10,
+            "place_on_support": True,
+            "gripper_command_unchanged": True,
+        },
+        "close_without_grasp": {
+            "shift_m": [0.0, -0.18, 0.0],
+            "trigger_phase": 3,
+            "place_on_support": True,
+            "gripper_command_unchanged": True,
+        },
+    }
+    return configurations[condition]
 
 
 @dataclass(frozen=True)
@@ -37,10 +160,12 @@ class PerturbationController:
     drop_shift = np.asarray([0.0, 0.18, 0.0], dtype=np.float64)
     miss_shift = np.asarray([0.0, -0.18, 0.0], dtype=np.float64)
 
-    def __init__(self, condition: str, env) -> None:
+    def __init__(self, condition: str, env, seed: int = 0) -> None:
         if condition not in CONDITIONS:
             raise ValueError(f"Unknown condition: {condition}")
         self.condition = condition
+        self.seed = int(seed)
+        self.parameters = perturbation_parameters(condition, seed)
         self.env = env
         self.object_asset = env.unwrapped.scene["object"]
         self.env_origin = env.unwrapped.scene.env_origins[0].detach().clone()
@@ -52,6 +177,7 @@ class PerturbationController:
         self.event_started = False
         self.event_finished = False
         self.instantaneous_event_applied = False
+        self.force_open_steps_remaining = 0
 
     @staticmethod
     def _smooth_fraction(phase: int, phase_step: int, trigger_phase: int) -> float:
@@ -91,7 +217,19 @@ class PerturbationController:
 
         fraction = 0.0
         shift = np.zeros(3, dtype=np.float64)
-        if self.condition == "smooth_object":
+        if self.condition in RECOVERY_CONDITIONS and self.parameters["kind"] in {"drop", "miss"}:
+            trigger_phase = int(self.parameters["trigger_phase"])
+            trigger_step = int(self.parameters["trigger_phase_step"])
+            should_trigger = phase == trigger_phase and phase_step >= trigger_step
+            if should_trigger and not self.instantaneous_event_applied:
+                shift = np.asarray(self.parameters["shift_m"], dtype=np.float64)
+                self._teleport_object(shift, place_on_support=bool(self.parameters["place_on_support"]))
+                self.force_open_steps_remaining = int(self.parameters.get("force_open_steps", 0))
+                self.instantaneous_event_applied = True
+                self.event_started = True
+                self.event_finished = True
+                fraction = 1.0
+        elif self.condition == "smooth_object":
             fraction = self._smooth_fraction(phase, phase_step, trigger_phase=1)
             shift = self.object_shift
             if phase == 1:
@@ -146,6 +284,9 @@ class PerturbationController:
         """Apply a temporary command offset during transport."""
 
         result = action.copy()
+        if self.force_open_steps_remaining > 0:
+            result[7] = 1.0
+            self.force_open_steps_remaining -= 1
         active = self.condition == "arm_offset" and phase == 5 and 5 <= phase_step < 25
         if active:
             result[:3] += self.arm_shift

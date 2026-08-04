@@ -47,6 +47,21 @@ def test_semantic_success_ignores_fixed_target_height_residual() -> None:
     assert metrics["xy_success_sensitivity"]["0.010000"]
 
 
+def test_terminal_snapshot_is_separate_from_action_aligned_trace() -> None:
+    trace = EpisodeTrace(control_dt=0.02)
+    current = observation()
+    action = np.asarray([0.55, 0.2, 0.23, 0.0, 1.0, 0.0, 0.0, 1.0])
+    trace.append(current, action, {"phase": 9}, inference_ms=0.1, perturbation_active=False)
+    terminal = observation(object_position=(0.70, -0.1, 0.021))
+    trace.set_terminal_observation(terminal)
+    arrays = trace.arrays()
+    assert arrays["object_position"].shape == (1, 3)
+    assert arrays["terminal_object_position"].shape == (3,)
+    assert np.allclose(arrays["terminal_object_position"], terminal.object_pose[:3])
+    assert arrays["active_frames"].tolist() == [""]
+    assert arrays["recovery_state"].tolist() == ["NOT_APPLICABLE"]
+
+
 class _JumpPolicy(PhaseClockPolicy):
     def fit(self, demonstrations) -> None:
         del demonstrations
@@ -96,3 +111,45 @@ def test_phase_path_partition_assigns_jump_to_destination_phase() -> None:
     assert np.isclose(metrics["phase_path_length_m"]["1"], 0.3)
     assert np.isclose(metrics["phase_path_length_m"]["2"], 0.3)
     assert np.isclose(sum(metrics["phase_path_length_m"].values()), metrics["path_length_m"])
+
+
+def test_recovery_metrics_report_trigger_resume_and_attempts() -> None:
+    trace = EpisodeTrace(control_dt=0.02)
+    current = observation()
+    action = np.asarray([0.55, 0.2, 0.23, 0.0, 1.0, 0.0, 0.0, 1.0])
+    for state, trigger, attempts in (
+        ("NORMAL", "NONE", 0),
+        ("LOSS_DETECTED", "LOSS", 0),
+        ("SAFE_RETREAT", "LOSS", 0),
+        ("REGRASP", "LOSS", 1),
+        ("RESUME_TASK", "LOSS", 1),
+        ("NORMAL", "NONE", 0),
+    ):
+        trace.append(
+            current,
+            action,
+            {
+                "phase": 9,
+                "recovery_state": state,
+                "recovery_trigger": trigger,
+                "regrasp_attempts": attempts,
+            },
+            inference_ms=0.1,
+            perturbation_active=False,
+        )
+    metrics = trace.summary(
+        final_object_position=current.object_pose[:3],
+        final_target_position=current.target_pose[:3],
+        criteria=SuccessCriteria(stability_window_steps=5),
+        policy_complete=True,
+        environment_done=False,
+        forced_transitions=0,
+        perturbation_started=True,
+    )
+    assert metrics["recovery_triggered"]
+    assert metrics["recovery_trigger"] == "LOSS"
+    assert metrics["recovery_start_step"] == 1
+    assert metrics["recovery_resume_step"] == 4
+    assert np.isclose(metrics["time_to_recover_s"], 0.06)
+    assert metrics["regrasp_attempt_count"] == 1
+    assert not metrics["false_recovery_trigger"]

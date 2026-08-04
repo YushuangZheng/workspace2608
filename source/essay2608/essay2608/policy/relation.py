@@ -42,18 +42,23 @@ class RelationEstimatorConfig:
     occupied_opening_min_m: float = 0.020
     occupied_opening_nominal_m: float = 0.045
     occupied_opening_max_m: float = 0.063
+    occupied_opening_plateau_min_m: float | None = None
+    occupied_opening_plateau_max_m: float | None = None
     release_opening_m: float = 0.071
     maximum_gripper_speed_m_s: float = 0.025
     maximum_relative_linear_speed_m_s: float = 0.025
     maximum_relative_angular_speed_rad_s: float = 0.035
     maximum_relative_position_rms_std_m: float = 0.0005
     maximum_relative_orientation_span_rad: float = 0.005
+    maximum_object_distance_m: float | None = None
     minimum_comotion_speed_m_s: float = 0.03
     minimum_velocity_correlation: float = 0.80
     lost_relative_linear_speed_m_s: float = 0.075
     lost_relative_angular_speed_rad_s: float = 0.105
     lost_relative_position_rms_std_m: float = 0.002
     lost_relative_orientation_span_rad: float = 0.03
+    lost_object_distance_m: float | None = None
+    kinematic_loss_requires_window_break: bool = False
     establish_confidence: float = 0.65
     cancel_candidate_confidence: float = 0.40
     lost_confidence: float = 0.70
@@ -63,8 +68,43 @@ class RelationEstimatorConfig:
     confidence_ema_alpha: float = 0.30
     calibration_source: str = "defaults"
 
+    def __post_init__(self) -> None:
+        plateau_pair = (
+            self.occupied_opening_plateau_min_m,
+            self.occupied_opening_plateau_max_m,
+        )
+        if (plateau_pair[0] is None) != (plateau_pair[1] is None):
+            raise ValueError("夹爪占用平台上下界必须同时设置或同时省略")
+        if plateau_pair[0] is not None and plateau_pair[1] is not None:
+            if not (
+                self.occupied_opening_min_m
+                < plateau_pair[0]
+                <= self.occupied_opening_nominal_m
+                <= plateau_pair[1]
+                < self.occupied_opening_max_m
+            ):
+                raise ValueError("夹爪占用平台必须位于占用外边界内并包含标称开度")
+        distance_pair = (
+            self.maximum_object_distance_m,
+            self.lost_object_distance_m,
+        )
+        if (distance_pair[0] is None) != (distance_pair[1] is None):
+            raise ValueError("建立与解除的物体距离阈值必须同时设置或同时省略")
+        if (
+            distance_pair[0] is not None
+            and distance_pair[1] is not None
+            and distance_pair[1] <= distance_pair[0]
+        ):
+            raise ValueError("解除距离阈值必须大于建立距离阈值")
+
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, values: dict[str, Any]) -> RelationEstimatorConfig:
+        """Load a persisted estimator configuration with full validation."""
+
+        return cls(**values)
 
 
 @dataclass(frozen=True)
@@ -370,14 +410,24 @@ class OnlineRelationEstimator:
     def _scores(self, features: dict[str, Any]) -> tuple[float, float, dict[str, float]]:
         config = self.config
         opening = features["gripper_opening_m"]
+        plateau_min = (
+            config.occupied_opening_nominal_m
+            if config.occupied_opening_plateau_min_m is None
+            else config.occupied_opening_plateau_min_m
+        )
+        plateau_max = (
+            config.occupied_opening_nominal_m
+            if config.occupied_opening_plateau_max_m is None
+            else config.occupied_opening_plateau_max_m
+        )
         lower_occupancy = _ramp(
             opening,
             config.occupied_opening_min_m,
-            config.occupied_opening_nominal_m,
+            plateau_min,
         )
         upper_occupancy = _inverse_ramp(
             opening,
-            config.occupied_opening_nominal_m,
+            plateau_max,
             config.occupied_opening_max_m,
         )
         occupancy = min(lower_occupancy, upper_occupancy)
@@ -421,6 +471,13 @@ class OnlineRelationEstimator:
                 config.minimum_comotion_speed_m_s,
             ),
         }
+        if config.maximum_object_distance_m is not None:
+            distance = float(np.linalg.norm(features["relative_position_m"]))
+            components["proximity"] = _inverse_ramp(
+                distance,
+                config.maximum_object_distance_m * 0.8,
+                config.maximum_object_distance_m,
+            )
         if not features["window_ready"]:
             connection_score = 0.0
         else:
@@ -439,27 +496,46 @@ class OnlineRelationEstimator:
                 config.occupied_opening_min_m * 0.25,
                 config.occupied_opening_min_m,
             ),
-            "relative_linear_break": _ramp(
+        }
+        instantaneous_break = max(
+            _ramp(
                 features["relative_linear_speed_m_s"],
                 config.maximum_relative_linear_speed_m_s,
                 config.lost_relative_linear_speed_m_s,
             ),
-            "relative_angular_break": _ramp(
+            _ramp(
                 features["relative_angular_speed_rad_s"],
                 config.maximum_relative_angular_speed_rad_s,
                 config.lost_relative_angular_speed_rad_s,
             ),
-            "relative_position_break": _ramp(
+        )
+        window_break = max(
+            _ramp(
                 features["relative_position_rms_std_m"],
                 config.maximum_relative_position_rms_std_m,
                 config.lost_relative_position_rms_std_m,
             ),
-            "relative_orientation_break": _ramp(
+            _ramp(
                 features["relative_orientation_span_rad"],
                 config.maximum_relative_orientation_span_rad,
                 config.lost_relative_orientation_span_rad,
             ),
-        }
+        )
+        if config.kinematic_loss_requires_window_break:
+            loss_components["kinematic_break"] = min(
+                instantaneous_break,
+                window_break,
+            )
+        else:
+            loss_components["instantaneous_kinematic_break"] = instantaneous_break
+            loss_components["window_kinematic_break"] = window_break
+        if config.lost_object_distance_m is not None:
+            distance = float(np.linalg.norm(features["relative_position_m"]))
+            loss_components["distance_break"] = _ramp(
+                distance,
+                config.maximum_object_distance_m,
+                config.lost_object_distance_m,
+            )
         loss_score = float(max(loss_components.values()))
         components.update({f"loss_{name}": value for name, value in loss_components.items()})
         return float(connection_score), loss_score, components

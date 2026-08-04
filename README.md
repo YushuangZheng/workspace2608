@@ -13,6 +13,27 @@
 当前结论、限制与复现入口见：
 
 - [夜间研发最终报告](docs/overnight_final_report.md)
+- [单臂代表性轨迹可视化审计](docs/trace_visual_audit.md)
+- [RelationDynaMAC 单臂恢复图](docs/recovery_graph.md)
+- [Oracle relation 恢复消融](docs/oracle_recovery_ablation.md)
+- [单臂关系恢复实验预注册协议](docs/recovery_protocol.md)
+- [单臂关系触发式恢复正式报告](docs/recovery_final_report.md)
+- [真实物理双臂交接 v1 预注册协议](docs/physical_handover_protocol.md)
+- [真实物理双臂交接 v1 正式报告](docs/physical_handover_report.md)
+- [真实物理双臂交接 v2 预注册协议](docs/physical_handover_protocol_v2.md)
+- [真实物理双臂交接 v2 正式报告](docs/physical_handover_report_v2.md)
+- [真实物理双臂交接 v3 预注册协议](docs/physical_handover_protocol_v3.md)
+- [真实物理双臂交接 v3 正式报告](docs/physical_handover_report_v3.md)
+- [真实物理双臂交接数据集 v1 预注册协议](docs/physical_handover_dataset_protocol.md)
+- [真实物理双臂交接数据集 v1 冻结报告](docs/physical_handover_dataset_report.md)
+- [双臂在线关系生命周期估计器](docs/bimanual_relation_estimator.md)
+- [双臂在线关系估计正式协议 v1](docs/bimanual_relation_protocol.md)
+- [双臂在线关系估计正式报告 v1](docs/bimanual_relation_report_v1.md)
+- [双臂在线关系估计正式协议 v2](docs/bimanual_relation_protocol_v2.md)
+- [双臂在线关系估计正式报告 v2](docs/bimanual_relation_report_v2.md)
+- [双臂关系门控恢复开发记录](docs/bimanual_recovery_development.md)
+- [双臂关系门控恢复正式协议 v1](docs/bimanual_recovery_protocol.md)
+- [双臂关系门控恢复收尾说明](docs/bimanual_recovery_handoff.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)
@@ -63,6 +84,7 @@ python scripts/list_envs.py
 ```text
 Essay2608-Dynamic-Pick-Place-v0
 Essay2608-Bimanual-Handover-v0
+Essay2608-Bimanual-Physical-Handover-v0
 Essay2608-Bimanual-Lift-Tray-v0
 ```
 
@@ -92,6 +114,59 @@ conda run -n env_isaaclab python scripts/eval_single_arm.py --headless \
   arm_offset drop_after_grasp close_without_grasp \
   --seeds 6300 6301 6302 6303 6304 6305 6306 6307 6308 6309 \
   --output_dir outputs/single_arm_scientific/v1
+```
+
+审计预注册的单臂关系恢复正式结果：
+
+```bash
+conda run -n env_isaaclab python scripts/audit_recovery_results.py
+```
+
+复现真实物理双臂交接开发样本：
+
+```bash
+conda run -n env_isaaclab python scripts/eval_physical_handover.py \
+  --headless --seeds 7400 --max_steps 1400 \
+  --output_dir outputs/physical_handover/dev_reproduction
+```
+
+只读审计 v2 正式 JSON/NPZ：
+
+```bash
+conda run -n env_isaaclab python scripts/audit_physical_handover_results.py
+# 审计当前通过严格门槛的 v3：追加 --version v3
+```
+
+只读审计冻结的真实物理交接数据集：
+
+```bash
+conda run -n env_isaaclab python scripts/audit_physical_handover_dataset.py \
+  --data_dir data/handover_physical/v1
+```
+
+复现双臂在线关系估计器的离线开发回放：
+
+```bash
+conda run -n env_isaaclab python scripts/analyze_bimanual_relation_estimator.py \
+  --data_dir data/handover_physical/v1 \
+  --output_dir outputs/bimanual_relation/offline_dev_v4
+```
+
+运行七类真实物理在线关系干预：
+
+```bash
+conda run -n env_isaaclab python scripts/eval_bimanual_relation.py --headless \
+  --conditions normal receiver_miss receiver_delayed giver_releases_early \
+    receiver_grasps_then_loses prolonged_both_hold one_arm_paused \
+  --seeds 8302 --output_dir outputs/bimanual_relation/online_dev_final_seed8302
+```
+
+只读审计双臂在线关系估计 v2 正式结果：
+
+```bash
+conda run -n env_isaaclab python scripts/audit_bimanual_relation_results.py \
+  --protocol configs/experiments/bimanual_relation_protocol_v2.json \
+  --results_dir outputs/bimanual_relation/formal_v2
 ```
 
 验证双臂交接 v2 冻结数据：
@@ -159,5 +234,20 @@ git diff --check
 
 本仓库复现的是自定义 Isaac Lab 任务中的相对几何、动态参考系和关系生命周期机制，
 不是 TAPAS、MiDiGaP、RLBench、DynaBench 或论文完整黎曼策略的逐项复现。
-双臂环境当前仍使用几何附着，不能作为接触丰富的真实抓取证据。所有论文表述均应以
-[夜间研发最终报告](docs/overnight_final_report.md) 中的“支持与不支持”边界为准。
+旧的 `handover_static/v1/v2` 仍使用几何附着，只能作为接口和数据骨架。新增物理任务
+已经产生真实接触关系转移：v1、v2、v3 正式结果依次为 `6/20`、`18/20`、`20/20`。
+v3 达到严格数据采集门槛，并已由独立 seed 冻结 20 条 `handover_physical/v1`；这只证明
+冻结扰动分布上的脚本专家和数据链路，不等于学习策略完成，也不能外推为任意分布上的
+100% 鲁棒。双臂关系估计器已通过七条件、十个未见 seed 的 v2 正式评测。关系门控恢复
+监督层已完成冻结开发验证和正式协议，但 v1 正式矩阵按用户指令在 95/200 条时中止，
+没有 summary、没有执行硬审计，不能声称正式通过。这些结论只分别证明在线关系检测和
+开发阶段恢复机制，不等于完整双臂 DynaMAC 学习策略完成。所有论文表述应同时遵守
+[夜间研发最终报告](docs/overnight_final_report.md)、[v1 正式报告](docs/physical_handover_report.md)、
+[v2 正式报告](docs/physical_handover_report_v2.md)和
+[v3 正式报告](docs/physical_handover_report_v3.md)、
+[物理数据冻结报告](docs/physical_handover_dataset_report.md)和
+[双臂在线关系估计说明](docs/bimanual_relation_estimator.md)、
+[双臂在线关系估计 v1 负结果](docs/bimanual_relation_report_v1.md)与
+[双臂在线关系估计 v2 正式报告](docs/bimanual_relation_report_v2.md)、
+[双臂关系恢复开发记录](docs/bimanual_recovery_development.md)和
+[双臂关系恢复收尾说明](docs/bimanual_recovery_handoff.md)中的声明边界。

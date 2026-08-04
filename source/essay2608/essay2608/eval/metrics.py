@@ -45,6 +45,12 @@ class EpisodeTrace:
     relation_confidence: list[float] = field(default_factory=list)
     gripper_opening_m: list[float] = field(default_factory=list)
     gripper_velocity_m_s: list[float] = field(default_factory=list)
+    terminal_ee_position: np.ndarray | None = None
+    terminal_object_position: np.ndarray | None = None
+    terminal_target_position: np.ndarray | None = None
+    recovery_states: list[str] = field(default_factory=list)
+    recovery_triggers: list[str] = field(default_factory=list)
+    regrasp_attempts: list[int] = field(default_factory=list)
 
     def append(
         self,
@@ -85,6 +91,16 @@ class EpisodeTrace:
             if observation.gripper_velocity_m_s is not None
             else float("nan")
         )
+        self.recovery_states.append(str(diagnostics.get("recovery_state", "NOT_APPLICABLE")))
+        self.recovery_triggers.append(str(diagnostics.get("recovery_trigger", "NONE")))
+        self.regrasp_attempts.append(int(diagnostics.get("regrasp_attempts", 0)))
+
+    def set_terminal_observation(self, observation) -> None:
+        """Persist the post-step terminal snapshot separately from action-aligned samples."""
+
+        self.terminal_ee_position = np.asarray(observation.ee_pose[:3], dtype=np.float64).copy()
+        self.terminal_object_position = np.asarray(observation.object_pose[:3], dtype=np.float64).copy()
+        self.terminal_target_position = np.asarray(observation.target_pose[:3], dtype=np.float64).copy()
 
     @staticmethod
     def _jumps(positions: np.ndarray) -> np.ndarray:
@@ -147,6 +163,22 @@ class EpisodeTrace:
             for index in range(1, len(self.relation_states))
             if self.relation_states[index] != self.relation_states[index - 1]
         ]
+        recovery_transition_steps = [
+            index
+            for index in range(1, len(self.recovery_states))
+            if self.recovery_states[index] != self.recovery_states[index - 1]
+        ]
+        recovery_active = np.asarray(
+            [state not in {"NOT_APPLICABLE", "NORMAL"} for state in self.recovery_states],
+            dtype=bool,
+        )
+        recovery_onsets = np.flatnonzero(recovery_active)
+        recovery_start_step = int(recovery_onsets[0]) if len(recovery_onsets) else None
+        resume_steps = [index for index, state in enumerate(self.recovery_states) if state == "RESUME_TASK"]
+        recovery_resume_step = resume_steps[0] if resume_steps else None
+        recovery_failed = "RECOVERY_FAILED" in self.recovery_states
+        observed_triggers = [trigger for trigger in self.recovery_triggers if trigger != "NONE"]
+        recovery_trigger = observed_triggers[0] if observed_triggers else None
         event_steps = np.flatnonzero(np.asarray(self.perturbation_events, dtype=bool))
         perturbation_event_step = int(event_steps[0]) if len(event_steps) else None
         post_event_loss_step = None
@@ -184,6 +216,10 @@ class EpisodeTrace:
 
         final_object_position = np.asarray(final_object_position, dtype=np.float64)
         final_target_position = np.asarray(final_target_position, dtype=np.float64)
+        # Keep metrics and the separately persisted terminal snapshot aligned,
+        # including trials that terminate between two action-aligned samples.
+        self.terminal_object_position = final_object_position.copy()
+        self.terminal_target_position = final_target_position.copy()
         final_xy_error = float(
             np.linalg.norm(final_object_position[:2] - final_target_position[:2])
         )
@@ -229,6 +265,8 @@ class EpisodeTrace:
             failure_reason = "success"
         elif environment_done:
             failure_reason = "environment_terminated"
+        elif recovery_failed:
+            failure_reason = "recovery_failed"
         elif not policy_complete:
             failure_reason = "policy_incomplete"
         elif not released:
@@ -252,6 +290,8 @@ class EpisodeTrace:
             "final_xy_error_m": final_xy_error,
             "final_error_3d_m": final_error_3d,
             "final_object_height_m": float(final_object_position[2]),
+            "final_object_position_m": final_object_position.tolist(),
+            "final_target_position_m": final_target_position.tolist(),
             "support_height_error_m": support_height_error,
             "object_on_support": on_support,
             "gripper_released": released,
@@ -301,6 +341,19 @@ class EpisodeTrace:
             ),
             "relation_state_transition_steps": relation_transition_steps,
             "maximum_relation_confidence": float(max(self.relation_confidence, default=0.0)),
+            "recovery_triggered": bool(len(recovery_onsets)),
+            "recovery_trigger": recovery_trigger,
+            "recovery_state_transition_steps": recovery_transition_steps,
+            "recovery_start_step": recovery_start_step,
+            "recovery_resume_step": recovery_resume_step,
+            "time_to_recover_s": (
+                (recovery_resume_step - recovery_start_step) * self.control_dt
+                if recovery_start_step is not None and recovery_resume_step is not None
+                else None
+            ),
+            "recovery_failed": recovery_failed,
+            "regrasp_attempt_count": int(max(self.regrasp_attempts, default=0)),
+            "false_recovery_trigger": bool(len(recovery_onsets) and not perturbation_started),
             "perturbation_event_step": perturbation_event_step,
             "post_event_relation_loss_expected": relation_loss_expected,
             "post_event_connection_loss_step": post_event_loss_step,
@@ -317,7 +370,7 @@ class EpisodeTrace:
     def arrays(self) -> dict[str, np.ndarray]:
         """Return numeric arrays suitable for NPZ persistence."""
 
-        return {
+        arrays = {
             "ee_position": np.asarray(self.ee_positions, dtype=np.float32),
             "object_position": np.asarray(self.object_positions, dtype=np.float32),
             "target_position": np.asarray(self.target_positions, dtype=np.float32),
@@ -337,4 +390,15 @@ class EpisodeTrace:
                 self.gripper_velocity_m_s,
                 dtype=np.float32,
             ),
+            "active_frames": np.asarray(["|".join(frames) for frames in self.active_frames], dtype="U256"),
+            "recovery_state": np.asarray(self.recovery_states, dtype="U32"),
+            "recovery_trigger": np.asarray(self.recovery_triggers, dtype="U16"),
+            "regrasp_attempts": np.asarray(self.regrasp_attempts, dtype=np.int64),
         }
+        if self.terminal_object_position is not None:
+            arrays["terminal_object_position"] = np.asarray(self.terminal_object_position, dtype=np.float32)
+        if self.terminal_target_position is not None:
+            arrays["terminal_target_position"] = np.asarray(self.terminal_target_position, dtype=np.float32)
+        if self.terminal_ee_position is not None:
+            arrays["terminal_ee_position"] = np.asarray(self.terminal_ee_position, dtype=np.float32)
+        return arrays

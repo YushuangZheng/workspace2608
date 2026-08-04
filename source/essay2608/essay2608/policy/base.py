@@ -164,7 +164,10 @@ class PhaseClockPolicy(SingleArmPolicy):
         }
         # Reach gating uses the phase endpoint, not the intermediate limited
         # command, so smoothing cannot cause an early phase transition.
-        self._advance_clock(observation, raw_action[:3])
+        if diagnostics.get("pause_task_clock", False):
+            self.total_step += 1
+        else:
+            self._advance_clock(observation, raw_action[:3])
         return PolicyStep(action=action, diagnostics=diagnostics)
 
     @abstractmethod

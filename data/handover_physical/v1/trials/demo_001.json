@@ -1,0 +1,35 @@
+{
+  "task_id": "Essay2608-Bimanual-Physical-Handover-v0",
+  "seed": 8201,
+  "experiment_fingerprint": "a08b763eb6bd0aed9f28761a26d1ee9c9438c931d64b91ad18877da7b66eacfd",
+  "source_sha256": "2e52bf2a0c961e5c79a4ca4a709bcb6416c3cca3e8f6ccf17dcc11339889d31c",
+  "success": true,
+  "failure_reason": "success",
+  "expert_complete": true,
+  "expert_failed": false,
+  "steps": 1115,
+  "relation_sequence": [
+    "none",
+    "left_only",
+    "both",
+    "right_only",
+    "none"
+  ],
+  "both_duration_s": 1.84,
+  "maximum_object_height_m": 0.30590879917144775,
+  "final_object_position_m": [
+    0.4788574278354645,
+    -0.19830994307994843,
+    0.18000006675720215
+  ],
+  "final_target_position_m": [
+    0.47999998927116394,
+    -0.20000000298023224,
+    0.1809999942779541
+  ],
+  "final_xy_error_m": 0.0020400364883244038,
+  "object_on_support": true,
+  "stable": true,
+  "settling_displacement_m": 0.0,
+  "video_requested": false
+}
