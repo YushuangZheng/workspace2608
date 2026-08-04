@@ -1,0 +1,33 @@
+{
+  "protocol": "single_arm_relation_recovery_v1",
+  "status": "preregistered_before_held_out_run",
+  "calibration_demo_seeds": [2608, 2609, 2610, 2611, 2612],
+  "development_seeds": [6400, 6401, 6402],
+  "held_out_test_seeds": [
+    6500, 6501, 6502, 6503, 6504, 6505, 6506, 6507, 6508, 6509,
+    6510, 6511, 6512, 6513, 6514, 6515, 6516, 6517, 6518, 6519
+  ],
+  "methods": [
+    "full_dynamac",
+    "relation_dynamac",
+    "relation_dynamac_recovery",
+    "oracle_relation_recovery"
+  ],
+  "conditions": [
+    "drop_lift_early",
+    "drop_transport_middle",
+    "drop_before_lower",
+    "miss_small_shift",
+    "miss_large_shift",
+    "edge_grasp",
+    "normal_no_failure"
+  ],
+  "drop_distances_m": [0.05, 0.10, 0.15, 0.20],
+  "drop_directions": ["front", "back", "left", "right"],
+  "drop_force_open_steps": [0, 3],
+  "maximum_regrasp_attempts": 2,
+  "maximum_steps": 1000,
+  "success_xy_threshold_m": 0.01,
+  "test_result_threshold_tuning_allowed": false,
+  "output_dir": "outputs/recovery_scientific/v1"
+}

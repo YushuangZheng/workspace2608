@@ -1,5 +1,12 @@
 # 文档更新记录
 
+## 2026-08-04：RelationDynaMAC 恢复研究 Phase 3 预注册
+
+- 新增七个恢复协议条件，drop 覆盖三个任务时点、四个距离、四个方向和两种夹爪行为，miss 覆盖小位移、大位移与边缘抓持；
+- 固定 calibration、development 和 20 个 held-out test seeds，后者在协议冻结前未运行；
+- 新增 `configs/experiments/recovery_protocol_v1.json` 与 `docs/recovery_protocol.md`，固定方法、阈值、最大重抓、指标、失败分类、560-trial 命令和禁止 test 调参规则；
+- 聚合新增相对同 method/seed 正常条件的额外路径统计；所有具体 seed 位移进入实验 fingerprint。
+
 ## 2026-08-04：RelationDynaMAC 恢复研究 Phase 2
 
 - 新增 `OracleRelationRecoveryPolicy`，Oracle 只给恢复图提供当前步 privileged relation，不提供动作或未来信息；

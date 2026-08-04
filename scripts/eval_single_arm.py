@@ -36,6 +36,13 @@ CONDITIONS = (
     "arm_offset",
     "drop_after_grasp",
     "close_without_grasp",
+    "drop_lift_early",
+    "drop_transport_middle",
+    "drop_before_lower",
+    "miss_small_shift",
+    "miss_large_shift",
+    "edge_grasp",
+    "normal_no_failure",
 )
 TASK_ID = "Essay2608-Dynamic-Pick-Place-v0"
 
@@ -79,7 +86,7 @@ AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 
 
-EVALUATION_SCHEMA_VERSION = 6
+EVALUATION_SCHEMA_VERSION = 7
 
 
 @lru_cache(maxsize=1)
@@ -183,51 +190,12 @@ def policy_configuration(method: str) -> dict:
     return configurations[method]
 
 
-def perturbation_configuration(condition: str) -> dict:
+def perturbation_configuration(condition: str, seed: int) -> dict:
     """Expose deterministic perturbation magnitudes and trigger rules."""
 
-    configurations = {
-        "static": {"kind": "none"},
-        "smooth_object": {
-            "shift_m": [0.0, 0.08, 0.0],
-            "trigger_phase": 1,
-            "ramp_phase_steps": [4, 24],
-        },
-        "sudden_object": {
-            "shift_m": [0.0, 0.08, 0.0],
-            "trigger_phase": 1,
-            "trigger_phase_step": 10,
-        },
-        "smooth_target": {
-            "shift_m": [0.0, -0.10, 0.0],
-            "trigger_phase": 4,
-            "ramp_phase_steps": [4, 24],
-        },
-        "sudden_target": {
-            "shift_m": [0.0, -0.10, 0.0],
-            "trigger_phase": 4,
-            "trigger_phase_step": 10,
-        },
-        "arm_offset": {
-            "shift_m": [0.0, 0.06, 0.0],
-            "active_phase": 5,
-            "active_phase_steps": [5, 25],
-        },
-        "drop_after_grasp": {
-            "shift_m": [0.0, 0.18, 0.0],
-            "trigger_phase": 5,
-            "trigger_phase_step": 10,
-            "place_on_support": True,
-            "gripper_command_unchanged": True,
-        },
-        "close_without_grasp": {
-            "shift_m": [0.0, -0.18, 0.0],
-            "trigger_phase": 3,
-            "place_on_support": True,
-            "gripper_command_unchanged": True,
-        },
-    }
-    return configurations[condition]
+    from essay2608.eval.perturbations import perturbation_parameters
+
+    return perturbation_parameters(condition, seed)
 
 
 def sha256_file(path: Path) -> str:
@@ -289,7 +257,7 @@ def experiment_fingerprint(method: str, condition: str, seed: int) -> tuple[str,
         "method": method,
         "policy_config": policy_configuration(method),
         "condition": condition,
-        "perturbation_config": perturbation_configuration(condition),
+        "perturbation_config": perturbation_configuration(condition, seed),
         "seed": seed,
         "max_steps": args.max_steps,
         "legacy_success_threshold_m": args.legacy_success_threshold,
@@ -385,6 +353,12 @@ def aggregate_trials(trials: list[dict]) -> dict:
     import numpy as np
 
     summary = {}
+    baseline_condition = "normal_no_failure" if "normal_no_failure" in args.conditions else "static"
+    baseline_paths = {
+        (trial.get("method"), trial.get("seed")): trial["metrics"]["path_length_m"]
+        for trial in trials
+        if trial.get("condition") == baseline_condition and "metrics" in trial
+    }
     for method_index, method in enumerate(args.methods):
         summary[method] = {}
         for condition_index, condition in enumerate(args.conditions):
@@ -419,6 +393,11 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 for item in metrics
                 if item.get("time_to_recover_s") is not None
             ]
+            extra_paths = [
+                item["metrics"]["path_length_m"] - baseline_paths[(method, item["seed"])]
+                for item in selected
+                if (method, item["seed"]) in baseline_paths
+            ]
             interval_seed = 2608 + 100 * method_index + condition_index
             sensitivity_keys = sorted(metrics[0]["xy_success_sensitivity"])
             phase_keys = sorted(metrics[0]["phase_path_length_m"], key=int)
@@ -438,6 +417,11 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 "mean_path_length_m": float(np.mean([item["path_length_m"] for item in metrics])),
                 "path_length_m_statistics": bootstrap_mean_interval(
                     [item["path_length_m"] for item in metrics], interval_seed + 1000
+                ),
+                "mean_extra_path_length_m": float(np.mean(extra_paths)) if extra_paths else None,
+                "extra_path_length_m_statistics": bootstrap_mean_interval(
+                    extra_paths,
+                    interval_seed + 1500,
                 ),
                 "mean_phase_path_length_m": {
                     phase: float(
@@ -758,7 +742,7 @@ def run_worker() -> None:
     uses_oracle = args.worker_method == "oracle_relation_recovery"
     observation = numpy_observation(env, privileged_contact=uses_oracle)
     policy.reset(observation)
-    perturbation = PerturbationController(args.worker_condition, env)
+    perturbation = PerturbationController(args.worker_condition, env, seed=args.worker_seed)
     trace = EpisodeTrace(control_dt=control_dt)
     environment_done = False
 
@@ -830,7 +814,13 @@ def run_worker() -> None:
         environment_done=environment_done,
         forced_transitions=policy.forced_transitions,
         perturbation_started=perturbation.event_started,
-        relation_loss_expected=args.worker_condition == "drop_after_grasp",
+        relation_loss_expected=args.worker_condition
+        in {
+            "drop_after_grasp",
+            "drop_lift_early",
+            "drop_transport_middle",
+            "drop_before_lower",
+        },
     )
     fingerprint, fingerprint_payload = experiment_fingerprint(
         args.worker_method, args.worker_condition, args.worker_seed
