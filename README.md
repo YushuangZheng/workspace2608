@@ -22,6 +22,7 @@
 - [真实物理双臂交接 v1 正式报告](docs/physical_handover_report.md)
 - [真实物理双臂交接 v2 预注册协议](docs/physical_handover_protocol_v2.md)
 - [真实物理双臂交接 v2 正式报告](docs/physical_handover_report_v2.md)
+- [真实物理双臂交接 v3 预注册协议](docs/physical_handover_protocol_v3.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)
