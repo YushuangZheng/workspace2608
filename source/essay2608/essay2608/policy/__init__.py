@@ -22,6 +22,14 @@ from .relation import (
     calibrate_relation_estimator,
     replay_relation_estimator,
 )
+from .bimanual_relation import (
+    BimanualOnlineRelationEstimator,
+    BimanualRelationEstimate,
+    BimanualRelationEstimatorConfig,
+    BimanualRelationSample,
+    calibrate_bimanual_relation_estimator,
+    replay_bimanual_relation_estimator,
+)
 from .recovery import (
     RecoveryConfig,
     RecoveryDecision,
@@ -41,6 +49,10 @@ __all__ = [
     "MaskOnlyPolicy",
     "OnlineDynaMACPrototype",
     "OnlineRelationEstimator",
+    "BimanualOnlineRelationEstimator",
+    "BimanualRelationEstimate",
+    "BimanualRelationEstimatorConfig",
+    "BimanualRelationSample",
     "OracleRelationRecoveryPolicy",
     "RelationDynaMACPolicy",
     "RelationDynaMACRecoveryPolicy",
@@ -60,5 +72,7 @@ __all__ = [
     "TrayGaussianPolicy",
     "WorldGaussianPolicy",
     "calibrate_relation_estimator",
+    "calibrate_bimanual_relation_estimator",
     "replay_relation_estimator",
+    "replay_bimanual_relation_estimator",
 ]

@@ -48,12 +48,14 @@ class RelationEstimatorConfig:
     maximum_relative_angular_speed_rad_s: float = 0.035
     maximum_relative_position_rms_std_m: float = 0.0005
     maximum_relative_orientation_span_rad: float = 0.005
+    maximum_object_distance_m: float | None = None
     minimum_comotion_speed_m_s: float = 0.03
     minimum_velocity_correlation: float = 0.80
     lost_relative_linear_speed_m_s: float = 0.075
     lost_relative_angular_speed_rad_s: float = 0.105
     lost_relative_position_rms_std_m: float = 0.002
     lost_relative_orientation_span_rad: float = 0.03
+    lost_object_distance_m: float | None = None
     establish_confidence: float = 0.65
     cancel_candidate_confidence: float = 0.40
     lost_confidence: float = 0.70
@@ -63,8 +65,28 @@ class RelationEstimatorConfig:
     confidence_ema_alpha: float = 0.30
     calibration_source: str = "defaults"
 
+    def __post_init__(self) -> None:
+        distance_pair = (
+            self.maximum_object_distance_m,
+            self.lost_object_distance_m,
+        )
+        if (distance_pair[0] is None) != (distance_pair[1] is None):
+            raise ValueError("建立与解除的物体距离阈值必须同时设置或同时省略")
+        if (
+            distance_pair[0] is not None
+            and distance_pair[1] is not None
+            and distance_pair[1] <= distance_pair[0]
+        ):
+            raise ValueError("解除距离阈值必须大于建立距离阈值")
+
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, values: dict[str, Any]) -> RelationEstimatorConfig:
+        """Load a persisted estimator configuration with full validation."""
+
+        return cls(**values)
 
 
 @dataclass(frozen=True)
@@ -421,6 +443,13 @@ class OnlineRelationEstimator:
                 config.minimum_comotion_speed_m_s,
             ),
         }
+        if config.maximum_object_distance_m is not None:
+            distance = float(np.linalg.norm(features["relative_position_m"]))
+            components["proximity"] = _inverse_ramp(
+                distance,
+                config.maximum_object_distance_m * 0.8,
+                config.maximum_object_distance_m,
+            )
         if not features["window_ready"]:
             connection_score = 0.0
         else:
@@ -460,6 +489,13 @@ class OnlineRelationEstimator:
                 config.lost_relative_orientation_span_rad,
             ),
         }
+        if config.lost_object_distance_m is not None:
+            distance = float(np.linalg.norm(features["relative_position_m"]))
+            loss_components["distance_break"] = _ramp(
+                distance,
+                config.maximum_object_distance_m,
+                config.lost_object_distance_m,
+            )
         loss_score = float(max(loss_components.values()))
         components.update({f"loss_{name}": value for name, value in loss_components.items()})
         return float(connection_score), loss_score, components

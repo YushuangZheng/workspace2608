@@ -26,6 +26,7 @@
 - [真实物理双臂交接 v3 正式报告](docs/physical_handover_report_v3.md)
 - [真实物理双臂交接数据集 v1 预注册协议](docs/physical_handover_dataset_protocol.md)
 - [真实物理双臂交接数据集 v1 冻结报告](docs/physical_handover_dataset_report.md)
+- [双臂在线关系生命周期估计器](docs/bimanual_relation_estimator.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)
@@ -136,6 +137,14 @@ conda run -n env_isaaclab python scripts/audit_physical_handover_dataset.py \
   --data_dir data/handover_physical/v1
 ```
 
+复现双臂在线关系估计器的离线开发回放：
+
+```bash
+conda run -n env_isaaclab python scripts/analyze_bimanual_relation_estimator.py \
+  --data_dir data/handover_physical/v1 \
+  --output_dir outputs/bimanual_relation/offline_dev_v2
+```
+
 验证双臂交接 v2 冻结数据：
 
 ```bash
@@ -205,8 +214,10 @@ git diff --check
 已经产生真实接触关系转移：v1、v2、v3 正式结果依次为 `6/20`、`18/20`、`20/20`。
 v3 达到严格数据采集门槛，并已由独立 seed 冻结 20 条 `handover_physical/v1`；这只证明
 冻结扰动分布上的脚本专家和数据链路，不等于学习策略完成，也不能外推为任意分布上的
-100% 鲁棒。所有论文表述应同时遵守
+100% 鲁棒。双臂关系估计器目前只通过冻结数据内部 10/10 划分的离线开发回放，尚未通过
+在线扰动和未见 seed 的正式评测。所有论文表述应同时遵守
 [夜间研发最终报告](docs/overnight_final_report.md)、[v1 正式报告](docs/physical_handover_report.md)、
 [v2 正式报告](docs/physical_handover_report_v2.md)和
 [v3 正式报告](docs/physical_handover_report_v3.md)、
-[物理数据冻结报告](docs/physical_handover_dataset_report.md)中的声明边界。
+[物理数据冻结报告](docs/physical_handover_dataset_report.md)和
+[双臂在线关系估计说明](docs/bimanual_relation_estimator.md)中的声明边界。
