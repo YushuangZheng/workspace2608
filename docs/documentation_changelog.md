@@ -1,5 +1,14 @@
 # 文档更新记录
 
+## 2026-08-04：RelationDynaMAC 恢复研究 Phase 3 正式结果
+
+- 完成预注册的 4 方法 × 7 条件 × 20 held-out seeds，共 560 次隔离试验；
+- 新增 `docs/recovery_final_report.md`，报告逐条件原始计数、配对主比较、检测延迟、恢复时间、额外路径、安全限幅、误触发和失败分类；
+- 六个扰动条件中，Relation 无恢复为 23/120，Relation＋Recovery 为 105/120；三类 drop 的两种恢复方法均为 60/60；
+- 正式保留 `miss_small_shift` 成功率不足、正常条件 5/20 短暂误触发和两种恢复方法各 2 次大位移恢复失败，不使用 test seeds 后调参；
+- 新增 `scripts/audit_recovery_results.py`，硬检查 560 个唯一组合与指纹、源码和数据哈希、预注册参数覆盖、JSON/NPZ 配对、trace schema、逐 step 对齐及终端快照一致性；
+- 最终 summary SHA-256 为 `2f58eef7a7493c2871854fa0dc9a7c060f43fb3ee7e14f7e49ab8d0acd69914f`。
+
 ## 2026-08-04：RelationDynaMAC 恢复研究 Phase 3 预注册
 
 - 新增七个恢复协议条件，drop 覆盖三个任务时点、四个距离、四个方向和两种夹爪行为，miss 覆盖小位移、大位移与边缘抓持；

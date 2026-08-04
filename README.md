@@ -17,6 +17,7 @@
 - [RelationDynaMAC 单臂恢复图](docs/recovery_graph.md)
 - [Oracle relation 恢复消融](docs/oracle_recovery_ablation.md)
 - [单臂关系恢复实验预注册协议](docs/recovery_protocol.md)
+- [单臂关系触发式恢复正式报告](docs/recovery_final_report.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)
@@ -96,6 +97,12 @@ conda run -n env_isaaclab python scripts/eval_single_arm.py --headless \
   arm_offset drop_after_grasp close_without_grasp \
   --seeds 6300 6301 6302 6303 6304 6305 6306 6307 6308 6309 \
   --output_dir outputs/single_arm_scientific/v1
+```
+
+审计预注册的单臂关系恢复正式结果：
+
+```bash
+conda run -n env_isaaclab python scripts/audit_recovery_results.py
 ```
 
 验证双臂交接 v2 冻结数据：
