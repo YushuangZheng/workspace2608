@@ -66,6 +66,13 @@ conda run -n env_isaaclab python -m compileall -q \
 
 ### GitHub 记录
 
-本次文档统一将在当前研发分支单独提交，通过 Pull Request 合并到默认分支。PR 编号、
-合并提交和最终默认分支状态由本次发布流程完成后记录在 GitHub 历史中；仓库本地记录
-不预写尚未发生的 PR 编号，以避免产生虚假来源。
+本次更新已按依赖顺序合并到默认分支：
+
+| 项目 | GitHub 记录 | 合并提交 | 状态 |
+|---|---|---|---|
+| 分阶段 DynaMAC 研究基础 | [PR #1](https://github.com/YushuangZheng/workspace2608/pull/1) | `20ffbb6e8e08d45a634f2b702833b3a526358c69` | 已合并 |
+| 科学审计、扩展评测、双臂 v2 与中文文档 | [PR #2](https://github.com/YushuangZheng/workspace2608/pull/2) | `dc3071b2693ebb31133b05ae29cd0feecf3d816c` | 已合并 |
+
+中文统一提交为 `323dd2fe15c3df58ea2d82c8ccc422f4bf3902a0`。合并 PR #2 后，
+GitHub 开放 PR 数为 0；默认分支为 `master`。本段实际合并来源通过一个仅含文档记录的
+后续 PR 补入，避免在事件发生前预写 PR 编号或合并哈希。
