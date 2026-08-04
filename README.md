@@ -31,6 +31,9 @@
 - [双臂在线关系估计正式报告 v1](docs/bimanual_relation_report_v1.md)
 - [双臂在线关系估计正式协议 v2](docs/bimanual_relation_protocol_v2.md)
 - [双臂在线关系估计正式报告 v2](docs/bimanual_relation_report_v2.md)
+- [双臂关系门控恢复开发记录](docs/bimanual_recovery_development.md)
+- [双臂关系门控恢复正式协议 v1](docs/bimanual_recovery_protocol.md)
+- [双臂关系门控恢复收尾说明](docs/bimanual_recovery_handoff.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)
@@ -235,12 +238,16 @@ git diff --check
 已经产生真实接触关系转移：v1、v2、v3 正式结果依次为 `6/20`、`18/20`、`20/20`。
 v3 达到严格数据采集门槛，并已由独立 seed 冻结 20 条 `handover_physical/v1`；这只证明
 冻结扰动分布上的脚本专家和数据链路，不等于学习策略完成，也不能外推为任意分布上的
-100% 鲁棒。双臂关系估计器已通过七条件、十个未见 seed 的 v2 正式评测，但该结论只
-证明在线关系检测，不等于双臂恢复或学习策略完成。所有论文表述应同时遵守
+100% 鲁棒。双臂关系估计器已通过七条件、十个未见 seed 的 v2 正式评测。关系门控恢复
+监督层已完成冻结开发验证和正式协议，但 v1 正式矩阵按用户指令在 95/200 条时中止，
+没有 summary、没有执行硬审计，不能声称正式通过。这些结论只分别证明在线关系检测和
+开发阶段恢复机制，不等于完整双臂 DynaMAC 学习策略完成。所有论文表述应同时遵守
 [夜间研发最终报告](docs/overnight_final_report.md)、[v1 正式报告](docs/physical_handover_report.md)、
 [v2 正式报告](docs/physical_handover_report_v2.md)和
 [v3 正式报告](docs/physical_handover_report_v3.md)、
 [物理数据冻结报告](docs/physical_handover_dataset_report.md)和
 [双臂在线关系估计说明](docs/bimanual_relation_estimator.md)、
 [双臂在线关系估计 v1 负结果](docs/bimanual_relation_report_v1.md)与
-[双臂在线关系估计 v2 正式报告](docs/bimanual_relation_report_v2.md)中的声明边界。
+[双臂在线关系估计 v2 正式报告](docs/bimanual_relation_report_v2.md)、
+[双臂关系恢复开发记录](docs/bimanual_recovery_development.md)和
+[双臂关系恢复收尾说明](docs/bimanual_recovery_handoff.md)中的声明边界。

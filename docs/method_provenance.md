@@ -20,7 +20,8 @@ Manipulation in Dynamic Environments*，作者为 von Hartz、Valada 和 Boedeck
 | 执行 | 每个技能拟合一个多流策略并串联执行（Algorithm 1，第 7–8 行） | 阶段时钟控制器为每个人工阶段使用固定参考系集合 | 论文启发的简化 |
 | 在线屏蔽 | 论文在策略拟合前从演示技能分布推导连接 | `OnlineDynaMACPrototype` 在运行时滑窗观察物体/末端平移和夹爪状态 | 项目新增原型，不是论文算法 |
 | 双向关系 | 论文允许每技能连接开始和结束，但没有定义运行时状态机 | `OnlineRelationEstimator` 使用四个滞回状态、实测指关节、六维相对运动、共同运动相关性和连续置信度 | essay2608 新机制 |
-| 双臂关系图 | 论文讨论双臂动态参考系协作，但没有规定运行时双边关系状态机 | `BimanualOnlineRelationEstimator` 独立估计左右臂—物体边，再组合为 `none / left_only / both / right_only`；运行时不读 contact 或 phase | essay2608 新机制，当前仅完成离线开发验证 |
+| 双臂关系图 | 论文讨论双臂动态参考系协作，但没有规定运行时双边关系状态机 | `BimanualOnlineRelationEstimator` 独立估计左右臂—物体边，再组合为 `none / left_only / both / right_only`；运行时不读 contact 或 phase | essay2608 新机制，在线检测已通过 Phase 5 v2 正式门 |
+| 双臂关系恢复 | 论文没有规定运行时故障恢复状态机 | `BimanualRelationRecoveryController` 根据当前关系冻结专家时钟，执行安全撤离、再接近、重抓和双边/单边验证 | essay2608 新机制；开发批次已通过，正式 v1 在 95/200 条时中止 |
 | 夹爪门控与锁存 | 论文主要依据每技能精度推断连接，不把夹爪门控规定为主测试 | 在线旧原型在演示夹爪命令张开时清除，否则锁存；SkillDynaMAC 无运行时门控 | 项目新增且不完整的逻辑 |
 | 参考系激活 | 每个已学习技能使用固定任务参数（Algorithm 1） | SkillDynaMAC 使用纯训练阶段选择；在线旧原型依据运行时连接并硬编码阶段 4 切换 | 前者论文启发，后者项目特有 |
 | 释放处理 | 每技能分析允许放置后连接结束（Fig. 3） | 旧在线原型锁存到张开命令；`SkillDynaMACPolicy` 只在阶段边界变化 | 项目行为不完整 |
