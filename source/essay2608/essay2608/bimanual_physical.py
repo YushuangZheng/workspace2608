@@ -46,6 +46,9 @@ class ScriptedPhysicalHandover:
         self.right_grasp_start_pose: torch.Tensor | None = None
         self.right_grasp_goal: torch.Tensor | None = None
         self.right_grasp_command: torch.Tensor | None = None
+        self.left_grasp_start_pose: torch.Tensor | None = None
+        self.left_grasp_goal: torch.Tensor | None = None
+        self.left_grasp_command: torch.Tensor | None = None
         self.right_approach_staged = False
         self.left_hold_pose: torch.Tensor | None = None
         self.right_hold_pose: torch.Tensor | None = None
@@ -157,12 +160,22 @@ class ScriptedPhysicalHandover:
         elif self.state == HandoverState.LEFT_APPROACH:
             left_desired = left_pregrasp
             if self._reached(left_pose, left_pregrasp_goal):
+                self.left_grasp_start_pose = left_pose.clone()
+                self.left_grasp_goal = left_site_goal.clone()
+                self.left_grasp_command = left_site.clone()
                 self._transition(HandoverState.LEFT_GRASP)
             elif self.state_time >= 4.0:
                 self._fail("left_pregrasp_timeout")
         elif self.state == HandoverState.LEFT_GRASP:
-            left_desired = left_site
-            if self.grasp_close_time is None and self._reached(left_pose, left_site_goal):
+            approach_fraction = min(self.state_time / 1.0, 1.0)
+            left_desired = self.left_grasp_start_pose + approach_fraction * (
+                self.left_grasp_command - self.left_grasp_start_pose
+            )
+            if (
+                self.grasp_close_time is None
+                and approach_fraction >= 1.0
+                and self._reached(left_pose, self.left_grasp_goal)
+            ):
                 self.grasp_close_time = self.state_time
             if self.grasp_close_time is not None:
                 left_gripper = GRIPPER_CLOSE
