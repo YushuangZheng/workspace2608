@@ -159,6 +159,7 @@ def audit_failure_taxonomy(metadata: dict[str, Any], arrays: dict[str, np.ndarra
     else:
         checks["known_failure_reason"] = reason in {
             "policy_incomplete",
+            "recovery_failed",
             "not_released",
             "not_on_support",
             "unstable_after_release",
@@ -308,6 +309,7 @@ def render_frame(
     event = bool(arrays["perturbation_event"][index])
     connected = bool(arrays["connected"][index])
     opening = float(arrays["gripper_opening_m"][index])
+    recovery = str(arrays["recovery_state"][index]) if "recovery_state" in arrays else "NOT_IMPLEMENTED"
     lines = [
         f"step: {index}/{len(arrays['phase']) - 1}",
         f"phase: {phase} ({phase_index})",
@@ -317,7 +319,7 @@ def render_frame(
         f"active frames: {active_text}",
         f"object-target XY: {xy_error:.4f} m",
         f"gripper opening: {opening:.4f} m",
-        "recovery: NOT_IMPLEMENTED (baseline)",
+        f"recovery: {recovery}",
         f"perturbation event: {event}",
         f"final: {metrics['failure_reason']}",
     ]
@@ -362,9 +364,12 @@ def render_trial(
     """Render one trace to MP4, snapshots, and a machine-readable audit row."""
 
     metadata, arrays = load_trial(trials_dir, trial.stem)
-    frames = reconstruct_active_frames(
-        len(arrays["phase"]), metadata["metrics"].get("frame_switch_diagnostics", [])
-    )
+    if "active_frames" in arrays:
+        frames = [tuple(str(value).split("|")) if str(value) else tuple() for value in arrays["active_frames"]]
+    else:
+        frames = reconstruct_active_frames(
+            len(arrays["phase"]), metadata["metrics"].get("frame_switch_diagnostics", [])
+        )
     audit = audit_failure_taxonomy(metadata, arrays)
     if not audit["consistent"]:
         raise ValueError(f"Failure taxonomy disagrees with trace for {trial.stem}: {audit['checks']}")
@@ -430,7 +435,7 @@ def render_audit_set(
             "maximum_frames_per_trial": maximum_frames,
             "video_codec": "mp4v",
             "resolution": [1280, 720],
-            "recovery_overlay": "NOT_IMPLEMENTED",
+            "recovery_overlay": "from_trace_when_available_otherwise_NOT_IMPLEMENTED",
         },
         "all_failure_taxonomies_consistent": all(row["failure_taxonomy_audit"]["consistent"] for row in rows),
         "trials": rows,

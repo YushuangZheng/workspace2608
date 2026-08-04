@@ -23,6 +23,7 @@ GEOMETRIC_METHODS = (
     "mask_only",
     "full_dynamac",
     "relation_dynamac",
+    "relation_dynamac_recovery",
 )
 METHODS = (*GEOMETRIC_METHODS, "diffusion_policy")
 CONDITIONS = (
@@ -77,7 +78,7 @@ AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 
 
-EVALUATION_SCHEMA_VERSION = 5
+EVALUATION_SCHEMA_VERSION = 6
 
 
 @lru_cache(maxsize=1)
@@ -90,6 +91,18 @@ def calibrated_relation_configuration() -> dict:
     demonstrations, _ = load_dataset(args.data_dir, verify_hashes=True)
     config, _ = calibrate_relation_estimator(demonstrations)
     return config.as_dict()
+
+
+@lru_cache(maxsize=1)
+def calibrated_recovery_configuration() -> dict:
+    """Load the frozen-data regrasp alignment once in the controller process."""
+
+    from essay2608.data.dataset import load_dataset
+    from essay2608.policy.recovery import calibrate_recovery_config
+
+    demonstrations, _ = load_dataset(args.data_dir, verify_hashes=True)
+    config, diagnostics = calibrate_recovery_config(demonstrations)
+    return {**config.as_dict(), "calibration_diagnostics": diagnostics}
 
 
 def policy_configuration(method: str) -> dict:
@@ -139,6 +152,15 @@ def policy_configuration(method: str) -> dict:
             "contact_sensor_available": False,
             "virtual_frame": "captured_on_connected_transition",
             "frame_activation": "mask_while_connected_virtual_in_phase_4",
+        },
+        "relation_dynamac_recovery": {
+            **common,
+            "estimator": calibrated_relation_configuration(),
+            "actual_gripper_joint_feedback": True,
+            "contact_sensor_available": False,
+            "virtual_frame": "captured_on_connected_transition",
+            "frame_activation": "mask_while_connected_virtual_in_phase_4",
+            "recovery": calibrated_recovery_configuration(),
         },
         "diffusion_policy": {
             **common,
@@ -380,6 +402,11 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 for item in metrics
                 if item["post_event_connection_loss_delay_s"] is not None
             ]
+            recovery_times = [
+                item["time_to_recover_s"]
+                for item in metrics
+                if item.get("time_to_recover_s") is not None
+            ]
             interval_seed = 2608 + 100 * method_index + condition_index
             sensitivity_keys = sorted(metrics[0]["xy_success_sensitivity"])
             phase_keys = sorted(metrics[0]["phase_path_length_m"], key=int)
@@ -416,6 +443,19 @@ def aggregate_trials(trials: list[dict]) -> dict:
                 "connection_detection_rate": float(np.mean([item["connection_detected"] for item in metrics])),
                 "recovery_rate": float(np.mean(recovery)) if recovery else None,
                 "recovery_rate_ci95_wilson": wilson_interval(sum(bool(value) for value in recovery), len(recovery)),
+                "recovery_trigger_rate": float(
+                    np.mean([item.get("recovery_triggered", False) for item in metrics])
+                ),
+                "false_recovery_trigger_rate": float(
+                    np.mean([item.get("false_recovery_trigger", False) for item in metrics])
+                ),
+                "mean_time_to_recover_s": float(np.mean(recovery_times)) if recovery_times else None,
+                "mean_regrasp_attempt_count": float(
+                    np.mean([item.get("regrasp_attempt_count", 0) for item in metrics])
+                ),
+                "recovery_failure_rate": float(
+                    np.mean([item.get("recovery_failed", False) for item in metrics])
+                ),
                 "mean_mask_false_positive_rate": float(
                     np.mean([item["mask_false_positive_rate"] for item in metrics])
                 ),
@@ -634,6 +674,7 @@ from essay2608.policy import (
     DynaMACPolicy,
     MaskOnlyPolicy,
     RelationDynaMACPolicy,
+    RelationDynaMACRecoveryPolicy,
     SkillDynaMACPolicy,
     StaticMultiStreamPolicy,
     WorldGaussianPolicy,
@@ -670,6 +711,7 @@ def make_policy(name: str):
         "mask_only": MaskOnlyPolicy,
         "full_dynamac": DynaMACPolicy,
         "relation_dynamac": RelationDynaMACPolicy,
+        "relation_dynamac_recovery": RelationDynaMACRecoveryPolicy,
     }[name]()
 
 
@@ -724,6 +766,8 @@ def run_worker() -> None:
         _, _, terminated, truncated, _ = env.step(action_tensor)
         if bool((terminated | truncated).any().item()):
             environment_done = True
+            break
+        if getattr(policy, "recovery_failed", False):
             break
         if policy.complete:
             break

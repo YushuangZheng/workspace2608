@@ -6,6 +6,7 @@ from .dynamac import (
     MaskOnlyPolicy,
     OnlineDynaMACPrototype,
     RelationDynaMACPolicy,
+    RelationDynaMACRecoveryPolicy,
 )
 from .diffusion import DiffusionActionPolicy
 from .gaussian import WorldGaussianPolicy
@@ -20,6 +21,14 @@ from .relation import (
     calibrate_relation_estimator,
     replay_relation_estimator,
 )
+from .recovery import (
+    RecoveryConfig,
+    RecoveryDecision,
+    RecoveryState,
+    RecoveryTrigger,
+    RelationRecoveryController,
+    calibrate_recovery_config,
+)
 from .tray import TrayGaussianPolicy
 
 __all__ = [
@@ -31,10 +40,17 @@ __all__ = [
     "OnlineDynaMACPrototype",
     "OnlineRelationEstimator",
     "RelationDynaMACPolicy",
+    "RelationDynaMACRecoveryPolicy",
     "RelationEstimate",
     "RelationEstimatorConfig",
     "RelationSample",
     "RelationState",
+    "RecoveryConfig",
+    "RecoveryDecision",
+    "RecoveryState",
+    "RecoveryTrigger",
+    "RelationRecoveryController",
+    "calibrate_recovery_config",
     "SkillDynaMACPolicy",
     "StaticMultiStreamPolicy",
     "TrayGaussianPolicy",

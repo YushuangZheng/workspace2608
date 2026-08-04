@@ -1,5 +1,13 @@
 # 文档更新记录
 
+## 2026-08-04：RelationDynaMAC 恢复研究 Phase 1
+
+- 新增独立 `RelationRecoveryController` 与 `RelationDynaMACRecoveryPolicy`，恢复层覆盖动作时暂停任务 phase clock；
+- 实现 MISS、LOSS、撤离、重定位、重新接近、重抓、验证、恢复和有界失败完整状态；
+- 新 schema 保存 active frames、恢复状态、触发来源、重抓次数和动作后终端快照；
+- 新增 `docs/recovery_graph.md`，记录状态图、安全限制、冻结训练示范标定、反例修复和 development 烟测；
+- development seeds 6400–6402 的 9 个 trial 全部成功：static 误触发 0/3，drop 与 miss 均恢复 3/3；该结果不替代后续预注册 test seeds。
+
 ## 2026-08-04：RelationDynaMAC 恢复研究 Phase 0
 
 - 新增 `docs/trace_visual_audit.md`，记录十个固定代表性 trial 的轨迹重建视频、失败分类复核和证据边界；

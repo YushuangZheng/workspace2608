@@ -19,6 +19,7 @@ from .relation import (
     RelationState,
     calibrate_relation_estimator,
 )
+from .recovery import RecoveryConfig, RelationRecoveryController, calibrate_recovery_config
 
 
 class KinematicConnectionDetector:
@@ -220,3 +221,69 @@ class RelationDynaMACPolicy(StaticMultiStreamPolicy):
             "relation_features": estimate.features if estimate else {},
         }
         return PolicyStep(action=step.action, diagnostics=diagnostics)
+
+
+class RelationDynaMACRecoveryPolicy(RelationDynaMACPolicy):
+    """RelationDynaMAC plus an independent relation-triggered recovery supervisor."""
+
+    name = "relation_dynamac_recovery"
+
+    def __init__(
+        self,
+        bins: int = 25,
+        control_dt: float = 0.02,
+        recovery_config: RecoveryConfig | None = None,
+    ) -> None:
+        super().__init__(bins=bins, control_dt=control_dt)
+        self._explicit_recovery_config = recovery_config
+        self.recovery = RelationRecoveryController(recovery_config)
+        self.recovery_calibration_diagnostics: dict = {}
+
+    def fit(self, demonstrations: list[Demonstration]) -> None:
+        super().fit(demonstrations)
+        config, self.recovery_calibration_diagnostics = calibrate_recovery_config(
+            demonstrations,
+            base=self._explicit_recovery_config,
+        )
+        self.recovery = RelationRecoveryController(config)
+
+    def _on_reset(self, observation: PolicyObservation) -> None:
+        super()._on_reset(observation)
+        self.recovery.reset()
+
+    @property
+    def recovery_failed(self) -> bool:
+        return self.recovery.failed
+
+    def _compute_action(self, observation: PolicyObservation) -> PolicyStep:
+        normal_step = super()._compute_action(observation)
+        if self.relation_estimate is None:
+            raise RuntimeError("Relation estimate must be updated before recovery supervision.")
+        task_phase_before = self.phase
+        decision = self.recovery.update(
+            observation=observation,
+            relation=self.relation_estimate,
+            task_phase=task_phase_before,
+            normal_action=normal_step.action,
+        )
+        if decision.resume_phase is not None:
+            self.phase = int(decision.resume_phase)
+            self.phase_step = 0
+            self._complete = False
+        diagnostics = {
+            **normal_step.diagnostics,
+            "method": self.name,
+            "policy_family": "bidirectional_relation_with_recovery_graph",
+            "task_phase_before_recovery": task_phase_before,
+            "phase": self.phase,
+            "phase_name": self.phase_name,
+            "recovery_state": decision.state.value,
+            "recovery_trigger": decision.trigger.value,
+            "recovery_transition": decision.transition,
+            "recovery_state_steps": decision.state_steps,
+            "total_recovery_steps": decision.total_recovery_steps,
+            "regrasp_attempts": decision.regrasp_attempts,
+            "pause_task_clock": decision.pause_task_clock,
+            "recovery_action_override": decision.action_overridden,
+        }
+        return PolicyStep(action=decision.action, diagnostics=diagnostics)
