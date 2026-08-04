@@ -25,6 +25,7 @@
 - [真实物理双臂交接 v3 预注册协议](docs/physical_handover_protocol_v3.md)
 - [真实物理双臂交接 v3 正式报告](docs/physical_handover_report_v3.md)
 - [真实物理双臂交接数据集 v1 预注册协议](docs/physical_handover_dataset_protocol.md)
+- [真实物理双臂交接数据集 v1 冻结报告](docs/physical_handover_dataset_report.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)
@@ -128,6 +129,13 @@ conda run -n env_isaaclab python scripts/audit_physical_handover_results.py
 # 审计当前通过严格门槛的 v3：追加 --version v3
 ```
 
+只读审计冻结的真实物理交接数据集：
+
+```bash
+conda run -n env_isaaclab python scripts/audit_physical_handover_dataset.py \
+  --data_dir data/handover_physical/v1
+```
+
 验证双臂交接 v2 冻结数据：
 
 ```bash
@@ -195,8 +203,10 @@ git diff --check
 不是 TAPAS、MiDiGaP、RLBench、DynaBench 或论文完整黎曼策略的逐项复现。
 旧的 `handover_static/v1/v2` 仍使用几何附着，只能作为接口和数据骨架。新增物理任务
 已经产生真实接触关系转移：v1、v2、v3 正式结果依次为 `6/20`、`18/20`、`20/20`。
-v3 达到严格数据采集门槛，但这只证明冻结扰动分布上的脚本专家，不等于学习策略完成，
-也不能外推为任意分布上的 100% 鲁棒。所有论文表述应同时遵守
+v3 达到严格数据采集门槛，并已由独立 seed 冻结 20 条 `handover_physical/v1`；这只证明
+冻结扰动分布上的脚本专家和数据链路，不等于学习策略完成，也不能外推为任意分布上的
+100% 鲁棒。所有论文表述应同时遵守
 [夜间研发最终报告](docs/overnight_final_report.md)、[v1 正式报告](docs/physical_handover_report.md)、
 [v2 正式报告](docs/physical_handover_report_v2.md)和
-[v3 正式报告](docs/physical_handover_report_v3.md)中的声明边界。
+[v3 正式报告](docs/physical_handover_report_v3.md)、
+[物理数据冻结报告](docs/physical_handover_dataset_report.md)中的声明边界。

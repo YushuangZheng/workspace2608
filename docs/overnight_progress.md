@@ -253,6 +253,10 @@
 - v3 由提交 `71b4477` 和标签 `physical-handover-protocol-v3` 冻结，在正式种子 8000–8019 上首次运行得到 `20/20`；
 - 20 个正式样本均为精确关系生命周期，`both` 为 `1.50–1.86 s`，最终 XY 误差 `0.85–11.38 mm`，末段全部稳定；
 - v3 已通过 Phase 4 严格退出与物理数据采集门槛，完整统计和外推边界见 [v3 正式报告](physical_handover_report_v3.md)。
+- 物理数据协议由提交 `d15a451` 和标签 `physical-handover-dataset-protocol-v1` 冻结，独立 seed 8200–8219 为 `20/20`；
+- `data/handover_physical/v1` 已冻结，数据集 SHA-256 为 `a4a39ed4837558cecaaf73e7c5db9b6ff88e7eddfb3bcf9923df862df9e65e52`；
+- 数据关系来自物理边而非 phase：20 条中共有 2007 个逐步标签差异，左右 connected 与双指接触最低一致率 99.55%/99.62%；
+- 冻结数据的详细 schema、统计、覆盖拒绝和后续使用边界见 [物理数据冻结报告](physical_handover_dataset_report.md)。
 
 ### 最终交付
 
