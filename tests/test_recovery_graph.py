@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import numpy as np
 
+from essay2608.policy.dynamac import OracleRelationRecoveryPolicy
 from essay2608.policy.base import PolicyObservation
-from essay2608.policy.recovery import RecoveryConfig, RecoveryState, RecoveryTrigger, RelationRecoveryController
+from essay2608.policy.recovery import (
+    RecoveryConfig,
+    RecoveryState,
+    RecoveryTrigger,
+    RelationRecoveryController,
+    privileged_grasp_relation,
+)
 from essay2608.policy.relation import RelationEstimate, RelationState
 
 
@@ -11,6 +18,7 @@ def observation(
     ee=(0.0, 0.0, 0.10),
     obj=(0.30, 0.0, 0.02),
     opening=0.04,
+    contact=False,
 ) -> PolicyObservation:
     identity = np.asarray([1.0, 0.0, 0.0, 0.0])
     return PolicyObservation(
@@ -19,6 +27,7 @@ def observation(
         target_pose=np.concatenate((np.asarray([0.55, 0.2, 0.08]), identity)),
         gripper_opening_m=opening,
         gripper_velocity_m_s=0.0,
+        object_contact=contact,
     )
 
 
@@ -82,6 +91,14 @@ def test_loss_freezes_then_confirms_safe_retreat() -> None:
     assert decision.state == RecoveryState.SAFE_RETREAT
 
 
+def test_oracle_direct_disconnect_triggers_loss_without_future_state() -> None:
+    controller = RelationRecoveryController()
+    controller.update(observation(), estimate(RelationState.CONNECTED), 5, NORMAL_ACTION)
+    decision = controller.update(observation(), estimate(RelationState.DISCONNECTED), 5, NORMAL_ACTION)
+    assert decision.state == RecoveryState.LOSS_DETECTED
+    assert decision.trigger == RecoveryTrigger.LOSS
+
+
 def test_transient_loss_candidate_cancels_without_recovery_motion() -> None:
     controller = RelationRecoveryController()
     controller.update(observation(), estimate(RelationState.CONNECTED), 5, NORMAL_ACTION)
@@ -115,3 +132,34 @@ def test_failed_verification_stops_after_bounded_attempts() -> None:
     decision = controller.update(observation(), disconnected, 4, NORMAL_ACTION)
     assert decision.state == RecoveryState.RECOVERY_FAILED
     assert controller.failed
+
+
+def test_oracle_policy_uses_only_current_contact_boolean() -> None:
+    policy = OracleRelationRecoveryPolicy()
+    policy.phase = 4
+    disconnected_observation = observation()
+    policy._update_online_state(disconnected_observation, 0)
+    assert policy.relation_estimate is not None
+    assert policy.relation_estimate.state == RelationState.DISCONNECTED
+    connected_observation = PolicyObservation(
+        ee_pose=disconnected_observation.ee_pose,
+        object_pose=disconnected_observation.object_pose,
+        target_pose=disconnected_observation.target_pose,
+        gripper_opening_m=0.045,
+        gripper_velocity_m_s=0.0,
+        object_contact=True,
+    )
+    policy._update_online_state(connected_observation, 0)
+    assert policy.relation_estimate.state == RelationState.CONNECTED
+    assert policy.virtual_frame_pose is not None
+    assert policy._active_frames(connected_observation) == ["target", "virtual_ee"]
+
+
+def test_privileged_grasp_predicate_rejects_empty_close_and_drop() -> None:
+    identity = np.asarray([1.0, 0.0, 0.0, 0.0])
+    obj = np.concatenate((np.asarray([0.50, 0.0, 0.021]), identity))
+    held_ee = np.concatenate((np.asarray([0.50, 0.0, 0.031]), identity))
+    dropped_ee = np.concatenate((np.asarray([0.50, -0.18, 0.15]), identity))
+    assert privileged_grasp_relation(held_ee, obj, 0.045)
+    assert not privileged_grasp_relation(held_ee, obj, 0.001)
+    assert not privileged_grasp_relation(dropped_ee, obj, 0.045)

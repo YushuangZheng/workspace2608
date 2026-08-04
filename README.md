@@ -15,6 +15,7 @@
 - [夜间研发最终报告](docs/overnight_final_report.md)
 - [单臂代表性轨迹可视化审计](docs/trace_visual_audit.md)
 - [RelationDynaMAC 单臂恢复图](docs/recovery_graph.md)
+- [Oracle relation 恢复消融](docs/oracle_recovery_ablation.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)

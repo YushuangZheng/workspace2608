@@ -24,6 +24,7 @@ GEOMETRIC_METHODS = (
     "full_dynamac",
     "relation_dynamac",
     "relation_dynamac_recovery",
+    "oracle_relation_recovery",
 )
 METHODS = (*GEOMETRIC_METHODS, "diffusion_policy")
 CONDITIONS = (
@@ -160,6 +161,17 @@ def policy_configuration(method: str) -> dict:
             "contact_sensor_available": False,
             "virtual_frame": "captured_on_connected_transition",
             "frame_activation": "mask_while_connected_virtual_in_phase_4",
+            "recovery": calibrated_recovery_configuration(),
+        },
+        "oracle_relation_recovery": {
+            **common,
+            "relation_input": "current_privileged_geometry_and_gripper_occupancy",
+            "future_information": False,
+            "target_action_from_oracle": False,
+            "occupied_opening_range_m": [0.020, 0.063],
+            "maximum_ee_object_distance_m": 0.040,
+            "virtual_frame": "captured_on_oracle_connected_transition",
+            "frame_activation": "mask_while_oracle_connected_virtual_in_phase_4",
             "recovery": calibrated_recovery_configuration(),
         },
         "diffusion_policy": {
@@ -673,29 +685,39 @@ from essay2608.policy import (
     DiffusionActionPolicy,
     DynaMACPolicy,
     MaskOnlyPolicy,
+    OracleRelationRecoveryPolicy,
     RelationDynaMACPolicy,
     RelationDynaMACRecoveryPolicy,
     SkillDynaMACPolicy,
     StaticMultiStreamPolicy,
     WorldGaussianPolicy,
+    privileged_grasp_relation,
 )
 from essay2608.policy.base import PolicyObservation
 from isaaclab_tasks.utils import parse_env_cfg
 
 
-def numpy_observation(env: gym.Env) -> PolicyObservation:
+def numpy_observation(env: gym.Env, privileged_contact: bool = False) -> PolicyObservation:
     """Read the first environment into the policy's NumPy observation."""
 
     ee_pose, object_pose, target_pose = get_scene_poses(env)
     robot = env.unwrapped.scene["robot"]
     gripper_opening = float(torch.sum(robot.data.joint_pos[0, -2:]).item())
     gripper_velocity = float(torch.sum(robot.data.joint_vel[0, -2:]).item())
+    object_contact = None
+    if privileged_contact:
+        object_contact = privileged_grasp_relation(
+            ee_pose[0].detach().cpu().numpy(),
+            object_pose[0].detach().cpu().numpy(),
+            gripper_opening,
+        )
     return PolicyObservation(
         ee_pose=ee_pose[0].detach().cpu().numpy().astype(np.float64),
         object_pose=object_pose[0].detach().cpu().numpy().astype(np.float64),
         target_pose=target_pose[0].detach().cpu().numpy().astype(np.float64),
         gripper_opening_m=gripper_opening,
         gripper_velocity_m_s=gripper_velocity,
+        object_contact=object_contact,
     )
 
 
@@ -712,6 +734,7 @@ def make_policy(name: str):
         "full_dynamac": DynaMACPolicy,
         "relation_dynamac": RelationDynaMACPolicy,
         "relation_dynamac_recovery": RelationDynaMACRecoveryPolicy,
+        "oracle_relation_recovery": OracleRelationRecoveryPolicy,
     }[name]()
 
 
@@ -732,7 +755,8 @@ def run_worker() -> None:
     env.reset(seed=args.worker_seed)
     control_dt = env_cfg.sim.dt * env_cfg.decimation
 
-    observation = numpy_observation(env)
+    uses_oracle = args.worker_method == "oracle_relation_recovery"
+    observation = numpy_observation(env, privileged_contact=uses_oracle)
     policy.reset(observation)
     perturbation = PerturbationController(args.worker_condition, env)
     trace = EpisodeTrace(control_dt=control_dt)
@@ -744,7 +768,7 @@ def run_worker() -> None:
         event_started_before = perturbation.event_started
         scene_status = perturbation.update_scene(phase_before, phase_step_before)
         perturbation_event = perturbation.event_started and not event_started_before
-        observation = numpy_observation(env)
+        observation = numpy_observation(env, privileged_contact=uses_oracle)
 
         start = time.perf_counter()
         policy_step = policy.act(observation)
@@ -775,7 +799,7 @@ def run_worker() -> None:
     # Always read the post-step scene state.  The previous implementation used
     # the pre-step error on termination, making terminal trials one control step
     # stale.  The configured horizon ends before the normal time-limit reset.
-    final_observation = numpy_observation(env)
+    final_observation = numpy_observation(env, privileged_contact=uses_oracle)
     trace.set_terminal_observation(final_observation)
     support_height = float(
         np.median(

@@ -210,7 +210,7 @@ class RelationRecoveryController:
             if (
                 self.had_connection
                 and task_phase in self.config.loss_sensitive_phases
-                and relation_state == RelationState.CANDIDATE_LOST
+                and relation_state in {RelationState.CANDIDATE_LOST, RelationState.DISCONNECTED}
             ):
                 self.trigger = RecoveryTrigger.LOSS
                 transition = self._transition(RecoveryState.LOSS_DETECTED)
@@ -353,3 +353,23 @@ class RelationRecoveryController:
             return self._decision(self._action(normal_action, safe, 1.0), overridden=True, transition=transition)
 
         raise RuntimeError(f"Unhandled recovery state: {self.state}")
+
+
+def privileged_grasp_relation(
+    ee_pose: np.ndarray,
+    object_pose: np.ndarray,
+    gripper_opening_m: float,
+    occupied_opening_min_m: float = 0.020,
+    occupied_opening_max_m: float = 0.063,
+    maximum_ee_object_distance_m: float = 0.040,
+) -> bool:
+    """Return a current-step simulator-state grasp predicate for Oracle ablation.
+
+    A true grasp must both keep the fingers in the object-occupied opening range
+    and place the known end-effector frame close to the cube centre. This uses
+    current privileged state only; it does not use task phase or future motion.
+    """
+
+    opening_occupied = occupied_opening_min_m <= gripper_opening_m <= occupied_opening_max_m
+    distance = float(np.linalg.norm(np.asarray(ee_pose[:3]) - np.asarray(object_pose[:3])))
+    return bool(opening_occupied and distance <= maximum_ee_object_distance_m)

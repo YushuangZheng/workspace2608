@@ -1,5 +1,13 @@
 # 文档更新记录
 
+## 2026-08-04：RelationDynaMAC 恢复研究 Phase 2
+
+- 新增 `OracleRelationRecoveryPolicy`，Oracle 只给恢复图提供当前步 privileged relation，不提供动作或未来信息；
+- 当前 Isaac Sim 4.5 的过滤式指尖 ContactSensor 会在 articulation 初始化时关闭应用，因此撤销该配置，保留干净的原任务环境；
+- Oracle 明确定义为已知 Franka—方块几何下的夹爪占用开度与末端—物体距离联合谓词，并在 `docs/oracle_recovery_ablation.md` 中记录适用边界；
+- seed 6400 的 static、drop 和 miss 均成功；Oracle drop 立即发现关系断开，在线估计器延迟 40 ms，两者恢复图均完成任务。
+- 三个 development seeds 的统一 36-trial 消融中，两个无恢复方法在 drop/miss 均为 0/3，在线恢复与 Oracle 恢复均为 3/3；两种恢复方法的 static 误触发均为 0/3。
+
 ## 2026-08-04：RelationDynaMAC 恢复研究 Phase 1
 
 - 新增独立 `RelationRecoveryController` 与 `RelationDynaMACRecoveryPolicy`，恢复层覆盖动作时暂停任务 phase clock；

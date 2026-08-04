@@ -5,6 +5,7 @@ from .dynamac import (
     DynaMACPolicy,
     MaskOnlyPolicy,
     OnlineDynaMACPrototype,
+    OracleRelationRecoveryPolicy,
     RelationDynaMACPolicy,
     RelationDynaMACRecoveryPolicy,
 )
@@ -28,6 +29,7 @@ from .recovery import (
     RecoveryTrigger,
     RelationRecoveryController,
     calibrate_recovery_config,
+    privileged_grasp_relation,
 )
 from .tray import TrayGaussianPolicy
 
@@ -39,6 +41,7 @@ __all__ = [
     "MaskOnlyPolicy",
     "OnlineDynaMACPrototype",
     "OnlineRelationEstimator",
+    "OracleRelationRecoveryPolicy",
     "RelationDynaMACPolicy",
     "RelationDynaMACRecoveryPolicy",
     "RelationEstimate",
@@ -51,6 +54,7 @@ __all__ = [
     "RecoveryTrigger",
     "RelationRecoveryController",
     "calibrate_recovery_config",
+    "privileged_grasp_relation",
     "SkillDynaMACPolicy",
     "StaticMultiStreamPolicy",
     "TrayGaussianPolicy",

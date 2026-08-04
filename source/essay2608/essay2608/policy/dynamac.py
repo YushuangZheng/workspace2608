@@ -287,3 +287,51 @@ class RelationDynaMACRecoveryPolicy(RelationDynaMACPolicy):
             "recovery_action_override": decision.action_overridden,
         }
         return PolicyStep(action=decision.action, diagnostics=diagnostics)
+
+
+class OracleRelationRecoveryPolicy(RelationDynaMACRecoveryPolicy):
+    """Recovery ablation whose relation input is current privileged contact truth."""
+
+    name = "oracle_relation_recovery"
+
+    def _update_online_state(self, observation: PolicyObservation, index: int) -> None:
+        del index
+        if observation.object_contact is None:
+            raise ValueError("OracleRelationRecoveryPolicy requires current simulator contact truth.")
+        connected = bool(observation.object_contact)
+        state = RelationState.CONNECTED if connected else RelationState.DISCONNECTED
+        transitioned = self.relation_estimate is not None and self.relation_estimate.state != state
+        self.relation_estimate = RelationEstimate(
+            state=state,
+            connected=connected,
+            confidence=float(connected),
+            connection_score=float(connected),
+            loss_score=float(not connected),
+            features={"privileged_instantaneous_grasp_predicate": connected},
+            transitioned=transitioned,
+        )
+        if transitioned and connected:
+            self.virtual_frame_pose = observation.ee_pose.copy()
+
+    def _active_frames(self, observation: PolicyObservation) -> list[str]:
+        del observation
+        connected = bool(self.relation_estimate is not None and self.relation_estimate.connected)
+        if connected:
+            if self.virtual_frame_pose is not None and self.phase == 4:
+                return ["target", "virtual_ee"]
+            return ["target"]
+        return ["object", "target"]
+
+    def _connection_state(self) -> bool:
+        return bool(self.relation_estimate is not None and self.relation_estimate.connected)
+
+    def _compute_action(self, observation: PolicyObservation) -> PolicyStep:
+        step = super()._compute_action(observation)
+        diagnostics = {
+            **step.diagnostics,
+            "method": self.name,
+            "policy_family": "privileged_contact_relation_with_recovery_graph",
+            "oracle_relation": True,
+            "oracle_information": "current_privileged_geometry_and_gripper_occupancy_only",
+        }
+        return PolicyStep(action=step.action, diagnostics=diagnostics)
