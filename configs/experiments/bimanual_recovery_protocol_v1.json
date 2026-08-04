@@ -1,0 +1,84 @@
+{
+  "protocol_version": "bimanual_recovery_protocol_v1",
+  "summary_artifact_type": "bimanual_relation_recovery_formal",
+  "task_id": "Essay2608-Bimanual-Physical-Handover-v0",
+  "implementation_commit": "4214730a1d74bef353bac28629adab82fbe03a87",
+  "source_sha256": "eff06caaedc64725a69ef148d8408f57bd167c0b0eba0e116ea4ce23d46cf1c9",
+  "relation_config": "configs/experiments/bimanual_relation_offline_v1.json",
+  "relation_config_sha256": "9878468cfa88160eec1ba218d38bf239ce38eba406383d5ac9f04db15bb68ade",
+  "recovery_config": "configs/experiments/bimanual_recovery_online_v1.json",
+  "recovery_config_sha256": "c62c9d22ee502f4af5fbbeea151fa3350e585e2b19b614c88f642b7eeb6007b5",
+  "dataset_sha256": "a4a39ed4837558cecaaf73e7c5db9b6ff88e7eddfb3bcf9923df862df9e65e52",
+  "development_summary_sha256": "ad779c50a41480710b99314b017c69bf02a620f8ea39d9e221116c71ab99962b",
+  "relation_calibration_seeds": [8200, 8201, 8202, 8203, 8204, 8205, 8206, 8207, 8208, 8209],
+  "relation_development_seeds": [8300, 8301, 8302, 8303, 8304, 8305, 8306, 8307],
+  "prior_relation_formal_seeds": [
+    8400, 8401, 8402, 8403, 8404, 8405, 8406, 8407, 8408, 8409,
+    8500, 8501, 8502, 8503, 8504, 8505, 8506, 8507, 8508, 8509
+  ],
+  "recovery_development_seeds": [
+    8600, 8601, 8602, 8603, 8604, 8605, 8606, 8607, 8608, 8609,
+    8610, 8611, 8612, 8613, 8614, 8615, 8616, 8617, 8618, 8619
+  ],
+  "formal_seeds": [8700, 8701, 8702, 8703, 8704, 8705, 8706, 8707, 8708, 8709],
+  "methods": [
+    "clocked_expert",
+    "relation_gate",
+    "relation_recovery",
+    "oracle_relation_recovery"
+  ],
+  "conditions": [
+    "normal",
+    "receiver_miss_once",
+    "receiver_brief_loss",
+    "receiver_loss_once",
+    "receiver_loss_after_release"
+  ],
+  "maximum_steps": 2200,
+  "control_dt_s": 0.02,
+  "maximum_regrasp_attempts": 2,
+  "maximum_recovery_time_s": {
+    "receiver_miss_once": 2.5,
+    "receiver_brief_loss": 0.8,
+    "receiver_loss_once": 3.0,
+    "receiver_loss_after_release": 3.5
+  },
+  "maximum_recovery_action_target_jump_m": 0.08,
+  "maximum_recovery_supervised_target_jump_m": 0.08,
+  "maximum_recovery_ee_speed_m_s": 0.75,
+  "minimum_online_four_value_accuracy": 0.94,
+  "minimum_task_successes": {
+    "clocked_expert": {
+      "normal": 9,
+      "receiver_brief_loss": 9
+    },
+    "relation_gate": {
+      "normal": 9,
+      "receiver_brief_loss": 9
+    },
+    "relation_recovery": {
+      "normal": 9,
+      "receiver_miss_once": 9,
+      "receiver_brief_loss": 9,
+      "receiver_loss_once": 9,
+      "receiver_loss_after_release": 9
+    },
+    "oracle_relation_recovery": {
+      "normal": 9,
+      "receiver_miss_once": 9,
+      "receiver_brief_loss": 9,
+      "receiver_loss_once": 9,
+      "receiver_loss_after_release": 9
+    }
+  },
+  "strong_fault_conditions": [
+    "receiver_miss_once",
+    "receiver_loss_once",
+    "receiver_loss_after_release"
+  ],
+  "minimum_paired_strong_recovery_wins": 27,
+  "maximum_paired_strong_recovery_losses": 0,
+  "maximum_online_oracle_success_gap": 2,
+  "verify_current_sources": true,
+  "formal_output_dir": "outputs/bimanual_recovery/formal_v1"
+}
