@@ -30,6 +30,13 @@ from .bimanual_relation import (
     calibrate_bimanual_relation_estimator,
     replay_bimanual_relation_estimator,
 )
+from .bimanual_recovery import (
+    BimanualRecoveryConfig,
+    BimanualRecoveryDecision,
+    BimanualRecoveryState,
+    BimanualRecoveryTrigger,
+    BimanualRelationRecoveryController,
+)
 from .recovery import (
     RecoveryConfig,
     RecoveryDecision,
@@ -53,6 +60,11 @@ __all__ = [
     "BimanualRelationEstimate",
     "BimanualRelationEstimatorConfig",
     "BimanualRelationSample",
+    "BimanualRecoveryConfig",
+    "BimanualRecoveryDecision",
+    "BimanualRecoveryState",
+    "BimanualRecoveryTrigger",
+    "BimanualRelationRecoveryController",
     "OracleRelationRecoveryPolicy",
     "RelationDynaMACPolicy",
     "RelationDynaMACRecoveryPolicy",
