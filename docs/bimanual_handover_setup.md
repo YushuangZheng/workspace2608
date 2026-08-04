@@ -1,47 +1,45 @@
-# Bimanual handover environment and dataset skeleton
+# 双臂交接环境与数据骨架
 
-## Scope
+## 范围
 
-This phase validates only the environment, scripted expert, collection,
-dataset, audit, and headless smoke chain for
-`Essay2608-Bimanual-Handover-v0`. It does not claim a contact-rich handover or
-a complete bimanual DynaMAC implementation. The older bimanual policy pilots in
-the repository predate this audit and were not used to accept the v2 dataset.
+本阶段只验收 `Essay2608-Bimanual-Handover-v0` 的环境、脚本专家、采集、
+数据审计和 headless 冒烟链路，不主张已经实现接触丰富的物理交接或完整双臂
+DynaMAC。仓库中更早的双臂策略试验早于本次审计，未参与 v2 数据集验收。
 
-The implementation source used for v2 collection is commit `5c4921e`. The
-previous `data/handover_static/v1` remains byte-for-byte unchanged and continues
-to load through the backward-compatible legacy carrier schema.
+v2 采集所用实现来源为提交 `5c4921e`。旧的
+`data/handover_static/v1` 保持逐字节不变，并继续通过兼容的旧版
+`carrier` 模式加载。
 
-## Environment contract
+## 环境契约
 
-The scene contains two independently rooted Franka Pandas, one transfer cube,
-a table, and a fixed placement target. The 16-D action is:
+场景包含两台独立根节点的 Franka Panda、一个交接方块、一张桌子和固定放置目标。
+16 维动作定义如下：
 
-| Slice | Meaning | Controller |
+| 切片 | 含义 | 控制器 |
 |---|---|---|
-| 0:7 | left tool pose, `xyz + wxyz` | absolute DLS differential IK |
-| 7 | left gripper | independent binary position command |
-| 8:15 | right tool pose, `xyz + wxyz` | absolute DLS differential IK |
-| 15 | right gripper | independent binary position command |
+| 0:7 | 左末端位姿，`xyz + wxyz` | 绝对 DLS 微分 IK |
+| 7 | 左夹爪 | 独立二值位置命令 |
+| 8:15 | 右末端位姿，`xyz + wxyz` | 绝对 DLS 微分 IK |
+| 15 | 右夹爪 | 独立二值位置命令 |
 
-The policy observation group now exposes the required geometric state directly:
+策略观测组直接暴露所需几何状态：
 
-| Observation | Shape | Source |
+| 观测 | 形状 | 来源 |
 |---|---:|---|
-| `left_ee_pose` | 7 | measured left tool pose in local environment coordinates |
-| `right_ee_pose` | 7 | measured right tool pose in local environment coordinates |
-| `object_pose` | 7 | measured rigid-object root pose |
-| `target_pose` | 7 | fixed placement target |
-| `left_gripper_state` | 2 | measured left finger joint positions |
-| `right_gripper_state` | 2 | measured right finger joint positions |
-| `actions` | 16 | previous action for diagnostics |
+| `left_ee_pose` | 7 | 局部环境坐标中的左工具实测位姿 |
+| `right_ee_pose` | 7 | 局部环境坐标中的右工具实测位姿 |
+| `object_pose` | 7 | 刚体物体根节点实测位姿 |
+| `target_pose` | 7 | 固定放置目标 |
+| `left_gripper_state` | 2 | 左侧两个指关节实测位置 |
+| `right_gripper_state` | 2 | 右侧两个指关节实测位置 |
+| `actions` | 16 | 用于诊断的上一时刻动作 |
 
-A headless construction at seed 7300 confirmed these term names and shapes, all
-four action terms, and one complete 575-step episode with 10.62 mm final error.
+seed 7300 的 headless 环境构造确认了上述名称、形状和四个动作项；同一进程完成
+575 步完整交接，最终误差为 10.62 mm。
 
-## Expert and relation supervision
+## 专家与关系监督
 
-The expert executes all 13 ordered states:
+专家按顺序执行全部 13 个状态：
 
 ```text
 REST → LEFT_APPROACH → LEFT_GRASP → LEFT_LIFT → LEFT_TO_HANDOVER
@@ -49,56 +47,50 @@ REST → LEFT_APPROACH → LEFT_GRASP → LEFT_LIFT → LEFT_TO_HANDOVER
 → RIGHT_TO_TARGET → RIGHT_RELEASE → RETREAT → COMPLETE
 ```
 
-Every recorded step has a state-aligned `relation_label`:
+每个记录步都有与专家状态对齐的 `relation_label`：
 
-| Label | Expert states | Meaning |
+| 标签 | 专家状态 | 含义 |
 |---|---|---|
-| `none` | 0–1 and 10–12 | no arm is treated as attached |
-| `left_only` | 2–6 | left carries while right approaches and closes |
-| `both` | 7 | confirmed short co-hold before left release |
-| `right_only` | 8–9 | right carries to the target |
+| `none` | 0–1、10–12 | 不认为任何机械臂与物体连接 |
+| `left_only` | 2–6 | 左臂搬运，右臂接近并闭合 |
+| `both` | 7 | 左臂释放前的短时共同持物 |
+| `right_only` | 8–9 | 右臂搬运至目标 |
 
-At 20 ms control time, `TRANSFER` lasts 15 recorded steps, or 0.30 s, in every
-accepted v2 demonstration. The legacy integer `carrier` is retained separately
-because it selects the one end effector used by the geometric attachment
-emulator. It must not be interpreted as four-value relation ground truth.
+控制周期为 20 ms；每条验收通过的 v2 演示中，`TRANSFER` 均持续 15 步，
+即 0.30 s。旧版整数 `carrier` 字段仍单独保留，用来选择几何附着模拟器所跟随的
+单个末端；它不能被解释为四值关系真值。
 
-## Isolated collection and frozen v2
+## 独立进程采集与冻结 v2
 
-`scripts/collect_handover.py` is the canonical thin entry point. Its controller
-starts a fresh simulator process for every attempt, accepts only a complete
-episode below the fixed 60 mm success threshold, and moves only successful NPZ
-files into the requested output directory.
+`scripts/collect_handover.py` 是统一的轻量入口。控制器为每次尝试启动新的仿真
+进程，只接受完整且低于固定 60 mm 成功阈值的 episode，并且只把成功 NPZ 移入
+目标目录。
 
-The one-demo smoke used seed 7300 and a separate output directory. Formal v2
-collection began at seed 7400. Five successes were accepted from eight attempts:
-7400, 7403, 7404, 7406, and 7407. Failed workers were rejected and contributed
-no trajectory to the dataset.
+单条冒烟数据使用 seed 7300 和独立输出目录。正式 v2 从 seed 7400 开始，8 次
+尝试中接受 5 次成功：7400、7403、7404、7406、7407。失败 worker 被拒绝，
+没有轨迹进入冻结集。
 
-Frozen dataset:
+冻结数据集：
 
-- path: `data/handover_static/v2`;
-- demonstrations: 5, with 582–604 steps each;
-- dataset SHA-256:
-  `91706df18abfea606c9e6836f1864e675610633ce5cb0c3c23846a1ea4f5fe18`;
-- maximum final error: 11.04 mm;
-- minimum pairwise initial-object distance: 13.91 mm;
-- maximum per-step Cartesian jump: 29.21 mm;
-- maximum left/right object-connection position RMS standard deviation:
-  2.01/3.38 mm;
-- relation schema: `four_value_state_aligned_v2` in all five files;
-- both finger measurements cover approximately 0–40 mm in all files.
+- 路径：`data/handover_static/v2`；
+- 演示数：5，每条 582–604 步；
+- 数据集 SHA-256：
+  `91706df18abfea606c9e6836f1864e675610633ce5cb0c3c23846a1ea4f5fe18`；
+- 最大最终误差：11.04 mm；
+- 初始物体两两最小距离：13.91 mm；
+- 最大单步笛卡尔跳变：29.21 mm；
+- 左/右物体连接位置 RMS 标准差最大值：2.01/3.38 mm；
+- 五条数据的关系模式均为 `four_value_state_aligned_v2`；
+- 五条数据的两侧指关节测量均覆盖约 0–40 mm。
 
-The audit checks required arrays, finite values, 16-D actions, 7-D poses,
-continuous timestamps, complete state and relation sequences, label/state
-agreement, measured open/closed grippers, reset-like jumps, distinct starts,
-final error, per-file SHA-256, and connection stability. Both collection and
-freezing refuse a directory containing `FROZEN`; the refusal test returned
-nonzero twice and left the manifest hash unchanged.
+审计检查必需数组、有限数值、16 维动作、7 维位姿、连续时间戳、完整状态和关系
+序列、标签与状态一致性、夹爪开闭实测、复位式跳变、不同初始位姿、最终误差、
+逐文件 SHA-256 和连接稳定性。采集与冻结脚本都拒绝带 `FROZEN` 的目录；两个
+拒绝反例均返回非零，且 manifest 哈希保持不变。
 
-## Reproduction
+## 复现
 
-One isolated smoke demonstration:
+采集一条独立冒烟演示：
 
 ```bash
 conda run -n env_isaaclab python scripts/collect_handover.py --headless \
@@ -108,8 +100,7 @@ conda run -n env_isaaclab python scripts/audit_handover_dataset.py \
   --data_dir outputs/handover_scientific/smoke_v2
 ```
 
-Collect a new, unfrozen five-demo version. Never reuse `v1` or `v2` as the
-output directory:
+采集一个新的、未冻结的五演示版本。不得复用 `v1` 或 `v2` 作为输出目录：
 
 ```bash
 conda run -n env_isaaclab python scripts/collect_handover.py --headless \
@@ -122,16 +113,12 @@ conda run -n env_isaaclab python scripts/audit_handover_dataset.py \
   --dataset_version handover_static_v3
 ```
 
-## Scientific limits
+## 科学限制
 
-The cube has gravity disabled and is written to a single carrier tool pose; the
-short `both` interval is scripted supervision rather than a force/contact
-measurement. Success is geometric completion and final position error, not a
-validated physical grasp-stability metric. The five demonstrations establish a
-reproducible data and supervision interface for later work, but provide no
-evidence that an existing bimanual learned policy generalizes or outperforms a
-baseline.
+方块禁用了重力，并由程序写入单一载体末端位姿；短时 `both` 是脚本监督，不是
+力或接触测量。当前成功表示几何流程完成和最终位置误差达标，不是经过验证的物理
+抓取稳定性指标。五条演示建立了可复现的数据与监督接口，但不能证明任何现有双臂
+学习策略具有泛化能力或优于基线。
 
-Before policy research, the next environment upgrade should add contact sensing
-and a non-kinematic held object, then compare scripted labels against observed
-two-arm contact/relative-motion evidence.
+进入策略研究前，下一项环境升级应加入接触传感和非运动学附着物体，再把脚本标签
+与实测双臂接触及相对运动证据进行比较。

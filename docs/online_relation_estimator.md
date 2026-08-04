@@ -1,121 +1,97 @@
-# Bidirectional online relation estimator
+# 双向在线关系估计器
 
-## Scope and provenance
+## 范围与来源
 
-`OnlineRelationEstimator` is a new essay2608 mechanism, not the link analysis
-from the DynaMAC paper. The paper identifies links from within-skill
-demonstration precision before fitting a policy. This estimator consumes runtime
-robot/object state, can both establish and revoke a relation, and never reads
-the current phase. `KinematicConnectionDetector` remains unchanged as the
-legacy, translation-only, open-command-reset detector.
+`OnlineRelationEstimator` 是 essay2608 新增机制，不是 DynaMAC 论文中的连接分析。
+论文在策略拟合前，根据技能内部演示精度识别连接；本估计器读取运行时机器人和物体
+状态，既能建立关系，也能撤销关系，并且不读取当前阶段。旧的
+`KinematicConnectionDetector` 保持不变，仍是只看平移、以张开命令复位的检测器。
 
-`RelationDynaMACPolicy` is a separate policy label, `relation_dynamac`. It uses
-the new relation decision to mask the object stream and captures a virtual
-end-effector frame on the transition to `CONNECTED`. Its current frame
-activation still uses phase 4 for the virtual-frame stream, so only the relation
-logic—not the complete controller—is phase independent.
+`RelationDynaMACPolicy` 使用独立方法标签 `relation_dynamac`。它根据新的关系判定
+屏蔽物体流，并在进入 `CONNECTED` 时捕获虚拟末端参考系。当前虚拟流的激活仍使用
+阶段 4，因此只有关系逻辑是完全阶段无关的，整个控制器还不是。
 
-## Inputs and state machine
+## 输入与状态机
 
-Each update consumes:
+每次更新读取：
 
-- actual summed Franka finger-joint opening and its actual velocity;
-- object-in-end-effector relative position and orientation;
-- instantaneous relative linear and angular velocity;
-- windowed relative-position RMS variation and orientation span;
-- windowed object/end-effector velocity correlation and minimum co-motion speed;
-- optional contact evidence when a contact sensor exists.
+- Franka 两个指关节开度之和及其实测速度；
+- 物体相对末端的位置和朝向；
+- 瞬时相对线速度和角速度；
+- 窗口内相对位置 RMS 变化与朝向跨度；
+- 窗口内物体/末端速度相关性与最小共同运动速度；
+- 存在接触传感器时的可选接触证据。
 
-The current custom task has no object contact sensor, so contact is recorded as
-unavailable and is not required. The estimator does not use
-`world_model.mean_gripper` as its gate.
+当前自定义任务没有物体接触传感器，因此接触记为不可用，且不是必需条件。估计器
+不会使用 `world_model.mean_gripper` 作为门控。
 
-| State | Forward transition | Cancellation/recovery |
+| 状态 | 正向转移 | 取消或恢复 |
 |---|---|---|
-| `DISCONNECTED` | connection score ≥ 0.65 → `CANDIDATE_CONNECTED` | remain disconnected |
-| `CANDIDATE_CONNECTED` | three qualifying samples → `CONNECTED` | score < 0.40 → `DISCONNECTED` |
-| `CONNECTED` | loss score ≥ 0.70 → `CANDIDATE_LOST` | remain connected |
-| `CANDIDATE_LOST` | three qualifying loss samples → `DISCONNECTED` | loss score ≤ 0.35 → `CONNECTED` |
+| `DISCONNECTED` | 连接分数 ≥ 0.65 → `CANDIDATE_CONNECTED` | 保持断开 |
+| `CANDIDATE_CONNECTED` | 连续三个合格样本 → `CONNECTED` | 分数 < 0.40 → `DISCONNECTED` |
+| `CONNECTED` | 丢失分数 ≥ 0.70 → `CANDIDATE_LOST` | 保持连接 |
+| `CANDIDATE_LOST` | 连续三个丢失样本 → `DISCONNECTED` | 丢失分数 ≤ 0.35 → `CONNECTED` |
 
-`CANDIDATE_LOST` retains the connected control decision until loss is confirmed,
-so a one-step relative-pose spike does not switch frames. Establishment requires
-co-motion and correlation; retention does not require continued motion. Opening
-the gripper, an empty fully closed gripper, or sustained relative translation,
-rotation, position dispersion, or orientation dispersion can cause loss.
-Confidence is a continuous [0, 1] exponential moving average with coefficient
-0.30. It follows the connection evidence while disconnected and one minus loss
-evidence while connected.
+`CANDIDATE_LOST` 在丢失确认前仍保留连接控制决策，避免单步相对位姿尖峰切换参考系。
+建立关系要求共同运动与速度相关性，维持关系则不要求持续运动。夹爪张开、空抓时完全
+闭合，或持续的相对平移、旋转、位置发散、朝向发散都能触发丢失。置信度为 [0, 1]
+范围内、系数 0.30 的指数移动平均：断开时跟随连接证据，连接时跟随一减丢失证据。
 
-## Frozen-data calibration
+## 冻结数据标定
 
-Calibration uses all five frozen demonstrations and no simulator test seed. The
-manual states 4–6 identify positive connected windows only during calibration;
-states 0–2 and 8–9 provide the actual open-gripper distribution. Phase labels
-are also used to score the offline replay, but are never passed to `update()`.
+标定只使用五条冻结演示，不使用任何仿真测试 seed。人工状态 4–6 只在标定阶段标识
+连接正窗口；状态 0–2、8–9 提供真实张开夹爪分布。阶段标签也用于离线回放评分，但
+绝不传给 `update()`。
 
-The accepted calibration has 263 complete ten-step positive windows. The 99th
-percentile plus a 1.25 margin determines connection-side motion thresholds;
-position/orientation floors prevent sub-resolution thresholds. Loss thresholds
-are deliberately wider than establishment thresholds.
+验收标定包含 263 个完整十步正窗口。连接侧运动阈值由第 99 百分位数乘 1.25 裕量
+得到，并用位置/朝向下限避免亚分辨率阈值；丢失阈值刻意比建立阈值宽。
 
-| Quantity | Connection side | Loss side |
+| 量 | 建立侧 | 丢失侧 |
 |---|---:|---:|
-| occupied opening band | 0.02257–0.06267 m | open ≥ 0.07129 m or near-empty close |
-| actual gripper speed | ≤ 0.02045 m/s | not a sole loss trigger |
-| relative linear speed | ≤ 0.02197 m/s | ≥ 0.075 m/s |
-| relative angular speed | ≤ 0.02775 rad/s | ≥ 0.105 rad/s |
-| relative-position RMS std | ≤ 0.00050 m | ≥ 0.002 m |
-| relative-orientation span | ≤ 0.005 rad | ≥ 0.030 rad |
-| co-motion speed | ≥ 0.06166 m/s | not required for retention |
-| velocity correlation | ≥ 0.79942 | not required for retention |
+| 占用开度区间 | 0.02257–0.06267 m | 张开 ≥ 0.07129 m 或接近空夹紧 |
+| 实测夹爪速度 | ≤ 0.02045 m/s | 不单独触发丢失 |
+| 相对线速度 | ≤ 0.02197 m/s | ≥ 0.075 m/s |
+| 相对角速度 | ≤ 0.02775 rad/s | ≥ 0.105 rad/s |
+| 相对位置 RMS 标准差 | ≤ 0.00050 m | ≥ 0.002 m |
+| 相对朝向跨度 | ≤ 0.005 rad | ≥ 0.030 rad |
+| 共同运动速度 | ≥ 0.06166 m/s | 维持时不要求 |
+| 速度相关性 | ≥ 0.79942 | 维持时不要求 |
 
-The opening lower bound is half the first percentile of occupied-gripper
-openings. This rejects a fully closed miss: the successful grasps stop at an
-approximately 45.3 mm summed finger opening because the cube occupies the
-gripper, whereas an empty gripper can close near zero.
+开度下界取“夹住物体”开度第 1 百分位数的一半，因此可拒绝完全闭合的空抓：成功抓取
+时方块占据夹爪，指关节总开度停在约 45.3 mm；空夹爪则可接近零。
 
-## Offline replay
+## 离线回放
 
-Replaying actual joint and pose arrays from the five demonstrations gives a mean
-onset offset of -8 ms relative to the scripted start of state 4 (range -220 to
-+80 ms) and a 60 ms release delay relative to state 7. Mean false-positive and
-false-negative fractions against states 4–6 are 0.01845 and 0.00681. The early
-onset on one demonstration occurs late in the grasp dwell when actual occupied
-fingers and rigid co-motion already provide evidence; the scripted phase label
-is therefore a comparison convention, not direct physical ground truth.
+在五条演示的实测关节和位姿数组上回放，相对脚本状态 4 起点的平均建立偏移为
+-8 ms（范围 -220 至 +80 ms），相对状态 7 的释放延迟为 60 ms。与状态 4–6
+比较时，平均假阳性比例为 0.01845，假阴性比例为 0.00681。其中一条演示提前建立，
+发生在抓取停留末期，此时被物体占用的指关节和刚性共同运动已经提供证据；所以脚本
+阶段只是比较约定，不是直接物理真值。
 
-## Mechanism counterexamples and simulator smoke
+## 机制反例与仿真冒烟
 
-Deterministic unit tests exercise all four required mechanisms:
+确定性单元测试覆盖四类必需机制：
 
-1. a fully closed gripper that misses a stationary object never leaves
-   `DISCONNECTED`;
-2. occupied fingers plus rigid correlated transport pass through
-   `CANDIDATE_CONNECTED` and reach `CONNECTED`;
-3. forced relative object motion with the gripper still closed passes through
-   `CANDIDATE_LOST` and returns to `DISCONNECTED`;
-4. an externally moving ungrasped object never creates a relation.
+1. 完全闭合但错过静止物体的夹爪始终停留在 `DISCONNECTED`；
+2. 指间有物体且刚性相关搬运时，经过 `CANDIDATE_CONNECTED` 到达 `CONNECTED`；
+3. 夹爪仍闭合但物体被强制移走时，经过 `CANDIDATE_LOST` 回到 `DISCONNECTED`；
+4. 未抓取物体的外部运动不会建立关系。
 
-The first Isaac Lab smoke run uses seed 6200 only as a held-out mechanism check,
-not for threshold tuning. `relation_dynamac` succeeds in all six original
-conditions, with 120 ms connection onset delay, 60 ms normal release delay, and
-about 0.009 connected false-positive fraction. Smooth and sudden external object
-motion before grasp do not create a persistent false connection.
+首次 Isaac Lab 冒烟只使用 seed 6200 做留出机制检查，不参与调参。
+`relation_dynamac` 在六个原始条件全部成功，连接建立延迟 120 ms、正常释放延迟
+60 ms，连接状态假阳性比例约 0.009。抓取前物体平滑或突然外移都不会形成持续误连接。
 
-Two new instantaneous perturbations expose the missing recovery layer:
+两个新增瞬时扰动暴露了缺失的恢复层：
 
-- `drop_after_grasp` teleports the object 18 cm away onto the support during
-  transport without opening the gripper. The estimator revokes the relation in
-  40 ms, but the phase-clock policy does not regrasp and final placement fails.
-- `close_without_grasp` moves the object 18 cm immediately before closure. No
-  connection is ever declared (maximum confidence 0.067), but the policy
-  continues its fixed phase sequence and final placement fails.
+- `drop_after_grasp`：搬运中夹爪不张开，把物体瞬移 18 cm 至支撑面。估计器在
+  40 ms 内撤销关系，但阶段时钟不会重新抓取，最终放置失败。
+- `close_without_grasp`：夹爪闭合前把物体移走 18 cm。全过程不声明连接，最大
+  置信度 0.067；策略仍继续固定阶段，因此最终放置失败。
 
-These are correct detector outcomes and failed task outcomes. Bidirectional
-relation estimation is necessary for recovery, but not sufficient: recovery
-also needs a replanning/regrasp transition policy.
+这两项都是“检测正确、任务失败”。双向关系估计是恢复的必要条件，但不充分；恢复
+还需要重规划或重新抓取转移策略。
 
-## Reproduction
+## 复现
 
 ```bash
 conda run -n env_isaaclab python scripts/analyze_relation_estimator.py \
@@ -130,11 +106,10 @@ conda run -n env_isaaclab python scripts/eval_single_arm.py --headless \
   --output_dir outputs/single_arm_scientific/relation_smoke_v1_clean
 ```
 
-The accepted runs use clean implementation commit `1143f17`. The calibration
-replay records source hash
-`23056a2b48bdca97620f545ba5c73a47e22545d62dc227e769093fcf44786a11`
-and analysis fingerprint
-`d74669c3ece5682d3c4d76ff276899867a87774f1976cb81a2359c245ca195cb`.
-All eight simulator trials share source hash
+验收运行使用实现提交 `1143f17`。标定回放源码哈希为
+`23056a2b48bdca97620f545ba5c73a47e22545d62dc227e769093fcf44786a11`，
+分析指纹为
+`d74669c3ece5682d3c4d76ff276899867a87774f1976cb81a2359c245ca195cb`。
+八个仿真试验共用源码哈希
 `66fd9063d7032306e1d0ba8c5187e6248b546a2fc749567b6103772f9f6454ca`
-and schema 4; every condition has one JSON/NPZ pair.
+和 schema 4；每个条件都有一对 JSON/NPZ 文件。

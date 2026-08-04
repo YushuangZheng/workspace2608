@@ -1,61 +1,63 @@
-# Bimanual DynaMAC minimal loop
+# 双臂 DynaMAC 最小闭环
 
-The bimanual extension contains exactly the two tasks selected after the single-arm loop passed: Handover and Lift
-Tray. Both use two independent Franka arms, a 16-D absolute Cartesian action, lightweight virtual attachment, and
-fresh Isaac Lab processes for each collection/evaluation episode. The attachment is geometric rather than a claim
-of contact-rich grasp physics.
+单臂闭环通过后，双臂扩展只选择了两个任务：交接（Handover）和托盘搬运
+（Lift Tray）。两者都使用两台独立 Franka、16 维绝对笛卡尔动作、轻量几何附着，
+并为每次采集或评测启动新的 Isaac Lab 进程。这里的附着是工程几何模拟，不代表
+接触丰富的抓取物理。
 
-## Handover
+## 双臂交接
 
-The frozen five-demo dataset is `data/handover_static/v1`. Its 13 states cover left grasp, left transport, right
-rendezvous, carrier transfer, right placement, release, and retreat. Verify or reproduce with:
+旧版五演示冻结集为 `data/handover_static/v1`。其 13 个状态覆盖左臂抓取、左臂
+搬运、右臂会合、载体切换、右臂放置、释放和撤离。新的四值关系标签数据集见
+`data/handover_static/v2` 和 [双臂交接环境与数据骨架](bimanual_handover_setup.md)。
+
+验证旧版工程试验：
 
 ```bash
 python scripts/audit_handover_dataset.py --data_dir data/handover_static/v1
 python scripts/eval_handover.py --headless --seeds 8208
 ```
 
-The controlled pilot compares independent arms, a fixed handover point, a fixed-schedule static cross-arm stream,
-and Full DynaMAC. Perturbations include left/right offsets, a shifted handover, left/right pauses, and smooth/sudden
-single-arm offsets. Full DynaMAC captures the observed right-hand-to-object transform at transfer and solves the
-placement target using that live connection geometry.
+受控试验比较独立双臂、固定交接点、固定时序静态跨臂流和 Full DynaMAC。扰动包括
+左右臂偏置、交接点平移、左右臂暂停，以及单臂平滑/突发偏置。Full DynaMAC 在
+载体切换时捕获实时右手—物体变换，并用该连接几何求解放置目标。
 
-The final Full DynaMAC development run succeeded in all eight conditions with 5.6--26.9 mm final error. This is a
-one-seed engineering result; the independent/fixed/static baselines and all raw trial metrics remain in
-`outputs/handover_minimal` when reproduced locally.
+开发试验中，Full DynaMAC 在八个条件上全部成功，最终误差为 5.6–26.9 mm。
+这只是单 seed 工程结果；其他基线和逐试验原始指标可在本地复现后从
+`outputs/handover_minimal` 查看。
 
-| Method | Successful conditions / 8 | Notable failure |
+| 方法 | 成功条件数 / 8 | 主要失败 |
 |---|---:|---|
-| Independent arms | 7 | shifted handover |
-| Fixed handover | 7 | shifted handover |
-| Static cross-arm | 7 | sudden right-arm offset |
-| Full DynaMAC | 8 | none in this pilot |
+| 独立双臂 | 7 | 交接点平移 |
+| 固定交接 | 7 | 交接点平移 |
+| 静态跨臂流 | 7 | 右臂突发偏置 |
+| Full DynaMAC | 8 | 本次单 seed 试验中无失败 |
 
-## Lift Tray
+## 双臂托盘搬运
 
-The frozen dataset is `data/lift_tray_static/v1`. Its nine states cover simultaneous approach, bilateral grasp,
-lift, transport, lower, release, and retreat. The tray pose is driven by the midpoint of both grippers while the
-connection is active, making arm disagreement directly measurable.
+冻结数据集为 `data/lift_tray_static/v1`。九个状态覆盖同步接近、双侧抓取、抬升、
+搬运、下降、释放和撤离。连接有效时，托盘位姿由两个夹爪中点驱动，因此可直接
+测量双臂分歧。
 
 ```bash
 python scripts/audit_lift_tray_dataset.py --data_dir data/lift_tray_static/v1
 python scripts/eval_lift_tray.py --headless --seeds 10208
 ```
 
-The ablation compares independent arms, an intentionally static shared-object stream, and Full DynaMAC using
-captured virtual gripper frames plus the opposite gripper frame during shared transport. Report final placement,
-cross-arm width error, total path length, perturbation recovery, and inference time. As with Handover, the current
-matrix is a pilot and must be expanded to multiple seeds before paper-level claims.
+消融比较独立双臂、刻意静态的共享物体流，以及使用捕获虚拟夹爪参考系和对侧夹爪
+参考系的 Full DynaMAC。报告最终放置、跨臂宽度误差、总路径、扰动恢复和推理时间。
+当前矩阵仍是单 seed 试验，论文级结论前必须扩展到多 seed。
 
-| Method | Successful conditions / 5 | Static width error | Interpretation |
+| 方法 | 成功条件数 / 5 | 静态宽度误差 | 解释 |
 |---|---:|---:|---|
-| Independent arms | 5 | 55.7 mm | placement works, weaker bilateral synchronization |
-| Static shared-object | 0 | 32.8 mm | endogenous object feedback makes the path diverge |
-| Full DynaMAC | 5 | 29.2 mm | masks the shared-object loop and uses cross-arm/virtual frames |
+| 独立双臂 | 5 | 55.7 mm | 放置成功，但双侧同步较弱 |
+| 静态共享物体 | 0 | 32.8 mm | 内生物体反馈使路径发散 |
+| Full DynaMAC | 5 | 29.2 mm | 屏蔽共享物体回路，并使用跨臂/虚拟参考系 |
 
-## Claim boundary
+## 声明边界
 
-These environments can support claims about reproduced relative-geometry behavior, online reference validity,
-zero-shot response to test-time perturbations from static demonstrations, and dynamic cross-arm coordination in the
-custom Isaac Lab tasks. They do not establish the paper's reported 35-point gain, 20x sample efficiency, a complete
-DynaBench reproduction, or a complete MiDiGaP/Diffusion Policy reproduction.
+这些环境可支持的窄范围结论包括：相对几何行为复现、在线参考系有效性、仅用静态
+演示面对测试时扰动的零样本响应，以及自定义 Isaac Lab 任务中的动态跨臂协调。
+它们不能证明论文所报的 35 个百分点增益、20 倍样本效率、完整 DynaBench、
+MiDiGaP 或 Diffusion Policy 复现。正式论文表述应优先引用
+[夜间研发最终报告](overnight_final_report.md) 中更新后的证据边界。

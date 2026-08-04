@@ -1,316 +1,243 @@
-# Overnight DynaMAC progress
+# DynaMAC 夜间研发过程记录
 
-Started: 2026-08-04 (Asia/Shanghai)
+开始时间：2026-08-04（Asia/Shanghai）
 
-## Baseline and constraints
+## 基线与约束
 
-- Branch: `codex/overnight-dynamac-audit`
-- Starting commit/checkpoint: `57e01c4fef0cacda9a37e7313afcff40c0b1b496`
-  (`single-arm-v1`)
-- The starting worktree was clean, so no synthetic checkpoint commit was created.
-- Python: 3.10.19
-- Isaac Lab: 0.54.0
-- Isaac Sim: 4.5.0.0
-- PyTorch: 2.7.0+cu128
-- NumPy: 1.26.4
-- GPU: NVIDIA GeForce RTX 4090; driver 550.90.07
-- Frozen single-arm dataset: `pick_place_static/v1`, five demonstrations,
-  SHA-256 `8956857d034694090ec0d1bf39c33364f95cac723954ac3baedcbd1fd8e479f8`
+- 工作分支：`codex/overnight-dynamac-audit`
+- 起始提交/检查点：`57e01c4fef0cacda9a37e7313afcff40c0b1b496`
+  （标签 `single-arm-v1`）
+- 起始工作树干净，因此没有制造额外检查点提交。
+- Python：3.10.19
+- Isaac Lab：0.54.0
+- Isaac Sim：4.5.0.0
+- PyTorch：2.7.0+cu128
+- NumPy：1.26.4
+- GPU：NVIDIA GeForce RTX 4090，驱动 550.90.07
+- 单臂冻结数据：`pick_place_static/v1`，五条演示，SHA-256
+  `8956857d034694090ec0d1bf39c33364f95cac723954ac3baedcbd1fd8e479f8`
 
-The frozen dataset, its manifest, `FROZEN`, existing output directories, and the
-paper PDF are read-only inputs for this work. Test seeds are evaluation-only and
-will not be used for threshold tuning.
+冻结数据及 manifest、`FROZEN`、旧输出目录和论文 PDF 均作为只读输入。测试 seed
+只用于评测，不参与阈值调整。
 
-## Execution plan
+## 执行计划
 
-1. Re-audit the completed strict single-arm correction and add missing phase-level
-   causal diagnostics without overwriting prior summaries.
-2. Separate method provenance and add a simplified paper-faithful skill-level
-   baseline while preserving compatibility names.
-3. Add velocity-based skill segmentation as a diagnostic-only tool.
-4. Add a bidirectional online relation estimator and synthetic plus simulator
-   counterexample tests using thresholds derived from training/calibration data.
-5. Run the stable methods on at least ten held-out evaluation seeds and preserve
-   per-trial evidence under a new fingerprinted output directory.
-6. Audit the already-present bimanual handover environment, expert, frozen data,
-   and smoke path; only fill gaps rather than rebuilding it.
+1. 重新审计单臂严格修正，补充阶段级因果诊断且不覆盖旧摘要。
+2. 区分方法来源，实现论文忠实的简化技能级基线，并保留兼容名称。
+3. 增加只用于诊断的速度技能分段。
+4. 增加双向在线关系估计器，用训练/标定数据阈值运行合成与仿真反例。
+5. 在至少十个留出 seed 上评测稳定方法，把逐试验证据保存到新指纹目录。
+6. 审计现有双臂交接环境、专家、冻结数据和冒烟链路，只补缺口，不重建系统。
 
-## Phase log
+## 阶段日志
 
-### Phase 1 — scientific audit
+### 阶段 1：科学审计
 
-Status: complete.
+状态：完成。
 
-Existing work at the checkpoint already corrected the fixed 59 mm vertical
-residual, semantic placement success, threshold sensitivity, action-rate limiting,
-post-step terminal reads, and experiment fingerprints. The remaining Phase 1 work
-is to quantify Mask-only versus Full behavior by phase and determine which phases,
-durations, frame switches, or forced transitions explain the path difference.
+起始检查点已经修正固定 59 mm 竖直残差、语义放置成功、阈值灵敏度、动作限速、
+终止后场景读取和实验指纹。本阶段继续量化 Mask-only 与 Full 的逐阶段差异。
 
-Completed work:
+完成内容：
 
-- Added explicit legacy 3-D, XY, and composite stable-place indicators.
-- Added an additive phase-attribution module and a thin analysis entry point.
-- Reconciled all 72 saved strict traces without rerunning or overwriting them.
-- Verified that every phase partition reproduces the saved path within
-  `2.3e-16 m`.
-- Found that Full is shorter in only 10/18 pairs. Mean Full-minus-Mask path is
-  -77.80 mm in lift and -24.99 mm in move-above-target; all other phases account
-  for about -1.81 mm.
-- Found a strong duration/path association (`r = 0.86`) and zero forced
-  transitions. This limits the claim to a coupled virtual-frame/timing effect.
-- Added `docs/single_arm_scientific_audit.md` with the target/support geometry,
-  metric reconciliation, causal limits, and reproduction command.
+- 增加旧三维、XY 和组合稳定放置指标；
+- 增加可加阶段归因模块和轻量分析入口；
+- 不重跑、不覆盖地重算全部 72 条严格轨迹；
+- 阶段分区以 `2.3e-16 m` 内误差重构每条保存路径；
+- Full 只在 10/18 对中更短；Full 减 Mask 的抬升路径均值为 -77.80 mm，移至目标
+  上方为 -24.99 mm，其余阶段合计约 -1.81 mm；
+- 时长/路径关联 `r = 0.86`，强制转移为零，因此结论限制为耦合的虚拟参考系/计时效应；
+- 新增 [单臂科学审计](single_arm_scientific_audit.md)。
 
-Validation:
+验证：
 
 - `python -m compileall -q source/essay2608/essay2608 scripts tests`
-- `python -m pytest -q` — 5 passed
-- `python scripts/analyze_phase_diagnostics.py ...` — 36 Mask/Full traces,
-  18 exact pairs, no partition failure
+- `python -m pytest -q`：5 项通过
+- `python scripts/analyze_phase_diagnostics.py ...`：36 条 Mask/Full 轨迹、18 个精确配对
 - `git diff --check`
 
-### Phase 2 — method provenance and skill-level baseline
+提交：`4d0b806 Audit single-arm success metrics and experiment validity`。
 
-Status: complete.
+### 阶段 2：方法来源与技能级基线
 
-Implementation completed before the full evaluation matrix:
+状态：完成。
 
-- Renamed the runtime engineering controller to `OnlineDynaMACPrototype` while
-  preserving `DynaMACPolicy` as a compatibility alias and `full_dynamac` as its
-  result label.
-- Added `SkillDynaMACPolicy`, which follows Algorithm 1 and Eqs. (5–6) using
-  the project's phase labels, Gaussian fitting, and translational product of
-  experts.
-- Added a 6-D position/rotation-vector covariance while retaining the original
-  3-D covariance used for action fusion.
-- Added all ten skill-start virtual frames, fixed per-skill frame selection, and
-  serializable training diagnostics.
-- Added explicit policy and perturbation configurations to evaluation
-  fingerprints and advanced the schema version.
-- Documented exact provenance and omissions in `docs/method_provenance.md`.
+实现内容：
 
-Training-only diagnostics show that the unweighted 6-D determinant is dominated
-by tiny rotational variance on this constrained dataset: it calls the object
-linked in phase 0 and phases 2–9. Eq. (6) also over-selects historical virtual
-frames in phase 5. These are recorded as limitations rather than hidden by
-evaluation-seed tuning.
+- 把运行时工程控制器明确命名为 `OnlineDynaMACPrototype`，保留
+  `DynaMACPolicy` 兼容别名和 `full_dynamac` 结果标签；
+- 增加 `SkillDynaMACPolicy`，使用项目阶段标签、高斯拟合和平移专家乘积实现
+  Algorithm 1 与 Eq. (5–6) 的简化版本；
+- 增加六维位置/旋转向量协方差，同时保留用于动作融合的原三维协方差；
+- 增加十个技能起点虚拟参考系、固定逐技能选择和可序列化训练诊断；
+- 把显式策略/扰动配置写入评测指纹，并提升 schema；
+- 在 [方法来源](method_provenance.md) 中记录精确来源和缺失组件。
 
-Pre-commit validation so far:
+训练集诊断表明，不加权六维行列式被本数据集中极小旋转方差主导，把阶段 0 和 2–9
+的物体都判断为连接；Eq. (6) 在阶段 5 也过度选择历史虚拟参考系。这些被保留为限制，
+没有用评测 seed 调权隐藏。
 
-- `python -m pytest -q` — 8 passed
-- `python -m compileall -q source/essay2608/essay2608 scripts tests`
-- Static Isaac Lab smoke, seed 6200 — stable-place success, 4.65 mm XY error,
-  59.18 mm 3-D error, 322 steps, 1.037 m path, no forced transition
-- Six-condition Isaac Lab smoke, seed 6200 — 4/6 stable-place and recovery
-  successes. Both 10 cm target shifts failed at 67.83 mm XY error, exposing the
-  cost of over-selected static virtual streams; the result is retained rather
-  than used to tune thresholds.
+预提交验证：
 
-Clean evaluation at implementation commit `c979a94`:
+- `python -m pytest -q`：8 项通过
+- 静态 seed 6200：稳定成功，XY 误差 4.65 mm，三维误差 59.18 mm，322 步，
+  路径 1.037 m，无强制转移
+- 六条件 seed 6200：4/6 成功；两个 10 cm 目标移动均以 67.83 mm XY 误差失败
 
-- Command: `conda run -n env_isaaclab python scripts/eval_single_arm.py
-  --headless --methods world_gaussian static_multistream skill_dynamac
-  mask_only full_dynamac --conditions static smooth_object sudden_object
-  smooth_target sudden_target arm_offset --seeds 6200 6201 6202 --output_dir
-  outputs/single_arm_scientific/skill_baseline_v1`
-- Integrity: 90/90 unique combinations, 90 JSON and 90 NPZ files, all metrics
-  present, schema 3, one source hash, one commit, and the frozen dataset hash.
-- World Gaussian and Static Multi-stream: 0/18 stable-place successes each.
-- SkillDynaMAC: 10/18 successes and 8/15 recoveries. All object shifts
-  succeeded; all six target shifts failed; seed 6201 also failed static and arm
-  offset. Condition-balanced mean XY error is 25.95 mm and path is 1.152 m.
-- SkillDynaMAC's offline fixed link labels have 0.621 mean false-positive
-  fraction against scripted physical-link phases, zero false-negative fraction,
-  0.259 m mean raw frame-switch jump limited to 0.020 m, and zero forced phase
-  transitions.
-- Mask-only and the online project prototype: 18/18 successes and 15/15
-  recoveries each. These stronger engineering results do not make them
-  paper-faithful methods.
+提交 `c979a94` 的干净评测：
 
-Implementation commit: `c979a94 Add paper-faithful skill-level DynaMAC baseline`.
+- 90/90 个唯一组合、90 个 JSON 和 90 个 NPZ、指标齐全、schema 3、统一源码/数据哈希；
+- World 与 Static 各 0/18；
+- SkillDynaMAC 成功 10/18、恢复 8/15，物体移动全成功，六个目标移动全失败，
+  条件平衡 XY 误差 25.95 mm、路径 1.152 m；
+- 固定连接标签相对脚本连接阶段的平均假阳性比例为 0.621、假阴性为零；平均原始
+  参考系切换 0.259 m，经限速为 0.020 m；
+- Mask-only 与在线旧原型各 18/18 成功、15/15 恢复，但它们不是论文忠实方法。
 
-### Phase 3 — automatic skill segmentation diagnostic
+实现提交：`c979a94 Add paper-faithful skill-level DynaMAC baseline`。
+评测记录提交：`48346b7 Record SkillDynaMAC baseline evaluation`。
 
-Status: complete.
+### 阶段 3：自动技能分段诊断
 
-- Added a source-level velocity diagnostic using both end-effector linear and
-  angular speeds, shared training-only quantile calibration, persistent
-  low-speed intervals, short-run removal, close-run merging, endpoint-aware
-  candidate extraction, and reference-free cross-demo alignment.
-- Added a thin analysis/visualization entry point with dataset/source/config
-  fingerprinting and two plots.
-- All five frozen demonstrations produce five automatic segments and four
-  boundary clusters with 5/5 support. The aligned boundary time standard
-  deviation averages 39 ms.
-- Candidate times differ from the nearest manual controller transition by
-  211 ms on average because grasp/release dwell centers are events while manual
-  states label the dwell edges.
-- The result supports coarse approach-and-grasp, transport-and-place, and
-  retreat macros, but velocity alone cannot isolate gripper semantics and does
-  not reproduce TAPAS.
+状态：完成。
 
-Validation:
+- 使用末端线/角速度、共同训练分位数标定、持续低速区间、短段删除、近段合并、
+  端点感知候选提取和无参考跨演示对齐；
+- 增加轻量分析/可视化入口、数据/源码/配置指纹和两张图；
+- 五条演示都产生五个自动片段和四个 5/5 支持边界簇；边界时间标准差平均 39 ms；
+- 候选点离最近人工转移平均 211 ms，因为抓取/释放停留中心是事件，而人工状态标边缘；
+- 支持粗粒度“接近抓取、搬运放置、撤离”，但速度无法单独恢复夹爪语义，也不是 TAPAS。
 
-- `conda run -n env_isaaclab python -m pytest -q` — 11 passed
-- `conda run -n env_isaaclab python scripts/analyze_segmentation.py ...` — five
-  demos, segment counts `[5, 5, 5, 5, 5]`, four fully supported clusters
-- Both generated figures inspected for complete traces, thresholds, manual
-  transitions, candidates, and alignment
-- `python -m compileall -q source/essay2608/essay2608 scripts tests`
-- `git diff --check`
+验证：
 
-Clean reproduction: `outputs/single_arm_scientific/segmentation_v1_clean` at
-commit `7bfdfc4`, source hash `30cded39e7941bf39070079771db321fcbb8effb311094fec530fa6b38d348c4`,
-analysis fingerprint
-`867c512ca7a7ecee6a6905cd71303d9ed749534cd207a7afd7949c7d983dd3eb`.
+- `conda run -n env_isaaclab python -m pytest -q`：11 项通过
+- 五条演示片段数 `[5, 5, 5, 5, 5]`，四个全支持簇
+- 检查两张图的轨迹、阈值、人工转移、候选点和对齐
+- compileall 与 `git diff --check` 通过
 
-### Phase 4 — bidirectional online relation estimation
+干净输出：`outputs/single_arm_scientific/segmentation_v1_clean`；实现提交
+`7bfdfc4`，源码哈希
+`30cded39e7941bf39070079771db321fcbb8effb311094fec530fa6b38d348c4`，
+分析指纹
+`867c512ca7a7ecee6a6905cd71303d9ed749534cd207a7afd7949c7d983dd3eb`。
 
-Status: complete.
+记录提交：`0620b7b Record clean segmentation analysis fingerprint`。
 
-- Preserved `KinematicConnectionDetector` as the legacy implementation and
-  added a phase-independent four-state `OnlineRelationEstimator`.
-- Added actual finger opening/velocity, 6-D relative motion, windowed stability,
-  object/EE velocity correlation, optional contact, asymmetric connection/loss
-  thresholds, temporal hysteresis, and continuous confidence.
-- Calibrated every threshold from all five frozen demonstrations; no simulator
-  test seed contributes to calibration.
-- Added the independent `relation_dynamac` policy, source/config fingerprints,
-  per-step relation state/confidence/gripper traces, onset/release/loss delays,
-  and two new perturbations.
-- Frozen-demo replay: mean onset offset -8 ms, release delay 60 ms, false
-  positive 0.01845, false negative 0.00681 against scripted states 4–6.
-- Four deterministic mechanism tests cover miss, successful transport, closed
-  gripper drop, and external object motion.
-- Dirty-run Isaac smoke, seed 6200: 6/6 original conditions succeeded; onset
-  delay 120 ms and release delay 60 ms. Forced drop revoked in 40 ms; the miss
-  never connected. Both counterexample tasks failed because regrasp/replanning
-  is not implemented.
+### 阶段 4：双向在线关系估计
 
-Validation so far:
+状态：完成。
 
-- `conda run -n env_isaaclab python -m pytest -q` — 16 passed
-- `conda run -n env_isaaclab python scripts/analyze_relation_estimator.py ...`
-  — five complete replays and a visually inspected confidence/state plot
-- `conda run -n env_isaaclab python scripts/eval_single_arm.py ...` — eight
-  isolated workers, complete JSON/NPZ trials
-- `python -m compileall -q source/essay2608/essay2608 scripts tests`
-- `git diff --check`
+- 保留旧 `KinematicConnectionDetector`，新增阶段无关四状态
+  `OnlineRelationEstimator`；
+- 加入实测指关节开度/速度、六维相对运动、窗口稳定性、物体/末端速度相关性、可选
+  接触、非对称连接/丢失阈值、时间滞回和连续置信度；
+- 全部阈值由五条冻结演示标定，测试 seed 不参与；
+- 增加独立 `relation_dynamac` 标签、源码/配置指纹、逐步关系/置信度/夹爪轨迹、
+  建立/释放/丢失延迟和两个新扰动；
+- 冻结演示回放：平均建立偏移 -8 ms、释放延迟 60 ms，假阳性 0.01845、假阴性
+  0.00681；
+- 四个确定性机制测试覆盖空抓、成功搬运、闭合夹爪掉落和外部物体运动；
+- seed 6200 仿真：六个普通条件全成功；建立延迟 120 ms、释放延迟 60 ms；掉落
+  40 ms 撤销，空抓从不连接。两个反例任务因无重抓/重规划而失败。
 
-Clean reproduction at implementation commit `1143f17`:
+验证：
 
-- `outputs/single_arm_scientific/relation_calibration_v1_clean`: source hash
-  `23056a2b48bdca97620f545ba5c73a47e22545d62dc227e769093fcf44786a11`,
-  analysis fingerprint
-  `d74669c3ece5682d3c4d76ff276899867a87774f1976cb81a2359c245ca195cb`.
-- `outputs/single_arm_scientific/relation_smoke_v1_clean`: 8/8 complete unique
-  JSON/NPZ pairs, schema 4, common source hash
-  `66fd9063d7032306e1d0ba8c5187e6248b546a2fc749567b6103772f9f6454ca`.
-- The six regular task outcomes remain 6/6; only drop is marked as expecting
-  relation loss and reports 40 ms post-event loss. Miss never connects.
+- `conda run -n env_isaaclab python -m pytest -q`：16 项通过
+- 五条完整回放和置信度/状态图人工检查
+- 八个隔离 worker，JSON/NPZ 完整
+- compileall 与 `git diff --check` 通过
 
-Implementation commit: `1143f17 Prototype bidirectional online relation estimation`.
+干净复现：
 
-### Phase 5 — expanded single-arm evaluation
+- `relation_calibration_v1_clean` 源码哈希
+  `23056a2b48bdca97620f545ba5c73a47e22545d62dc227e769093fcf44786a11`，
+  分析指纹
+  `d74669c3ece5682d3c4d76ff276899867a87774f1976cb81a2359c245ca195cb`；
+- `relation_smoke_v1_clean` 有 8/8 对 JSON/NPZ、schema 4，共同源码哈希
+  `66fd9063d7032306e1d0ba8c5187e6248b546a2fc749567b6103772f9f6454ca`。
 
-Status: complete.
+实现提交：`1143f17 Prototype bidirectional online relation estimation`。
+记录提交：`7362714 Record clean online relation evaluation`。
 
-- Reserved ten new held-out simulator seeds: 6300–6309. These were not used in
-  implementation smoke tests or threshold calibration.
-- Stable method set: World Gaussian, Static Multi-stream, SkillDynaMAC,
-  Mask-only, legacy online prototype, and bidirectional relation prototype.
-- Condition set: the six existing perturbations plus `drop_after_grasp` and
-  `close_without_grasp`.
-- Added an exact destination-phase path partition to every trial and aggregate;
-  schema 5 also retains onset/release/loss delay, action jump, maximum speed,
-  inference time, recovery, and failure taxonomy.
-- Planned matrix: 6 methods × 8 conditions × 10 seeds = 480 isolated Isaac Lab
-  processes under a new output directory. No result will be used to alter
-  thresholds or success criteria.
+### 阶段 5：扩展单臂评测
 
-Accepted matrix at commit `3673dd2`:
+状态：完成。
 
-- 480/480 unique complete trials, 480 JSON/NPZ pairs, ten 48-trial seed slices,
-  one source/data hash, schema 5, and phase-path residual ≤ `6.67e-16 m`.
-- Regular six-condition success: World 0/60, Static 9/60, SkillDynaMAC 38/60,
-  Mask-only 51/60, legacy Full 51/60, RelationDynaMAC 51/60.
-- All methods fail all drop and miss task trials. RelationDynaMAC nevertheless
-  revokes every drop in 40 ms and rejects every empty closure; legacy online
-  methods revoke only after 0.88–0.91 s and falsely connect in every miss.
-- Regular-condition mean path: Mask 1.222 m, legacy Full 1.084 m, Relation 1.117
-  m. Relation compute remains below 1 ms but is 3.6× legacy Full.
-- Added `docs/single_arm_final_report.md` with Wilson intervals, seed-balanced
-  bootstrap results, phase paths, action/speed/compute, failure taxonomy, and
-  explicit claim limits.
+- 预留全新 seed 6300–6309，未用于冒烟或阈值标定；
+- 方法：World、Static、SkillDynaMAC、Mask-only、旧在线 Full、双向 Relation；
+- 条件：原六扰动加 `drop_after_grasp` 和 `close_without_grasp`；
+- 每条试验增加精确目的阶段路径分区；schema 5 同时保留关系延迟、动作跳变、最大
+  速度、推理时间、恢复和失败分类；
+- 计划并执行 6 方法 × 8 条件 × 10 seed = 480 个隔离进程，结果不反向修改阈值。
 
-Validation:
+提交 `3673dd2` 对应矩阵验收：
 
-- `conda run -n env_isaaclab python -m pytest -q` — 17 passed before freeze
-- 480 independent Isaac workers completed; transient Isaac plugin-exit warnings
-  produced no missing artifact or metric
-- full matrix identity, count, fingerprint, path-partition, and hash audit passed
+- 480/480 完整唯一试验、480 对 JSON/NPZ、十个各 48 条 seed 切片、统一源码/数据
+  哈希、schema 5，阶段路径残差 ≤ `6.67e-16 m`；
+- 六普通条件：World 0/60、Static 9/60、SkillDynaMAC 38/60、Mask 51/60、
+  旧 Full 51/60、Relation 51/60；
+- 所有方法在掉落和空抓任务上都失败。Relation 仍能在 40 ms 撤销全部掉落并拒绝
+  全部空抓；旧在线方法要到 0.88–0.91 s 后才撤销，并在每个空抓中误连接；
+- 普通条件平均路径：Mask 1.222 m、旧 Full 1.084 m、Relation 1.117 m；
+  Relation 计算仍低于 1 ms，但为旧 Full 的 3.6 倍；
+- [单臂最终报告](single_arm_final_report.md) 记录 Wilson 区间、seed 平衡 bootstrap、
+  阶段路径、动作/速度/计算、失败分类和明确声明边界。
 
-### Phase 6 — bimanual handover skeleton
+验证：17 项冻结前测试通过；480 个独立 worker 完成；瞬时 Isaac 退出警告未导致文件
+或指标缺失；身份、计数、指纹、路径分区和哈希审计全部通过。
 
-Status: complete.
+指标提交：`3673dd2 Prepare expanded single-arm evaluation metrics`。
+报告提交：`e8df22c Run expanded single-arm DynaMAC evaluation`。
 
-Audit findings and minimum plan:
+### 阶段 6：双臂交接骨架
 
-- The existing `Essay2608-Bimanual-Handover-v0` already has two Frankas,
-  independent absolute Cartesian IK actions, independent grippers, a complete
-  13-state scripted expert, isolated-process collection, and five frozen v1
-  demonstrations.
-- The task observation manager exposes only joint state and prior action, so it
-  does not yet satisfy the explicit geometric observation contract.
-- Frozen v1 records a single kinematic `carrier` and cannot represent the short
-  `both` interval. It must remain immutable; the corrected schema will be
-  collected as `data/handover_static/v2`.
-- Add explicit left/right EE, object, target, and measured finger observations;
-  add state-aligned `none → left_only → both → right_only → none` supervision;
-  keep the physical carrier field for backward compatibility.
-- Unit-test the simulator-independent schema and v1 compatibility, run one
-  isolated headless smoke episode, then collect and independently audit five v2
-  episodes before freezing them.
+状态：完成。
 
-Accepted results:
+审计发现：已有任务具备两台 Franka、独立绝对 IK、独立夹爪、13 状态专家、隔离采集
+和五条冻结 v1；但观测管理器只暴露关节状态和前一动作，v1 的单一 `carrier` 也不能
+表示短时 `both`。因此 v1 保持不可变，修正模式写入独立 v2。
 
-- Pure tests pass without starting Isaac; the handover schema exposes the exact
-  `none → left_only → both → right_only → none` sequence and rejects a corrupted
-  transfer label. Frozen v1 remains loadable through `legacy_carrier_only`.
-- Headless seed 7300 completed in 575 steps at 10.62 mm final error. Runtime
-  inspection confirmed the six required observation shapes and 16-D action.
-- Formal v2 accepted five successes from eight isolated attempts at seeds 7400,
-  7403, 7404, 7406, and 7407. Rejected workers contributed no data.
-- All five trajectories contain states 0–12, all four labels, exactly 15 `both`
-  steps, measured 0–40 mm gripper motion, continuous 20 ms timestamps, and no
-  reset-like jump.
-- Frozen hash:
-  `91706df18abfea606c9e6836f1864e675610633ce5cb0c3c23846a1ea4f5fe18`.
-  Maximum final error is 11.04 mm; minimum start separation is 13.91 mm.
-- Collection and audit both refuse to overwrite v2 after `FROZEN`; the manifest
-  remained unchanged. `DynaMAC.pdf`, single-arm v1, and handover v1 were not
-  modified.
-- `docs/bimanual_handover_setup.md` records the contract, commands, audit, and
-  scientific limitations. The cube remains a gravity-disabled geometric
-  attachment, so this is infrastructure rather than contact-rich evidence.
+补充内容：
 
-Validation:
+- 显式左右末端、物体、目标和实测指关节观测；
+- 与状态对齐的 `none → left_only → both → right_only → none` 监督；
+- 保留物理 `carrier` 字段以兼容旧策略；
+- 仿真无依赖的模式单元测试和 v1 向后兼容测试；
+- 一条隔离 headless 冒烟，再采集并独立审计五条 v2。
 
-- `conda run -n env_isaaclab python -m pytest -q` — 20 passed
-- one independent headless smoke worker — success
-- eight formal independent workers — five accepted, three rejected by the
-  unchanged success gate
-- pre-freeze and post-freeze full dataset audits — pass with identical digest
-- frozen overwrite/refreeze counterexamples — both refused, manifest unchanged
+验收结果：
 
-### Final handoff
+- 纯测试验证完整四值序列，并拒绝被破坏的 transfer 标签；v1 以
+  `legacy_carrier_only` 正常加载；
+- seed 7300 在 575 步完成，最终误差 10.62 mm；运行时确认六个必需观测形状和
+  16 维动作；
+- 正式 v2 在八次隔离尝试中接受 seed 7400、7403、7404、7406、7407；
+- 五条轨迹均包含状态 0–12、全部四标签、恰好 15 个 `both` 步、0–40 mm 实测
+  夹爪运动、连续 20 ms 时间戳，且无复位式跳变；
+- 冻结哈希
+  `91706df18abfea606c9e6836f1864e675610633ce5cb0c3c23846a1ea4f5fe18`，
+  最大最终误差 11.04 mm，最小初始间距 13.91 mm；
+- 采集和审计都拒绝覆盖冻结 v2，manifest 不变；论文、单臂 v1、交接 v1 未改；
+- [双臂交接说明](bimanual_handover_setup.md) 记录契约、命令、审计和科学限制。
 
-Status: complete.
+验证：
 
-- `docs/overnight_final_report.md` consolidates all phase results, commit and
-  reproduction provenance, solved/open questions, exact claim boundaries, the
-  project-owned research direction, and the next-day top three checks.
-- The final repository acceptance reruns pure tests, syntax compilation, frozen
-  dataset audits, the 480-trial identity audit, protected-asset hashes, and a
-  clean-worktree check before closing the goal.
+- `conda run -n env_isaaclab python -m pytest -q`：20 项通过
+- 一条独立 headless 冒烟成功
+- 八个正式隔离 worker：五条接受、三条由原成功门拒绝
+- 冻结前后完整审计得到相同摘要哈希
+- 覆盖/重复冻结反例均被拒绝，manifest 不变
+
+实现提交：`5c4921e Prepare audited bimanual handover dataset v2`。
+数据提交：`7489495 Add bimanual handover environment and scripted demonstrations`。
+
+### 最终交付
+
+状态：完成。
+
+- [最终报告](overnight_final_report.md) 汇总阶段结果、提交与复现来源、已解决/未解决
+  问题、声明边界、自研方向和次日三项检查；
+- 最终验收重跑纯测试、语法编译、冻结数据审计、480 条身份审计、受保护资产哈希和
+  干净工作树检查；
+- 20 项测试通过，480 条实验与三个冻结数据集均从磁盘复核一致；
+- 最终汇总提交：`ab1d4ef Document overnight DynaMAC research outcomes`。

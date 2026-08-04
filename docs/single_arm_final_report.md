@@ -1,190 +1,154 @@
-# Expanded single-arm DynaMAC evaluation
+# 单臂 DynaMAC 扩展评测
 
-## Protocol and integrity
+## 协议与完整性
 
-All methods use the same five frozen `pick_place_static/v1` demonstrations,
-dataset SHA-256
-`8956857d034694090ec0d1bf39c33364f95cac723954ac3baedcbd1fd8e479f8`.
-The ten simulator seeds 6300–6309 are evaluation instances, not independent
-training sets, and were reserved after method and detector thresholds were
-frozen. None was used for tuning.
+所有方法使用相同的五条冻结 `pick_place_static/v1` 演示，数据集 SHA-256 为
+`8956857d034694090ec0d1bf39c33364f95cac723954ac3baedcbd1fd8e479f8`。
+仿真 seed 6300–6309 是评测实例，不是独立训练集；它们在方法与检测阈值冻结后才保留，
+没有用于调参。
 
-The matrix contains six geometric methods, eight conditions, and ten seeds:
-480 isolated Isaac Lab worker processes. The two counterexamples augment the
-original six conditions: `drop_after_grasp` moves the object 18 cm away during
-transport while the gripper remains closed, and `close_without_grasp` moves it
-18 cm immediately before closure.
+矩阵包含六种几何方法、八个条件、十个 seed，共 480 个隔离 Isaac Lab worker。
+两个反例扩展原六条件：`drop_after_grasp` 在搬运中夹爪保持闭合时把物体移走
+18 cm；`close_without_grasp` 在夹爪闭合前把物体移走 18 cm。
 
-Mechanical acceptance passed:
+机械验收全部通过：
 
-- 480 JSON and 480 NPZ trial files, 480 unique method/condition/seed tuples,
-  and 480 unique experiment fingerprints;
-- ten seeds with 48 trials each, six methods with 80 trials each, and eight
-  conditions with 60 trials each;
-- zero missing metrics; one schema version (5), Git commit
-  `3673dd2e48115b553c53d28cab30ddf2a38ea68b`, source hash
-  `a7123de8c07d5dc4d2d4e725e642e60937e3d4f4a0d72b377b981cd432f2a0c6`,
-  and frozen dataset hash;
-- maximum residual between the sum of destination-phase paths and total path:
-  `6.66e-16 m`.
+- 480 个 JSON 和 480 个 NPZ，480 个唯一“方法/条件/seed”组合及 480 个唯一
+  实验指纹；
+- 每个 seed 48 条、每种方法 80 条、每个条件 60 条；
+- 无缺失指标；统一 schema 5、Git 提交
+  `3673dd2e48115b553c53d28cab30ddf2a38ea68b`、源码哈希
+  `a7123de8c07d5dc4d2d4e725e642e60937e3d4f4a0d72b377b981cd432f2a0c6`
+  和冻结数据哈希；
+- 目的阶段路径和与总路径的最大残差为 `6.66e-16 m`。
 
-The accepted result is
-`outputs/single_arm_scientific/v1/summary.json`. No prior result directory was
-overwritten.
+验收结果为 `outputs/single_arm_scientific/v1/summary.json`，没有覆盖任何旧结果目录。
 
-## Methods and claim boundary
+## 方法与声明边界
 
-- World Gaussian is a single world-frame trajectory baseline.
-- Static Multi-stream is the project's translational Gaussian product of
-  object and target experts.
-- SkillDynaMAC is the paper-faithful simplified, fixed-skill baseline; its 6-D
-  link and frame selections are learned offline from the five demonstrations.
-- Mask-only and Full are the legacy online engineering ablations. Their detector
-  latches while the demonstrated gripper command is closed.
-- RelationDynaMAC uses the new four-state bidirectional relation estimator with
-  actual finger feedback and phase-independent relation updates.
+- World Gaussian：单一世界参考系轨迹基线。
+- Static Multi-stream：项目中的物体/目标平移高斯专家乘积。
+- SkillDynaMAC：论文忠实的简化固定技能基线；六维连接和参考系选择只从五条演示离线学习。
+- Mask-only 与 Full：旧在线工程消融；只要演示夹爪命令闭合，其检测器就会锁存。
+- RelationDynaMAC：使用新的四状态双向关系估计器，读取实测指关节，并独立于阶段更新关系。
 
-None is a full TAPAS/MiDiGaP/Riemannian reproduction of the supplied paper.
+这些方法都不是 TAPAS、MiDiGaP、论文黎曼策略或 DynaBench 的完整复现。
 
-## Success and recovery
+## 成功与恢复
 
-The table reports semantic stable-place success. Each condition has ten trials.
-For reference, Wilson 95% intervals are: 10/10 `[0.722, 1.000]`, 9/10
-`[0.596, 0.982]`, 8/10 `[0.490, 0.943]`, 2/10 `[0.057, 0.510]`, 1/10
-`[0.018, 0.404]`, and 0/10 `[0.000, 0.278]`.
+表中采用语义稳定放置成功，每个条件十条。对应 Wilson 95% 区间为：10/10
+`[0.722, 1.000]`、9/10 `[0.596, 0.982]`、8/10 `[0.490, 0.943]`、
+2/10 `[0.057, 0.510]`、1/10 `[0.018, 0.404]`、0/10 `[0.000, 0.278]`。
 
-| Method | Static | Smooth obj. | Sudden obj. | Smooth target | Sudden target | Arm offset | Drop | Miss |
+| 方法 | 静态 | 物体平滑 | 物体突发 | 目标平滑 | 目标突发 | 机械臂偏置 | 掉落 | 空抓 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | World | 0% | 0% | 0% | 0% | 0% | 0% | 0% | 0% |
 | Static Multi-stream | 10% | 10% | 10% | 20% | 20% | 20% | 0% | 0% |
 | SkillDynaMAC | 100% | 90% | 90% | 0% | 0% | 100% | 0% | 0% |
 | Mask-only | 90% | 90% | 80% | 80% | 80% | 90% | 0% | 0% |
-| Legacy Full | 90% | 90% | 80% | 80% | 80% | 90% | 0% | 0% |
+| 旧 Full | 90% | 90% | 80% | 80% | 80% | 90% | 0% | 0% |
 | RelationDynaMAC | 90% | 90% | 80% | 80% | 80% | 90% | 0% | 0% |
 
-Across the six original conditions, descriptive success is 0/60 World, 9/60
-Static, 38/60 SkillDynaMAC, and 51/60 for each online method. The three online
-methods therefore have equal task success on this matrix; the relation estimator
-does not create a success gain under ordinary perturbations.
+六个原始条件汇总：World 0/60、Static 9/60、SkillDynaMAC 38/60，三种在线
+方法均为 51/60。因此关系估计器在普通扰动上没有带来任务成功率增益。
 
-Including both deliberately unrecoverable counterexamples, the condition-
-balanced seed bootstrap estimates are:
+把两个刻意不可恢复反例也计入后，按条件平衡的 seed bootstrap 估计为：
 
-| Method | Mean success | Seed-bootstrap 95% CI | Mean recovery | Mean XY error | Mean path |
+| 方法 | 平均成功 | seed-bootstrap 95% CI | 平均恢复 | 平均 XY 误差 | 平均路径 |
 |---|---:|---:|---:|---:|---:|
 | World | 0.0% | [0.0, 0.0]% | 0.0% | 183.52 mm | 1.127 m |
 | Static Multi-stream | 11.25% | [2.5, 21.25]% | 11.43% | 94.00 mm | 1.194 m |
 | SkillDynaMAC | 47.5% | [42.5, 50.0]% | 40.0% | 80.54 mm | 1.115 m |
 | Mask-only | 63.75% | [52.5, 72.5]% | 60.0% | 60.66 mm | 1.266 m |
-| Legacy Full | 63.75% | [52.5, 72.5]% | 60.0% | 74.20 mm | 1.172 m |
+| 旧 Full | 63.75% | [52.5, 72.5]% | 60.0% | 74.20 mm | 1.172 m |
 | RelationDynaMAC | 63.75% | [52.5, 72.5]% | 60.0% | 70.22 mm | 1.166 m |
 
-These all-condition error means include the 20 drop/miss failures per method and
-should not be read as placement accuracy conditional on success.
+这些八条件误差均值包含每种方法 20 个掉落/空抓失败，不能解释为成功条件下的放置精度。
 
-## Bidirectional relation mechanism
+## 双向关系机制
 
-The counterexamples separate detector behavior from task recovery:
+反例把检测行为与任务恢复分离：
 
-| Online method | Drop: detected connection | Drop: loss delay | Miss: ever connected | Drop task | Miss task |
+| 在线方法 | 掉落前检测到连接 | 掉落丢失延迟 | 空抓曾连接 | 掉落任务 | 空抓任务 |
 |---|---:|---:|---:|---:|---:|
 | Mask-only | 10/10 | 0.910 s | 10/10 | 0/10 | 0/10 |
-| Legacy Full | 10/10 | 0.880 s | 10/10 | 0/10 | 0/10 |
+| 旧 Full | 10/10 | 0.880 s | 10/10 | 0/10 | 0/10 |
 | RelationDynaMAC | 10/10 | 0.040 s | 0/10 | 0/10 | 0/10 |
 
-The legacy methods clear only when their later gripper command opens, not when
-the closed-gripper object is lost. The new estimator revokes every forced-drop
-relation after exactly two 20 ms control intervals and rejects every empty
-closed gripper. This is the strongest evidence for an essay2608 contribution
-beyond the paper-faithful baseline.
+旧方法只在后续夹爪命令张开时清除关系，不能检测闭合夹爪中的物体丢失。新估计器在
+两个 20 ms 控制周期后撤销全部强制掉落关系，并拒绝全部空夹爪闭合。这是 essay2608
+相对论文忠实简化基线最强的新机制证据。
 
-Task recovery remains zero for every method. Once the object is dropped or
-moved before closure, the phase clock continues rather than returning to an
-approach/regrasp state. The result supports the detector mechanism and directly
-falsifies any claim that bidirectional detection alone provides recovery.
+但是所有方法的任务恢复仍为零。物体掉落或闭合前移走后，阶段时钟继续前进，不会返回
+接近/重抓状态。因此结果支持检测器机制，同时直接否定“仅靠双向检测即可恢复”的主张。
 
-On the six regular conditions, RelationDynaMAC's observed onset is on average
-50–86 ms before the scripted start of phase 4 depending on condition; its normal
-release delay is 60 ms. Early onset occurs during late grasp when actual fingers
-and rigid co-motion already indicate attachment. Scripted phase 4 is a
-comparison convention, not exact physical contact ground truth. For
-SkillDynaMAC, the reported negative multi-second “onset” is not meaningful:
-its `connected` field is a fixed offline skill label rather than runtime onset.
+六个普通条件中，RelationDynaMAC 的实测连接开始平均比脚本阶段 4 提前 50–86 ms，
+正常释放延迟为 60 ms。提前发生在抓取末期，此时实测指关节和刚性共同运动已表明附着；
+脚本阶段 4 只是比较约定，不是精确物理接触真值。SkillDynaMAC 报告的数秒负建立时间
+没有意义，因为它的 `connected` 是固定离线技能标签，不是运行时事件。
 
-## Motion, path attribution, and compute
+## 运动、路径归因与计算
 
-Over the six original conditions:
+六个原始条件的均值：
 
-| Method | Mean XY error | Mean path | Mean policy compute |
+| 方法 | XY 误差 | 路径 | 策略计算 |
 |---|---:|---:|---:|
 | World | 164.91 mm | 1.129 m | 0.035 ms |
 | Static Multi-stream | 34.28 mm | 1.164 m | 0.219 ms |
 | SkillDynaMAC | 25.04 mm | 1.113 m | 0.296 ms |
 | Mask-only | 4.76 mm | 1.222 m | 0.244 ms |
-| Legacy Full | 4.74 mm | 1.084 m | 0.249 ms |
+| 旧 Full | 4.74 mm | 1.084 m | 0.249 ms |
 | RelationDynaMAC | 5.04 mm | 1.117 m | 0.899 ms |
 
-The online relation features cost about 3.6 times the legacy Full compute, but
-remain below 1 ms on this workstation. All methods cap the rate-limited policy
-position jump at 20 mm. Mean maximum physical end-effector speeds range from
-0.721 to 0.765 m/s. No method except World has a forced phase transition; World
-has eight across 80 trials.
+在线关系特征的计算量约为旧 Full 的 3.6 倍，但本机仍低于 1 ms。所有方法的限速
+策略位置跳变上限为 20 mm；平均最大实测末端速度为 0.721–0.765 m/s。除 World
+外没有方法发生强制阶段转移；World 在 80 条试验中发生八次。
 
-The destination-phase partition localizes the regular-condition path gap:
+目的阶段分区定位了普通条件下的路径差：
 
-| Method | Lift phase 4 | Move phase 5 | Total regular path |
+| 方法 | 抬升阶段 4 | 搬运阶段 5 | 普通条件总路径 |
 |---|---:|---:|---:|
 | Mask-only | 0.2010 m | 0.2433 m | 1.2223 m |
-| Legacy Full | 0.1253 m | 0.1827 m | 1.0836 m |
+| 旧 Full | 0.1253 m | 0.1827 m | 1.0836 m |
 | RelationDynaMAC | 0.1442 m | 0.1776 m | 1.1166 m |
 
-RelationDynaMAC retains most of the legacy Full path benefit while paying about
-19 mm more in phase 3 and 19 mm more in phase 4 because capture is driven by
-observed relation onset rather than a hardcoded phase-4 boundary. This remains a
-coupled frame/timing effect, not proof of globally optimal virtual frames.
+RelationDynaMAC 保留了旧 Full 的大部分路径收益，但阶段 3 和阶段 4 各多约 19 mm，
+因为捕获由实测关系建立触发，而不是硬编码阶段 4 边界。该结果仍是耦合参考系/计时
+效应，不证明虚拟参考系全局最优。
 
-## Failure taxonomy
+## 失败分类
 
-Across all 80 trials per method:
+每种方法全部 80 条试验：
 
-- World: 80 placement-XY failures.
-- Static: 9 successes, 68 placement-XY failures, 3 environment terminations.
-- SkillDynaMAC: 38 successes and 42 placement-XY failures.
-- Mask-only and Legacy Full: 51 successes and 29 placement-XY failures each.
-- RelationDynaMAC: 51 successes, 27 placement-XY failures, and 2 environment
-  terminations in `close_without_grasp`.
+- World：80 个 XY 放置失败；
+- Static：9 成功、68 个 XY 放置失败、3 个环境终止；
+- SkillDynaMAC：38 成功、42 个 XY 放置失败；
+- Mask-only 与旧 Full：各 51 成功、29 个 XY 放置失败；
+- RelationDynaMAC：51 成功、27 个 XY 放置失败、2 个空抓条件环境终止。
 
-The semantic threshold was never relaxed. The stable support, released gripper,
-post-release stability, legacy 3-D error, XY sensitivities, raw/rate-limited
-jumps, phase paths, maximum speed, relation states, and inference time remain in
-each trial for alternative analysis.
+语义阈值从未放宽。每条试验仍保存稳定支撑、释放夹爪、释放后稳定性、旧三维误差、
+XY 灵敏度、原始/限速跳变、阶段路径、最大速度、关系状态和推理时间，可供其他分析。
 
-## What the result supports and limits
+## 支持与不支持的结论
 
-Supported within this custom task:
+在本自定义任务内支持：
 
-- static object/target product-of-experts can be causally harmful after grasp;
-- masking and a virtual frame improve ordinary dynamic performance and shorten
-  the dominant lift/transport path;
-- an offline Eq. (5–6)-style skill baseline is reproducible but fails target
-  dynamics because simplified frame selection over-selects static references;
-- actual-gripper, hysteretic 6-D relation estimation reliably distinguishes
-  grasp, forced loss, empty closure, and external ungrasped motion.
+- 抓取后，静态物体/目标专家乘积可能产生因果上有害的内生反馈；
+- 屏蔽和虚拟参考系提高普通动态表现，并缩短主要抬升/搬运路径；
+- 离线 Eq. (5–6) 风格技能基线可复现，但简化选择会过度选中静态参考系，导致目标动态失败；
+- 使用实测夹爪和滞回六维特征的关系估计可稳定区分抓取、强制丢失、空抓和外部未抓取运动。
 
-Not supported:
+不支持：
 
-- equivalence to TAPAS, MiDiGaP, the paper's Riemannian policy, or DynaBench;
-- superiority of RelationDynaMAC in ordinary task success—it ties both legacy
-  online methods at 51/60;
-- recovery after drop or miss; a phase/replanning layer is still absent;
-- broad generalization from ten seeds in one custom task, or independence of the
-  eight conditions within a seed.
+- 等价于 TAPAS、MiDiGaP、论文黎曼策略或 DynaBench；
+- RelationDynaMAC 在普通任务成功率上更优，它与两种旧在线方法同为 51/60；
+- 掉落或空抓后的恢复，因为仍缺少阶段/重规划层；
+- 从一个自定义任务、十个 seed 推广到广泛任务，或把同一 seed 内八个条件视作独立样本。
 
-The next single-arm research step should couple `CANDIDATE_LOST`/`DISCONNECTED`
-to an explicit recovery graph, then evaluate whether mechanism improvements
-translate into task recovery without altering detector thresholds.
+下一项单臂研究应把 `CANDIDATE_LOST`/`DISCONNECTED` 接入显式恢复图，再在不改变
+检测阈值的前提下验证机制改善是否会转化为任务恢复。
 
-## Reproduction
+## 复现
 
 ```bash
 conda run -n env_isaaclab python scripts/eval_single_arm.py --headless \

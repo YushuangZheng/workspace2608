@@ -1,77 +1,58 @@
-# Velocity-based skill segmentation analysis
+# 基于速度的技能分段分析
 
-## Scope
+## 范围
 
-This is a diagnostic-only segmentation of the five frozen
-`pick_place_static/v1` demonstrations. It does not replace the expert's 0–9
-states in policy fitting, and it is not a TAPAS reproduction. Its purpose is to
-test whether end-effector velocity alone exposes repeatable coarse temporal
-structure before adding semantic, gripper, contact, or visual signals.
+这是对五条冻结 `pick_place_static/v1` 演示进行的诊断性分段。它不会在策略拟合中
+替换专家的 0–9 状态，也不是 TAPAS 复现。目的只是先判断末端速度能否暴露可重复
+的粗粒度时间结构，再考虑加入语义、夹爪、接触或视觉信号。
 
-The diagnostic computes end-effector linear speed and quaternion angular speed,
-smooths both over 0.10 s, and calibrates one shared pair of thresholds as the
-40th percentiles over all five frozen training demonstrations. A sample is low
-speed only when both signals are below threshold. Low-speed runs shorter than
-0.12 s are removed and gaps of at most 0.08 s are merged. Interior low-speed
-runs yield their center as a transition candidate; endpoint runs yield their
-inner edge. Candidate times are aligned across demonstrations by reference-free
-clustering within 0.05 normalized trajectory time.
+诊断计算末端线速度和四元数角速度，以 0.10 s 窗口平滑，并用五条冻结训练演示
+上共同的第 40 百分位数标定一对阈值。只有两种速度都低于阈值时，样本才算低速。
+删除短于 0.12 s 的低速段，合并间隔不超过 0.08 s 的片段。内部低速段的中心作为
+候选转移点，端点低速段使用其内侧边缘。候选时间以归一化轨迹时间 0.05 为半径，
+不指定参考演示地进行跨演示聚类对齐。
 
-All durations and the quantile are predeclared diagnostic choices. They were
-not adjusted against held-out simulator seeds or task success.
+所有时长和分位数都是预先声明的诊断选择，没有根据留出仿真 seed 或任务成功率调整。
 
-## Results
+## 结果
 
-The shared thresholds are 0.021813 m/s linear speed and 0.017696 rad/s angular
-speed. Every demonstration produces four persistent low-speed regions and four
-candidate boundaries, hence five automatic segments rather than the ten expert
-controller states.
+共享阈值为线速度 0.021813 m/s、角速度 0.017696 rad/s。每条演示都产生四个
+持续低速区域和四个候选边界，因此得到五个自动片段，而不是专家控制器的十个状态。
 
-| Candidate | demo 000 | demo 001 | demo 002 | demo 003 | demo 004 | aligned mean ± std |
+| 候选点 | demo 000 | demo 001 | demo 002 | demo 003 | demo 004 | 对齐均值 ± 标准差 |
 |---|---:|---:|---:|---:|---:|---:|
-| initial-rest exit | 0.48 s | 0.48 s | 0.48 s | 0.48 s | 0.48 s | 0.480 ± 0.000 s |
-| grasp dwell center | 2.22 s | 2.24 s | 2.26 s | 2.14 s | 2.18 s | 2.208 ± 0.043 s |
-| release dwell center | 4.32 s | 4.34 s | 4.18 s | 4.26 s | 4.20 s | 4.260 ± 0.063 s |
-| final-rest entry | 5.20 s | 5.22 s | 5.10 s | 5.16 s | 5.10 s | 5.156 ± 0.050 s |
+| 初始静止结束 | 0.48 s | 0.48 s | 0.48 s | 0.48 s | 0.48 s | 0.480 ± 0.000 s |
+| 抓取停留中心 | 2.22 s | 2.24 s | 2.26 s | 2.14 s | 2.18 s | 2.208 ± 0.043 s |
+| 释放停留中心 | 4.32 s | 4.34 s | 4.18 s | 4.26 s | 4.20 s | 4.260 ± 0.063 s |
+| 最终静止开始 | 5.20 s | 5.22 s | 5.10 s | 5.16 s | 5.10 s | 5.156 ± 0.050 s |
 
-All four normalized-time clusters contain all five demonstrations. Automatic
-segment count has mean 5.0 and standard deviation 0.0; the mean time standard
-deviation across aligned candidates is 39 ms. The persistent interior intervals
-fall entirely in manual state 3 (grasp) and state 7 (release), while endpoint
-intervals fall in states 0 and 9.
+四个归一化时间簇都包含全部五条演示。自动片段数均值为 5.0、标准差为 0.0；对齐
+候选点的平均时间标准差为 39 ms。持续内部区间完全落在人工状态 3（抓取）和状态
+7（释放），端点区间落在状态 0 和 9。
 
-The nearest manual state-transition deviation is 211 ms on average and 300 ms
-at worst. This is not a simple timing error: manual boundaries label entry and
-exit from the scripted dwell states, whereas this detector intentionally places
-one event boundary at each dwell center. The visual comparison therefore keeps
-both sets of lines instead of treating the ten state transitions as ground-truth
-velocity boundaries.
+离最近人工状态转移的平均偏差为 211 ms，最大为 300 ms。这不只是计时误差：人工
+边界标记脚本停留状态的进入与退出，而本检测器刻意把单一事件边界放在停留中心。
+因此可视化同时保留两组线，不把十个人工状态转移当作速度边界真值。
 
-## Interpretation
+## 解释
 
-Velocity alone consistently reduces ten low-level controller states to five
-temporal regions. Ignoring initial and final idle regions, these support three
-coarse action macros: approach-and-grasp, transport-and-place, and retreat. The
-grasp and release dwell regions are highly repeatable transition events, but
-they are not recovered as separate semantic skills because zero velocity cannot
-tell closing from opening or intentional holding from rest.
+单独使用速度，可以稳定地把十个底层控制状态压缩为五个时间区域。忽略起始和末尾
+空闲区域后，可形成三个粗粒度动作宏：接近并抓取、搬运并放置、撤离。抓取与释放
+停留是高度可重复的转移事件，但没有被恢复为独立语义技能，因为零速度无法区分闭合
+与张开，也无法区分主动保持与静止。
 
-The result supports using these candidates as initialization or a prior for a
-future segmenter. It does not justify replacing the phase labels yet. A useful
-next segmentation model should add actual gripper position/velocity and contact
-or object-motion changes, then test whether grasp and place emerge separately.
+结果支持把这些候选点用作未来分段器的初始化或先验，但还不足以替换阶段标签。下一
+版分段模型应加入实测夹爪位置/速度，以及接触或物体运动变化，再检查抓取和放置是否
+会分别出现。
 
-## Difference from TAPAS
+## 与 TAPAS 的区别
 
-The supplied DynaMAC paper delegates both automatic skill segmentation and
-task-parameter selection to TAPAS. This diagnostic has no learned visual
-representation, keypoints, object relevance, task-parameter precision, or model
-selection. It applies one global velocity rule to already-clean robot poses and
-does not fit a policy per discovered segment. Agreement across five scripted
-demonstrations establishes repeatability only for this dataset, not equivalence
-to TAPAS or transfer to a new task.
+DynaMAC 论文把自动技能分段和任务参数选择都交给 TAPAS。本诊断没有学习视觉表示、
+关键点、物体相关性、任务参数精度或模型选择；它只对已经清理的机器人位姿应用一条
+全局速度规则，也不为发现的片段逐一拟合策略。五条脚本演示间的一致性只证明该数据集
+上的可重复性，不代表等价于 TAPAS 或能迁移到新任务。
 
-## Reproduction
+## 复现
 
 ```bash
 conda run -n env_isaaclab python scripts/analyze_segmentation.py \
@@ -79,12 +60,11 @@ conda run -n env_isaaclab python scripts/analyze_segmentation.py \
   --output_dir outputs/single_arm_scientific/segmentation_v1_clean
 ```
 
-The output contains `analysis.json`, `velocity_boundaries.png`, and
-`boundary_alignment.png`. The JSON stores the immutable dataset hash, every
-parameter, per-demo interval and boundary, alignment membership, source content
-hash, Git revision, and an analysis fingerprint.
+输出包含 `analysis.json`、`velocity_boundaries.png` 和
+`boundary_alignment.png`。JSON 记录冻结数据哈希、全部参数、逐演示区间和边界、
+对齐成员、源码内容哈希、Git 修订号和分析指纹。
 
-The accepted clean run records commit `7bfdfc4`, source hash
-`30cded39e7941bf39070079771db321fcbb8effb311094fec530fa6b38d348c4`, and
-analysis fingerprint
-`867c512ca7a7ecee6a6905cd71303d9ed749534cd207a7afd7949c7d983dd3eb`.
+验收运行对应提交 `7bfdfc4`，源码哈希为
+`30cded39e7941bf39070079771db321fcbb8effb311094fec530fa6b38d348c4`，
+分析指纹为
+`867c512ca7a7ecee6a6905cd71303d9ed749534cd207a7afd7949c7d983dd3eb`。

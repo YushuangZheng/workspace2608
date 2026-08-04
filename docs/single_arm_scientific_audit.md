@@ -1,109 +1,91 @@
-# Single-arm scientific audit
+# 单臂科学审计
 
-This audit separates observations from claims. It uses the frozen five-demo
-dataset and the 72 rollout traces at commit `57e01c4`; it does not modify either
-input. Phase-level results are written to the new directory
-`outputs/single_arm_scientific/audit_v1/phase_diagnostics`.
+本审计严格区分观察与主张。输入为冻结的五演示数据集，以及提交 `57e01c4` 对应的
+72 条 rollout 轨迹；两者都不修改。阶段级结果写入新目录
+`outputs/single_arm_scientific/audit_v1/phase_diagnostics`。
 
-## Target and support geometry
+## 目标与支撑面几何
 
-The task inherits Isaac Lab's cube-lift command, whose target is a desired
-**object pose**. The project fixes that object-center command at `z = 0.08 m`.
-The scaled DexCube settles on the table with its measured center at about
-`z = 0.021 m`. Therefore a stable table placement at the commanded XY location
-has an unavoidable vertical residual of about:
+任务继承 Isaac Lab 方块抬升命令，其中目标表示期望的**物体位姿**。项目把物体中心
+目标固定为 `z = 0.08 m`；缩放后的 DexCube 静置桌面时，实测中心约为
+`z = 0.021 m`。因此，即使 XY 完全正确，稳定桌面放置也必然有约：
 
 ```text
 0.080 m - 0.021 m = 0.059 m
 ```
 
-The legacy 3-D error was consequently measuring the mismatch between a desired
-object-center height and the stable support surface, rather than placement
-quality alone. It should remain available for historical comparison but must not
-be the paper-facing success definition.
+旧版三维误差主要测量期望物体中心高度与稳定支撑面的不一致，而不只是放置质量。该
+指标可以保留做历史比较，但不能继续作为论文成功定义。
 
-## Parallel success indicators
+## 并列成功指标
 
-Future rollouts explicitly store three related but distinct indicators:
+后续 rollout 明确保存三个相关但不同的指标：
 
-1. `final_error_3d_m` and `legacy_success_3d` at the historical 60 mm radius;
-2. `final_xy_error_m`, with 5/10/20 mm sensitivity;
-3. `stable_place_success`, requiring the primary XY threshold, demonstrated
-   support height, an open gripper, policy completion, and low final displacement
-   and speed over 25 control steps.
+1. 历史 60 mm 半径下的 `final_error_3d_m` 和 `legacy_success_3d`；
+2. `final_xy_error_m`，并报告 5/10/20 mm 灵敏度；
+3. `stable_place_success`：要求主要 XY 阈值、演示支撑高度、夹爪张开、策略完成，
+   且最后 25 个控制步的位移和速度足够低。
 
-Offline reconciliation of the existing strict traces gives:
+对旧严格评测离线重算后得到：
 
-| Method | Legacy 3-D success | Stable-place success | Mean 3-D error | Mean XY error |
+| 方法 | 旧三维成功 | 稳定放置成功 | 平均三维误差 | 平均 XY 误差 |
 |---|---:|---:|---:|---:|
 | World Gaussian | 0/18 | 0/18 | 213.85 mm | 200.48 mm |
 | Static Multi-stream | 0/18 | 0/18 | 73.64 mm | 42.46 mm |
 | Mask-only | 18/18 | 18/18 | 59.09 mm | 3.01 mm |
-| Full online prototype | 18/18 | 18/18 | 59.08 mm | 2.98 mm |
+| Full 在线原型 | 18/18 | 18/18 | 59.08 mm | 2.98 mm |
 
-All 72 trials reached the demonstrated support height, released the object, and
-were stable at the end. In this matrix, failure is therefore explained by XY
-placement rather than the fixed height residual. Mask-only and Full remain 17/18
-at 5 mm and 18/18 at 10/20 mm, so their strict successes are not 60 mm edge
-artifacts.
+72 条试验都到达演示支撑高度、释放物体并在末尾稳定；因此本矩阵中的失败来自 XY
+放置，而不是固定高度残差。Mask-only 和 Full 在 5 mm 阈值下仍为 17/18，在
+10/20 mm 下为 18/18，严格成功不是 60 mm 边缘效应。
 
-## Additive phase attribution
+## 可加阶段归因
 
-Every inter-step EE displacement is assigned to its destination phase. The sum
-over phases reproduces every saved rollout path within
-`2.3e-16 m`, so the attribution is numerically complete.
+每个相邻控制步的末端位移归入其目的阶段。阶段和在每条轨迹上以 `2.3e-16 m` 内
+误差重构总路径，因此归因在数值上完整。
 
-Across 18 paired Mask-only/Full trials, Full minus Mask is:
+18 对 Mask-only/Full 试验中，Full 减 Mask 为：
 
-| Phase | Mean path difference | Mean step difference |
+| 阶段 | 平均路径差 | 平均步数差 |
 |---|---:|---:|
-| Lift object | -77.80 mm | -6.39 |
-| Move above target | -24.99 mm | -1.11 |
-| Lower to target | -1.75 mm | 0.00 |
-| All other phases combined | -0.06 mm | 0.00 |
-| Total | -104.60 mm | -7.50 |
+| 抬起物体 | -77.80 mm | -6.39 |
+| 移到目标上方 | -24.99 mm | -1.11 |
+| 下降至目标 | -1.75 mm | 0.00 |
+| 其他阶段合计 | -0.06 mm | 0.00 |
+| 总计 | -104.60 mm | -7.50 |
 
-The ratio of aggregate mean paths is an 8.5% reduction; averaging each paired
-percentage gives 8.0%. Full is shorter in only 10/18 paired trials. It is longer
-in all six seed-6202 conditions, so virtual-frame efficiency is not a stable
-per-seed conclusion.
+汇总均值路径比值对应 8.5% 缩短；逐对百分比平均为 8.0%。Full 只在 10/18 对中
+更短，并且在 seed 6202 的六个条件全部更长，所以虚拟参考系效率不是稳定的跨 seed
+结论。
 
-Total step difference and total path difference have correlation `r = 0.86`.
-There are no forced phase transitions in either method. Pre-grasp phases are
-identical, and essentially all change starts in phase 4, the only phase where the
-online prototype activates the virtual EE frame. The most defensible explanation
-is therefore:
+总步数差与总路径差相关系数为 `r = 0.86`。两种方法都没有强制阶段转移；抓取前
+阶段完全相同，几乎所有变化都从阶段 4 开始，而这正是在线原型激活虚拟末端参考系的
+唯一阶段。最稳妥的解释是：
 
-- the virtual-frame command changes phase-4 tracking and reach timing;
-- that changes both phase-4 path/duration and the phase-5 starting state;
-- phase 5 can either save path or add path, producing the seed-6202 reversal.
+- 虚拟参考系命令改变阶段 4 的跟踪和到达时机；
+- 这同时改变阶段 4 的路径/时长和阶段 5 的初始状态；
+- 阶段 5 可能节省或增加路径，从而出现 seed 6202 反转。
 
-This is a coupled observational attribution, not proof that the frame alone is
-causal. A paper-faithful skill baseline and a timing-controlled ablation are still
-needed before claiming a general virtual-frame efficiency benefit.
+这是耦合的观察性归因，不证明参考系单独具有因果性。若要主张一般化的虚拟参考系效率，
+仍需要论文忠实技能基线和计时受控消融。
 
-## Action discontinuity
+## 动作不连续
 
-For Full/seed 6202, the largest raw phase-4 to phase-5 desired-position change is
-about 406 mm. The shared limiter bounds the policy command change to 20 mm. The
-largest post-perturbation jump is about 80 mm in `arm_offset`, where a 60 mm test
-offset is deliberately injected after policy limiting; maximum measured EE speed
-is about 1.01 m/s. This fixes the command discontinuity but is not a hardware
-safety certification, because orientation rate, acceleration, force, and robot
-limits are not certified here.
+对于 Full/seed 6202，阶段 4 到 5 最大原始期望位置变化约为 406 mm。共享限速器把
+策略命令变化限制为 20 mm。`arm_offset` 在限速之后刻意注入 60 mm 测试偏置，
+因此最大扰动后跳变约 80 mm；最大实测末端速度约 1.01 m/s。该修复解决了命令位置
+不连续，但不是硬件安全认证，因为这里没有认证朝向速率、加速度、力或机器人本体限制。
 
-## Cache and claim boundaries
+## 缓存与声明边界
 
-Trial reuse requires an exact fingerprint over the Git commit, relevant source
-contents, frozen dataset SHA, method, condition, seed, task, rollout length,
-success criteria, action-rate limit, perturbation source, and generative
-checkpoint when used. A mismatch invalidates the cache.
+只有 Git 提交、相关源码、冻结数据 SHA、方法、条件、seed、任务、rollout 长度、
+成功条件、动作限速、扰动来源以及所用生成模型 checkpoint 的指纹全部一致时，才允许
+复用试验缓存；任一不一致都会使缓存失效。
 
-The three evaluation seeds share one frozen training set. They measure test-time
-robustness for that dataset, not the variance of independently sampled five-demo
-training sets and not arbitrary 5-shot sample efficiency.
+三个评测 seed 共用一个冻结训练集。它们测量该数据集下的测试时稳健性，不是多个独立
+五演示训练集的方差，也不是任意意义的 5-shot 样本效率。
 
-Reproduce the offline audit with:
+复现离线审计：
 
 ```bash
 python scripts/analyze_phase_diagnostics.py \
