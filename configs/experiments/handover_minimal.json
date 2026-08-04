@@ -1,0 +1,8 @@
+{
+  "task": "Essay2608-Bimanual-Handover-v0",
+  "dataset": "data/handover_static/v1",
+  "methods": ["independent_arms", "fixed_handover", "static_cross_arm", "full_dynamac"],
+  "conditions": ["static", "left_offset", "right_offset", "handover_shift", "left_pause", "right_pause", "smooth_left", "sudden_right"],
+  "success_threshold_m": 0.06,
+  "pilot_seeds": [8208]
+}

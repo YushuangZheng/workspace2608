@@ -1,0 +1,29 @@
+{
+  "dataset": "data/pick_place_static/v1",
+  "methods": [
+    "world_gaussian",
+    "static_multistream",
+    "mask_only",
+    "full_dynamac"
+  ],
+  "conditions": [
+    "static",
+    "smooth_object",
+    "sudden_object",
+    "smooth_target",
+    "sudden_target",
+    "arm_offset"
+  ],
+  "success_definition": {
+    "xy_threshold_m": 0.01,
+    "xy_sensitivity_thresholds_m": [0.005, 0.01, 0.02],
+    "support_height_tolerance_m": 0.01,
+    "released_gripper_required": true,
+    "stability_window_steps": 25,
+    "stability_displacement_threshold_m": 0.005,
+    "stability_speed_threshold_m_s": 0.05
+  },
+  "maximum_action_position_step_m": 0.02,
+  "minimum_report_seeds": 3,
+  "minimal_debug_seeds": [6200]
+}

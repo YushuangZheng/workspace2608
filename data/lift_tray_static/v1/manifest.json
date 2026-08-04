@@ -1,0 +1,296 @@
+{
+  "task_id": "Essay2608-Bimanual-Lift-Tray-v0",
+  "num_demos": 5,
+  "attempts": 5,
+  "base_seed": 9208,
+  "quaternion_order": "wxyz",
+  "coordinate_frame": "local_environment",
+  "demos": [
+    {
+      "file": "demo_000.npz",
+      "sha256": "8dba5109bd5fc2eeaa8eb2cea6307886373bbd1662ecf635a93b29d745bd6d97",
+      "steps": 552,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "initial_object_pose": [
+        0.47735142707824707,
+        0.020274249836802483,
+        0.21835744380950928,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.6000000238418579,
+        0.0,
+        0.3400000035762787,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.034832414239645004,
+      "max_step_position_jump": {
+        "left_ee_m": 0.02581802010536194,
+        "right_ee_m": 0.025445813313126564,
+        "tray_m": 0.014594325795769691
+      },
+      "left_tray_connection_stability": {
+        "position_rms_std_m": 0.014468725585757137,
+        "rotation_rms_deg": 3.9375569632820775
+      },
+      "right_tray_connection_stability": {
+        "position_rms_std_m": 0.026543131970592132,
+        "rotation_rms_deg": 8.930802973889843
+      },
+      "cross_arm_stability": {
+        "position_rms_std_m": 0.02469786410538665,
+        "rotation_rms_deg": 10.25451144128214
+      },
+      "attempt": 1,
+      "seed": 9208
+    },
+    {
+      "file": "demo_001.npz",
+      "sha256": "bc8bc1c94cf5f1d8c39d30353ab9e97798a8c234f5c2e899aa7d78455d2b33e0",
+      "steps": 332,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "initial_object_pose": [
+        0.4644891321659088,
+        0.014749782159924507,
+        0.22456149756908417,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.6000000238418579,
+        0.0,
+        0.3400000035762787,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.026576010510325432,
+      "max_step_position_jump": {
+        "left_ee_m": 0.021081389859318733,
+        "right_ee_m": 0.0210840106010437,
+        "tray_m": 0.014465798623859882
+      },
+      "left_tray_connection_stability": {
+        "position_rms_std_m": 0.03013439674910976,
+        "rotation_rms_deg": 6.407969316786407
+      },
+      "right_tray_connection_stability": {
+        "position_rms_std_m": 0.030274021459666723,
+        "rotation_rms_deg": 5.691823955170493
+      },
+      "cross_arm_stability": {
+        "position_rms_std_m": 0.05729459700036604,
+        "rotation_rms_deg": 11.95560465900526
+      },
+      "attempt": 2,
+      "seed": 9209
+    },
+    {
+      "file": "demo_002.npz",
+      "sha256": "1f48779f051cd4e8e1eceb5c88e46c576d3be89e01baedfb4a05778f7f8f9dca",
+      "steps": 618,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "initial_object_pose": [
+        0.49940985441207886,
+        -0.019294962286949158,
+        0.21666407585144043,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.6000000238418579,
+        0.0,
+        0.3400000035762787,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.03354300931096077,
+      "max_step_position_jump": {
+        "left_ee_m": 0.02269066870212555,
+        "right_ee_m": 0.022705402225255966,
+        "tray_m": 0.015305517241358757
+      },
+      "left_tray_connection_stability": {
+        "position_rms_std_m": 0.015786417761229753,
+        "rotation_rms_deg": 4.68287104490446
+      },
+      "right_tray_connection_stability": {
+        "position_rms_std_m": 0.028639028429929065,
+        "rotation_rms_deg": 9.455168228713227
+      },
+      "cross_arm_stability": {
+        "position_rms_std_m": 0.025280043929123135,
+        "rotation_rms_deg": 11.090298746978007
+      },
+      "attempt": 3,
+      "seed": 9210
+    },
+    {
+      "file": "demo_003.npz",
+      "sha256": "276de24ec1e4ea62ff7b5461dd472601f8abf730c8a5183c30774b3ba9926d68",
+      "steps": 661,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "initial_object_pose": [
+        0.4643886387348175,
+        -0.013052409514784813,
+        0.22015896439552307,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.6000000238418579,
+        0.0,
+        0.3400000035762787,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.05522697791457176,
+      "max_step_position_jump": {
+        "left_ee_m": 0.025065749883651733,
+        "right_ee_m": 0.026538122445344925,
+        "tray_m": 0.020899415016174316
+      },
+      "left_tray_connection_stability": {
+        "position_rms_std_m": 0.025444621530232497,
+        "rotation_rms_deg": 8.07817682252833
+      },
+      "right_tray_connection_stability": {
+        "position_rms_std_m": 0.038355581354488716,
+        "rotation_rms_deg": 11.621430046454696
+      },
+      "cross_arm_stability": {
+        "position_rms_std_m": 0.03497148246349249,
+        "rotation_rms_deg": 19.0313354613063
+      },
+      "attempt": 4,
+      "seed": 9211
+    },
+    {
+      "file": "demo_004.npz",
+      "sha256": "3749264e321bfc3a265bd2eb3c2a50242d4018222ba262c7f436c262f8d78e3c",
+      "steps": 546,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "initial_object_pose": [
+        0.48087063431739807,
+        0.01976386271417141,
+        0.22746281325817108,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.6000000238418579,
+        0.0,
+        0.3400000035762787,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.027219068259000778,
+      "max_step_position_jump": {
+        "left_ee_m": 0.021541858091950417,
+        "right_ee_m": 0.024285655468702316,
+        "tray_m": 0.01079336367547512
+      },
+      "left_tray_connection_stability": {
+        "position_rms_std_m": 0.0226269414071298,
+        "rotation_rms_deg": 7.42382800078156
+      },
+      "right_tray_connection_stability": {
+        "position_rms_std_m": 0.03480898871304289,
+        "rotation_rms_deg": 9.599932964418459
+      },
+      "cross_arm_stability": {
+        "position_rms_std_m": 0.029069899763905952,
+        "rotation_rms_deg": 14.687095055981459
+      },
+      "attempt": 5,
+      "seed": 9212
+    }
+  ],
+  "frozen": true,
+  "dataset_version": "lift_tray_static_v1",
+  "dataset_sha256": "87296cb65b3ad1bd8a005c8dba8527253cc41d235fb8a71af1d2ecc8de4bfeeb",
+  "source_git_commit": "90914bdc3287c8ca7b70d251ac0983358fb229b0",
+  "frozen_at_utc": "2026-08-03T12:45:24.726525+00:00",
+  "acceptance": {
+    "minimum_initial_object_distance_m": 0.009775124930335376,
+    "max_final_error_m": 0.05522697791457176,
+    "max_step_position_jump_m": 0.026538122445344925,
+    "max_cross_arm_position_std_m": 0.05729459700036604
+  }
+}

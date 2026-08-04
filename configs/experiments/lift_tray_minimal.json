@@ -1,0 +1,8 @@
+{
+  "task": "Essay2608-Bimanual-Lift-Tray-v0",
+  "dataset": "data/lift_tray_static/v1",
+  "methods": ["independent_arms", "static_shared_object", "full_dynamac"],
+  "conditions": ["static", "left_offset", "right_offset", "left_pause", "right_pause"],
+  "success_threshold_m": 0.06,
+  "pilot_seeds": [10208]
+}

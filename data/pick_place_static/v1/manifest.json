@@ -1,0 +1,319 @@
+{
+  "dataset_name": "pick_place_static",
+  "dataset_version": "v1",
+  "frozen": true,
+  "frozen_at": "2026-08-03T19:26:34+08:00",
+  "source_git_commit": "be2c3a07de10e209230fb7890a20df48833c42d9",
+  "task_id": "Essay2608-Dynamic-Pick-Place-v0",
+  "num_demos": 5,
+  "success_threshold_m": 0.06,
+  "quaternion_order": "wxyz",
+  "coordinate_frame": "local_environment",
+  "dataset_sha256": "8956857d034694090ec0d1bf39c33364f95cac723954ac3baedcbd1fd8e479f8",
+  "acceptance": {
+    "status": "passed",
+    "required_state_sequence": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "minimum_initial_object_distance_m": 0.040295813304752216,
+    "max_final_error_m": 0.059173885732889175,
+    "max_step_position_jump_m": 0.031818754971027374,
+    "max_postgrasp_position_rms_std_m": 0.00020956903684460582
+  },
+  "demos": [
+    {
+      "file": "demo_000.npz",
+      "sha256": "b2158a6263a4908cf3b01f885c3edbc05c5bc2404a0240eda003c3ac3f403ec9",
+      "steps": 296,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "initial_ee_pose": [
+        0.4633335471153259,
+        5.133915692567825e-08,
+        0.3854876756668091,
+        0.008603483438491821,
+        0.9216110706329346,
+        0.020462853834033012,
+        0.3874797523021698
+      ],
+      "initial_object_pose": [
+        0.506019115447998,
+        -0.20324057340621948,
+        0.054999999701976776,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.550000011920929,
+        0.20000000298023224,
+        0.07999999821186066,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.05909458547830582,
+      "max_step_position_jump": {
+        "ee_m": 0.0301454309374094,
+        "object_m": 0.03038661554455757,
+        "target_m": 0.0
+      },
+      "postgrasp_object_to_ee_stability": {
+        "position_rms_std_m": 0.0002062904124031659,
+        "rotation_rms_deg": 0.013071882371477212
+      },
+      "seed": 2608,
+      "seed_provenance": "reconstructed from the original base_seed + demo_index launcher"
+    },
+    {
+      "file": "demo_001.npz",
+      "sha256": "d678d5cc05e135554409a1c1e3f172ae3e622c91d580e9ed1f02d936ed3f2f9f",
+      "steps": 297,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "initial_ee_pose": [
+        0.4633335471153259,
+        5.133915692567825e-08,
+        0.3854876756668091,
+        0.008603483438491821,
+        0.9216110706329346,
+        0.020462853834033012,
+        0.3874797523021698
+      ],
+      "initial_object_pose": [
+        0.5230686664581299,
+        -0.23975174129009247,
+        0.054999999701976776,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.550000011920929,
+        0.20000000298023224,
+        0.07999999821186066,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.05910126492381096,
+      "max_step_position_jump": {
+        "ee_m": 0.03158212825655937,
+        "object_m": 0.031818754971027374,
+        "target_m": 0.0
+      },
+      "postgrasp_object_to_ee_stability": {
+        "position_rms_std_m": 0.00020956903684460582,
+        "rotation_rms_deg": 0.020568044078634627
+      },
+      "seed": 2609,
+      "seed_provenance": "reconstructed from the original base_seed + demo_index launcher"
+    },
+    {
+      "file": "demo_002.npz",
+      "sha256": "c755c70a2720ec0c03d4cf430c36f2a4cb138474528796d823668a144bae7988",
+      "steps": 291,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "initial_ee_pose": [
+        0.4633335471153259,
+        5.133915692567825e-08,
+        0.3854876756668091,
+        0.008603483438491821,
+        0.9216110706329346,
+        0.020462853834033012,
+        0.3874797523021698
+      ],
+      "initial_object_pose": [
+        0.5960232019424438,
+        0.22270873188972473,
+        0.054999999701976776,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.550000011920929,
+        0.20000000298023224,
+        0.07999999821186066,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.059173885732889175,
+      "max_step_position_jump": {
+        "ee_m": 0.022651612758636475,
+        "object_m": 0.018616560846567154,
+        "target_m": 0.0
+      },
+      "postgrasp_object_to_ee_stability": {
+        "position_rms_std_m": 0.0001203123785741328,
+        "rotation_rms_deg": 0.02013100036160577
+      },
+      "seed": 2610,
+      "seed_provenance": "reconstructed from the original base_seed + demo_index launcher"
+    },
+    {
+      "file": "demo_003.npz",
+      "sha256": "d38f0ef203fcc6e10d1fa283f11de0e0c60d6d0a41a2e61fa2497dcde079c6ac",
+      "steps": 294,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "initial_ee_pose": [
+        0.4633335471153259,
+        5.133915692567825e-08,
+        0.3854876756668091,
+        0.008603483438491821,
+        0.9216110706329346,
+        0.020462853834033012,
+        0.3874797523021698
+      ],
+      "initial_object_pose": [
+        0.4603951573371887,
+        -0.024370208382606506,
+        0.054999999701976776,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.550000011920929,
+        0.20000000298023224,
+        0.07999999821186066,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.05907158926129341,
+      "max_step_position_jump": {
+        "ee_m": 0.02474045380949974,
+        "object_m": 0.018327567726373672,
+        "target_m": 0.0
+      },
+      "postgrasp_object_to_ee_stability": {
+        "position_rms_std_m": 0.00013404522841939097,
+        "rotation_rms_deg": 0.01133469421861382
+      },
+      "seed": 2611,
+      "seed_provenance": "reconstructed from the original base_seed + demo_index launcher"
+    },
+    {
+      "file": "demo_004.npz",
+      "sha256": "01a9acaafa32a7c194c680153fa2dbe74c4a4c482d8a2f7ff369f0f68e0939f2",
+      "steps": 291,
+      "control_dt": 0.019999999552965164,
+      "state_sequence": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "initial_ee_pose": [
+        0.4633335471153259,
+        5.133915692567825e-08,
+        0.3854876756668091,
+        0.008603483438491821,
+        0.9216110706329346,
+        0.020462853834033012,
+        0.3874797523021698
+      ],
+      "initial_object_pose": [
+        0.4804486036300659,
+        0.0604325532913208,
+        0.054999999701976776,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "target_pose": [
+        0.550000011920929,
+        0.20000000298023224,
+        0.07999999821186066,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_error": 0.05917159467935562,
+      "max_step_position_jump": {
+        "ee_m": 0.024389175698161125,
+        "object_m": 0.018558552488684654,
+        "target_m": 0.0
+      },
+      "postgrasp_object_to_ee_stability": {
+        "position_rms_std_m": 0.0001239257387259209,
+        "rotation_rms_deg": 0.011128913875257905
+      },
+      "seed": 2612,
+      "seed_provenance": "reconstructed from the original base_seed + demo_index launcher"
+    }
+  ]
+}
