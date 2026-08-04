@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from essay2608.eval.bimanual_relation_audit import (
+    _assert_nested_close,
     _experiment_fingerprint,
     audit_bimanual_relation_results,
 )
@@ -14,6 +15,10 @@ from essay2608.eval.bimanual_relation_study import (
     condition_realization,
     score_bimanual_relation_trace,
 )
+
+
+def test_metric_recompute_accepts_only_float32_scale_roundoff() -> None:
+    _assert_nested_close({"delay_s": 0.22}, {"delay_s": 0.2199999950826168})
 
 
 def test_formal_audit_recomputes_trace_and_exact_membership(tmp_path: Path) -> None:

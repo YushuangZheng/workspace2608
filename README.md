@@ -28,6 +28,7 @@
 - [真实物理双臂交接数据集 v1 冻结报告](docs/physical_handover_dataset_report.md)
 - [双臂在线关系生命周期估计器](docs/bimanual_relation_estimator.md)
 - [双臂在线关系估计正式协议 v1](docs/bimanual_relation_protocol.md)
+- [双臂在线关系估计正式报告 v1](docs/bimanual_relation_report_v1.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)

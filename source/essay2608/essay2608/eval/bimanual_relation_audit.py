@@ -126,7 +126,10 @@ def _assert_nested_close(actual: Any, expected: Any, path: str = "root") -> None
         for index, (left, right) in enumerate(zip(actual, expected, strict=True)):
             _assert_nested_close(left, right, f"{path}[{index}]")
     elif isinstance(expected, float):
-        if actual is None or not np.isclose(float(actual), expected, atol=1e-10, rtol=1e-9):
+        # JSON metrics use the Python control period while NPZ persists it as
+        # float32.  A 10--20 step delay can therefore differ by ~5e-8 s when
+        # recomputed; this tolerance is far below every protocol gate.
+        if actual is None or not np.isclose(float(actual), expected, atol=1e-7, rtol=1e-7):
             raise ValueError(f"{path} 的浮点值不一致：{actual!r} != {expected!r}")
     elif actual != expected:
         raise ValueError(f"{path} 不一致：{actual!r} != {expected!r}")
