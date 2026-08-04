@@ -1,5 +1,16 @@
 # 文档更新记录
 
+## 2026-08-04：真实物理双臂交接 Phase 4
+
+- 新增 `Essay2608-Bimanual-Physical-Handover-v0`，启用物体重力、真实碰撞、摩擦、双指夹持和四指过滤式接触传感；
+- 脚本专家不读取 privileged 接触或关系标签，评测不直接写入物体位姿/速度，也不使用几何 carrier；
+- 新增独立双边物理关系真值，连接建立需要双指接触、近邻和相对运动一致，连接保持不会被仍有双指接触的短时沉降错误解除；
+- 开发种子 7400–7404 为 5/5，冻结实现提交 `040ad95`；
+- 预注册提交 `81c66f6` 和标签 `physical-handover-protocol-v1` 固定 20 个正式种子、关系序列、成功阈值和禁止 test 调参规则；
+- 唯一一次正式结果为 6/20，低于 18/20 验收线；六个成功样本均形成 1.82–1.84 s 的真实 `both` 并以 1.79–2.51 mm XY 误差完成放置；
+- 14 个失败全部为 `left_pick_failed`，逐指轨迹与 seed 7602 视频均显示发送端单指侧压，未发现正式集接收或放置阶段失败；
+- 新增 `docs/physical_handover_protocol.md` 与 `docs/physical_handover_report.md`，明确不创建 `handover_physical/v1`、不进入完整双臂策略训练。
+
 ## 2026-08-04：RelationDynaMAC 恢复研究 Phase 3 正式结果
 
 - 完成预注册的 4 方法 × 7 条件 × 20 held-out seeds，共 560 次隔离试验；

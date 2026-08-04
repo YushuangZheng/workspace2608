@@ -231,6 +231,19 @@
 实现提交：`5c4921e Prepare audited bimanual handover dataset v2`。
 数据提交：`7489495 Add bimanual handover environment and scripted demonstrations`。
 
+### 阶段 7：真实物理双臂交接
+
+状态：基础设施完成，正式鲁棒性验收未通过。
+
+- 新任务使用重力、碰撞、摩擦和四个过滤式指体传感器，未使用物体位姿写入或几何 carrier；
+- 物理关系由左右两条独立边产生，能够表示 `none → left_only → both → right_only → none`；
+- 开发种子 7400–7404 为 5/5，随后在提交 `81c66f6` 和标签 `physical-handover-protocol-v1` 冻结正式协议；
+- 20 个未见种子 7600–7619 的唯一一次正式结果为 6/20，Wilson 95% 区间 `[14.5%, 51.9%]`；
+- 六个成功样本全部完成完整关系转移，`both` 为 1.82–1.84 s，最终 XY 误差为 1.79–2.51 mm；
+- 14 个失败全部为发送端 `left_pick_failed`：一指接近 0 N，另一指达到 75–103 N，物体没有离桌；
+- 因未达到预注册的 18/20 科学验收线和 20/20 数据采集门槛，未创建 `handover_physical/v1`，也未开始完整双臂策略训练；
+- 详细冻结边界、失败视频和下一版允许动作见 [真实物理双臂交接正式报告](physical_handover_report.md)。
+
 ### 最终交付
 
 状态：完成。

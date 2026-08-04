@@ -18,6 +18,8 @@
 - [Oracle relation 恢复消融](docs/oracle_recovery_ablation.md)
 - [单臂关系恢复实验预注册协议](docs/recovery_protocol.md)
 - [单臂关系触发式恢复正式报告](docs/recovery_final_report.md)
+- [真实物理双臂交接预注册协议](docs/physical_handover_protocol.md)
+- [真实物理双臂交接正式报告](docs/physical_handover_report.md)
 - [单臂最终评测报告](docs/single_arm_final_report.md)
 - [双臂交接环境与数据说明](docs/bimanual_handover_setup.md)
 - [方法来源与实现边界](docs/method_provenance.md)
@@ -68,6 +70,7 @@ python scripts/list_envs.py
 ```text
 Essay2608-Dynamic-Pick-Place-v0
 Essay2608-Bimanual-Handover-v0
+Essay2608-Bimanual-Physical-Handover-v0
 Essay2608-Bimanual-Lift-Tray-v0
 ```
 
@@ -103,6 +106,14 @@ conda run -n env_isaaclab python scripts/eval_single_arm.py --headless \
 
 ```bash
 conda run -n env_isaaclab python scripts/audit_recovery_results.py
+```
+
+复现真实物理双臂交接开发样本：
+
+```bash
+conda run -n env_isaaclab python scripts/eval_physical_handover.py \
+  --headless --seeds 7400 --max_steps 1400 \
+  --output_dir outputs/physical_handover/dev_reproduction
 ```
 
 验证双臂交接 v2 冻结数据：
@@ -170,5 +181,7 @@ git diff --check
 
 本仓库复现的是自定义 Isaac Lab 任务中的相对几何、动态参考系和关系生命周期机制，
 不是 TAPAS、MiDiGaP、RLBench、DynaBench 或论文完整黎曼策略的逐项复现。
-双臂环境当前仍使用几何附着，不能作为接触丰富的真实抓取证据。所有论文表述均应以
-[夜间研发最终报告](docs/overnight_final_report.md) 中的“支持与不支持”边界为准。
+旧的 `handover_static/v1/v2` 仍使用几何附着，只能作为接口和数据骨架。新增物理任务
+已经产生真实接触关系转移，但预注册正式集仅为 `6/20`，不能声称脚本专家稳定，也未
+采集 `handover_physical/v1`。所有论文表述应同时遵守[夜间研发最终报告](docs/overnight_final_report.md)
+和[真实物理双臂交接正式报告](docs/physical_handover_report.md)中的声明边界。
