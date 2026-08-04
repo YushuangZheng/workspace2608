@@ -14,12 +14,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--protocol",
         type=Path,
-        default=Path("configs/experiments/bimanual_relation_protocol_v1.json"),
+        default=Path("configs/experiments/bimanual_relation_protocol_v2.json"),
     )
     parser.add_argument(
         "--results_dir",
         type=Path,
-        default=Path("outputs/bimanual_relation/formal_v1"),
+        default=Path("outputs/bimanual_relation/formal_v2"),
     )
     return parser.parse_args()
 
