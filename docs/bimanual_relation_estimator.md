@@ -7,12 +7,13 @@ Phase 5 的第一步已经建立一个不读取任务阶段、接触真值或未
 `none / left_only / both / right_only` 四值关系图。
 
 在冻结物理数据集 `handover_physical/v1` 上，先用 seed 8200–8209 标定阈值，再对互斥的
-seed 8210–8219 做离线开发回放。十条回放的四值逐步准确率均值为 **94.33%**；左、右边
-micro F1 分别为 **97.82%** 和 **95.41%**。结果说明两条独立关系边能够从实测几何与夹爪
-运动中恢复主要生命周期，但接收臂边仍有明显的延迟/漏检：真值含 901 个 `both` 步，
-估计器只输出 568 个。
+seed 8210–8219 做离线开发回放。最终开发版十条回放的四值逐步准确率均值为 **98.30%**；
+左、右边 micro F1 分别为 **98.54%** 和 **99.44%**。真值含 901 个 `both` 步，估计器输出
+879 个。
 
-这不是正式预注册评测，也没有证明异常条件下的在线检测能力。完整双臂策略训练仍未开始。
+同一估计器随后接入真实接触仿真。在最终开发 seed 8302 的七个条件中，所有干预均由物理
+真值确认成立，七条推断关系序列逐段等于对应物理序列。该结果仍不是预注册正式评测，
+完整双臂策略训练尚未开始。
 
 ## 机制与输入边界
 
@@ -41,7 +42,11 @@ DISCONNECTED -> CANDIDATE_CONNECTED -> CONNECTED
 - 当前控制周期。
 
 估计证据包括夹爪占用区间、相对平移/旋转刚性、窗口稳定性、共同运动、速度相关性和
-末端—物体距离。运行时函数没有 `contact`、`relation_label`、`state/phase` 或未来窗口参数。
+末端—物体距离。连接开度的 q01–q99 是满分平台，而不是只让中位数满分；双臂配置中的
+运动学解除还要求瞬时相对运动与滑窗几何漂移共同成立，避免载荷转移尖峰伪造断裂。夹爪
+张开、空闭合或末端—物体距离脱离仍可单独解除。
+
+运行时函数没有 `contact`、`relation_label`、`state/phase` 或未来窗口参数。
 物理接触导出的 `left_connected/right_connected` 只在离线标定和结果评分时使用。
 
 ## 数据划分与标定
@@ -61,27 +66,58 @@ a4a39ed4837558cecaaf73e7c5db9b6ff88e7eddfb3bcf9923df862df9e65e52
 因为两只夹爪在物理交接中的闭合宽度、末端—物体相对几何和传感噪声并不相同。
 
 这个 10/10 划分是在 Phase 5 开发时声明并执行，未在代码冻结前预注册，所以只能用于
-机制开发和后续协议设计。没有在评测十条上修改阈值；成功回放前唯一修复是把存储形状
-`(T, 2, 1, 3)` 的指体位置正确化为每步唯一指间距。
+机制开发和后续协议设计。初始回放暴露出接收边偏保守；随后只依据标定子集的连接开度
+q01–q99 构造占用平台，并依据在线开发 seed 8300 的载荷转移反例把单通道速度尖峰改为
+“瞬时断裂与滑窗漂移共同成立”。最终指标是在这些开发选择之后重算，不能当作未见测试。
+
+存储形状 `(T, 2, 1, 3)` 的指体位置会先严格化为每步唯一指间距。提交的配置
+`configs/experiments/bimanual_relation_offline_v1.json` 保存两臂独立阈值、标定 seed 和
+冻结数据哈希，并支持验证后反序列化。
 
 ## 离线开发结果
 
 | 指标 | 结果 |
 |---|---:|
-| 四值逐步准确率均值 | 94.33% |
-| 四值逐步准确率范围 | 88.12%–96.92% |
-| 左边 TP / FP / FN | 4422 / 0 / 197 |
-| 左边 micro precision / recall / F1 | 100.00% / 95.74% / 97.82% |
-| 左边单条最低 F1 | 95.91% |
-| 右边 TP / FP / FN | 4791 / 2 / 459 |
-| 右边 micro precision / recall / F1 | 99.96% / 91.26% / 95.41% |
-| 右边单条最低 F1 | 89.61% |
-| 真值 / 推断 `both` 步数 | 901 / 568 |
+| 四值逐步准确率均值 | 98.30% |
+| 四值逐步准确率范围 | 97.86%–98.49% |
+| 左边 TP / FP / FN | 4495 / 9 / 124 |
+| 左边 micro precision / recall / F1 | 99.80% / 97.32% / 98.54% |
+| 左边单条最低 F1 | 98.02% |
+| 右边 TP / FP / FN | 5220 / 29 / 30 |
+| 右边 micro precision / recall / F1 | 99.45% / 99.43% / 99.44% |
+| 右边单条最低 F1 | 99.24% |
+| 真值 / 推断 `both` 步数 | 901 / 879 |
 
-左边没有假阳性、右边只有两个假阳性，说明当前阈值的主要误差不是虚构连接，而是关系
-建立偏晚或在短窗口中漏检。特别是接收臂在交接时相对物体的旋转和指体受力扰动更大，
-使 `both` 区间被保守截短。后续不得只通过放松阈值追求四值准确率；必须同时报告边级
-precision、recall、建立/解除延迟和异常条件的误触发。
+初始三角占用版的四值准确率为 94.33%，右边 F1 为 95.41%，只推断 568 个 `both` 步；
+最终版的提升来自明确的机制修复，不是改评分标签。后续仍须同时报告 precision、recall、
+建立/解除延迟和异常误触发，不能只选取改善后的四值准确率。
+
+## 真实物理在线开发结果
+
+在线评测器保存左右末端、物体、指体位置/间距/速度、接触力真值、基础与施加动作、干预
+事件、两边状态/置信度/建立分数/解除分数。接触力只进入独立 `PhysicalRelationTracker`，
+没有进入在线估计器。任务是否成功与干预是否物理成立分开统计。
+
+最终源码下的开发 cohort 只包含 seed 8302，每个条件一次：
+
+| 条件 | 物理真值序列与推断序列 | 四值准确率 | 左 F1 | 右 F1 | 任务结果 |
+|---|---|---:|---:|---:|---|
+| `normal` | `none → left_only → both → right_only → none` | 98.49% | 98.69% | 99.52% | 成功 |
+| `receiver_miss` | `none → left_only → none` | 98.93% | 98.69% | 无正样本、0 FP | 预期失败 |
+| `receiver_delayed` | `none → left_only → both → right_only → none` | 98.77% | 98.93% | 99.74% | 成功 |
+| `giver_releases_early` | `none → left_only → none → right_only → none` | 98.14% | 97.50% | 99.24% | 预期失败 |
+| `receiver_grasps_then_loses` | `none → left_only → both → left_only → none` | 98.58% | 98.69% | 90.91% | 预期失败 |
+| `prolonged_both_hold` | `none → left_only → both → right_only → none` | 98.61% | 98.93% | 99.60% | 成功 |
+| `one_arm_paused` | `none → left_only → both → right_only → none` | 98.69% | 98.69% | 99.68% | 成功 |
+
+短暂接收关系只有约 0.44 s，所以两步建立误差与两步解除误差会把右边 F1 降至 90.91%；
+但完整序列和边的建立/解除方向均正确。正常条件两边最大匹配延迟为 220/60 ms；最终延迟
+条件的右边建立/解除延迟为 20/40 ms。空抓全过程右边真值和推断均不连接。
+
+开发过程中还保留两个负结果：初始占用版在正常条件的右边建立晚 1.22 s；第一版延迟
+干预错误地让脚本专家在夹爪张开时越过抓取状态，造成 96 步单指接触假阳性。前者推动
+占用平台修复，后者通过在真实抓取位姿冻结时钟、延迟张开 1 s、闭合稳定 1 s 后再进入
+transfer 修正。二者均不计入最终开发指标。
 
 ## 机制反例测试
 
@@ -102,23 +138,35 @@ conda run -n env_isaaclab python scripts/analyze_bimanual_relation_estimator.py 
   --data_dir data/handover_physical/v1 \
   --calibration_seeds 8200 8201 8202 8203 8204 8205 8206 8207 8208 8209 \
   --evaluation_seeds 8210 8211 8212 8213 8214 8215 8216 8217 8218 8219 \
-  --output_dir outputs/bimanual_relation/offline_dev_v2
+  --output_dir outputs/bimanual_relation/offline_dev_v4
 ```
 
 脚本拒绝覆盖已有输出，逐条保存真值/推断标签、左右置信度和逐边指标。当前产物身份为：
 
 | 产物 | SHA-256 |
 |---|---|
-| 源码指纹 | `2477aa8b67dfba83776b33f6da05ad49ddcffbfd61f8d6270b35cfc3678f52c9` |
-| `summary.json` | `8b03e03a7531896bd88e7f8258b0299c31b8a544cd1dead3a4d950f9363c98aa` |
-| `config.json` | `6eac855b84bc08d314e134204ebfcaaa3d57f2a331edac0b26bfe047a9b97ff5` |
-| `calibration.json` | `721eab78e23299b18c51b4ae58b1a66412e457b8cc09bf1d335d447abdfdfdea` |
+| 离线源码指纹 | `a46a1b84a8c6ceab1edee6f73abed8d312953497f93de4ecff6f495633fa7862` |
+| 离线 `summary.json` | `cbc52a671de860a2f58e87c015600ff00a8a398ff327f1b99689fd9fd2947d9d` |
+| 离线 `config.json` | `ec8d431bd2602449d3326a0f64b16fc019a2c889427f502caacae4f3e0f40cd5` |
+| 离线 `calibration.json` | `e08ce762463a043722a30e47199c74f34f09d137b1eeeb1015d61c945398d7c9` |
+| 提交配置 | `9878468cfa88160eec1ba218d38bf239ce38eba406383d5ac9f04db15bb68ade` |
+| 在线源码指纹 | `95d6e5560ad3af6a089b32a946a2e79b658516b08a7f871d0e052bf0c5b1f23b` |
+| 在线开发 `summary.json` | `f772ba841e2e2a24a9eb0a60db38d4c3fe94f56129479002194554052805a9e7` |
+
+最终在线开发命令为：
+
+```bash
+conda run -n env_isaaclab python scripts/eval_bimanual_relation.py --headless \
+  --conditions normal receiver_miss receiver_delayed giver_releases_early \
+    receiver_grasps_then_loses prolonged_both_hold one_arm_paused \
+  --seeds 8302 --max_steps 1800 \
+  --output_dir outputs/bimanual_relation/online_dev_final_seed8302
+```
 
 ## 下一阶段门槛
 
-下一步是在真实物理交接仿真中逐步运行同一估计器，并加入至少以下条件：正常、接收空抓、
-接收延迟、发送提前释放、接收抓住后丢失、延长双持和单臂暂停。privileged 物理关系只作
-评分标签，不能进入估计器。
+七类在线条件的开发接线已完成。下一步冻结源码、配置、精确 seed、每条件关系序列、F1、
+延迟、误触发和正常任务成功门槛，再运行未见 seed。privileged 物理关系继续只作评分标签。
 
 进入完整双臂策略学习之前至少需要：
 
@@ -128,5 +176,5 @@ conda run -n env_isaaclab python scripts/analyze_bimanual_relation_estimator.py 
 - 保存逐步输入、估计状态、物理真值和干预时点，允许独立重放；
 - 若接收边漏检仍显著，先改进关系证据或校准设计，再讨论把它用于策略切换。
 
-因此目前的准确表述是：**双臂在线关系估计已完成离线开发验证，尚未通过在线扰动与正式
-泛化验收。**
+因此目前的准确表述是：**双臂在线关系估计已完成离线与在线扰动开发验证，尚未通过
+预注册未见 seed 的正式泛化验收。**

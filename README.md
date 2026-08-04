@@ -142,7 +142,16 @@ conda run -n env_isaaclab python scripts/audit_physical_handover_dataset.py \
 ```bash
 conda run -n env_isaaclab python scripts/analyze_bimanual_relation_estimator.py \
   --data_dir data/handover_physical/v1 \
-  --output_dir outputs/bimanual_relation/offline_dev_v2
+  --output_dir outputs/bimanual_relation/offline_dev_v4
+```
+
+运行七类真实物理在线关系干预：
+
+```bash
+conda run -n env_isaaclab python scripts/eval_bimanual_relation.py --headless \
+  --conditions normal receiver_miss receiver_delayed giver_releases_early \
+    receiver_grasps_then_loses prolonged_both_hold one_arm_paused \
+  --seeds 8302 --output_dir outputs/bimanual_relation/online_dev_final_seed8302
 ```
 
 验证双臂交接 v2 冻结数据：

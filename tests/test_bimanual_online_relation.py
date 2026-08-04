@@ -37,6 +37,7 @@ def edge_config() -> RelationEstimatorConfig:
         lost_relative_position_rms_std_m=0.01,
         lost_relative_orientation_span_rad=0.10,
         lost_object_distance_m=0.12,
+        kinematic_loss_requires_window_break=True,
         establish_steps=2,
         lost_steps=2,
         confidence_ema_alpha=0.5,
@@ -62,6 +63,11 @@ def test_persisted_config_round_trip_and_distance_contract() -> None:
     values = edge_config().as_dict()
     values["lost_object_distance_m"] = None
     with np.testing.assert_raises_regex(ValueError, "必须同时设置"):
+        RelationEstimatorConfig.from_dict(values)
+
+    values = edge_config().as_dict()
+    values["occupied_opening_plateau_min_m"] = 0.03
+    with np.testing.assert_raises_regex(ValueError, "平台上下界必须同时设置"):
         RelationEstimatorConfig.from_dict(values)
 
 
