@@ -26,6 +26,7 @@ class ScriptedPhysicalHandover:
         self.dt = float(dt)
         self.device = device
         self.position_threshold_m = float(position_threshold_m)
+        self.left_alignment_threshold_m = 0.015
         self.handover_object_position = PHYSICAL_HANDOVER_OBJECT_POSITION.to(device=device)
         self.left_grasp_offset = LEFT_GRASP_OFFSET.to(device=device)
         self.right_grasp_offset = RIGHT_GRASP_OFFSET.to(device=device)
@@ -77,9 +78,15 @@ class ScriptedPhysicalHandover:
         self.failure_reason = reason
         print(f"[physical-handover] FAILED: {reason}", flush=True)
 
-    def _reached(self, current: torch.Tensor, desired: torch.Tensor) -> bool:
+    def _reached(
+        self,
+        current: torch.Tensor,
+        desired: torch.Tensor,
+        threshold_m: float | None = None,
+    ) -> bool:
         error = torch.linalg.norm(current[:, :3] - desired[:, :3], dim=-1)
-        return bool((error < self.position_threshold_m).all())
+        threshold = self.position_threshold_m if threshold_m is None else threshold_m
+        return bool((error < threshold).all())
 
     def _pose_at_object_site(
         self,
@@ -159,7 +166,15 @@ class ScriptedPhysicalHandover:
                 self._transition(HandoverState.LEFT_APPROACH)
         elif self.state == HandoverState.LEFT_APPROACH:
             left_desired = left_pregrasp
-            if self._reached(left_pose, left_pregrasp_goal):
+            # Finish horizontal alignment while there is still vertical
+            # clearance.  The old 5 cm state threshold let the hand descend
+            # with a large lateral error, so the palm could push the baton
+            # before the fingers closed.
+            if self._reached(
+                left_pose,
+                left_pregrasp,
+                self.left_alignment_threshold_m,
+            ):
                 self.left_grasp_start_pose = left_pose.clone()
                 self.left_grasp_goal = left_site_goal.clone()
                 self.left_grasp_command = left_site.clone()
@@ -174,7 +189,11 @@ class ScriptedPhysicalHandover:
             if (
                 self.grasp_close_time is None
                 and approach_fraction >= 1.0
-                and self._reached(left_pose, self.left_grasp_goal)
+                and self._reached(
+                    left_pose,
+                    self.left_grasp_command,
+                    self.left_alignment_threshold_m,
+                )
             ):
                 self.grasp_close_time = self.state_time
             if self.grasp_close_time is not None:
