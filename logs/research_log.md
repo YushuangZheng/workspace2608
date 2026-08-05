@@ -238,6 +238,11 @@ Isaac Sim 5.1 成功创建房间、相机、桌面、T 形物体和 Franka 资�
 原生任务失败或 RGB-D 估计器缺失时才需要人工检查。默认轨道是 Oracle Pose；设置
 `ESSAY2608_RGBD_POSE_ESTIMATOR=模块:函数` 并加 `--observation-mode rgbd_pose` 才会走视觉估计。
 
+首条 `push_T` 自动回放实际生成了 360 帧 JSONL，但 RoboDojo 原生成功判据为失败；该样本
+被保留用于诊断视频，不进入训练。加载器现已强制检查同名 `.audit.json` 的
+`accepted_for_training=true`，所以“文件存在”不再等同于“数据可训练”。这次失败说明源布局
+或回放物理一致性仍需修正后再批量采集，不能为了凑齐数量放宽门禁。
+
 本轮还加入两个可选后端：`VAPORConfig(solver="augmented_lagrangian_fd")` 的有限差分增广
 拉格朗日求解器，以及 `ESSAY2608_RGBD_POSE_ESTIMATOR=builtin:dino_sam` 的 Transformers
 DINOv2/SAM 候选前端。前者复现约束目标和增广更新但没有 Kineverse 符号 Jacobian；后者会

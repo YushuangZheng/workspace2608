@@ -52,3 +52,31 @@ def test_capture_frames_reject_empty_frame_set(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="没有任务真值帧"):
         _load_captured_frames(root, "push_T", 0, 1)
+
+
+def test_capture_frames_reject_failed_training_audit(tmp_path) -> None:
+    root = tmp_path / "captured"
+    path = root / "push_T" / "episode_0000000.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "\n".join(
+            (
+                json.dumps({"type": "metadata"}),
+                json.dumps(
+                    {
+                        "type": "step",
+                        "index": 0,
+                        "frames": {"t": [0, 0, 0, 1, 0, 0, 0]},
+                    }
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path.with_suffix(".audit.json").write_text(
+        json.dumps({"accepted_for_training": False}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="未通过训练门禁"):
+        _load_captured_frames(root, "push_T", 0, 1)

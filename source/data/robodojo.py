@@ -917,6 +917,7 @@ def _load_captured_frames(
     task_name: str,
     index: int,
     expected_length: int,
+    require_audit: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """读取一次 GUI 回放的逐时刻任务帧。
 
@@ -933,6 +934,14 @@ def _load_captured_frames(
                 f"GUI 补采不存在：{Path(capture_root) / task_name / f'episode_{index:07d}.jsonl'}"
             )
         return None, {"source": "not_provided"}
+    audit_path = path.with_suffix(".audit.json")
+    audit: dict[str, Any] | None = None
+    if audit_path.is_file():
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        if not audit.get("accepted_for_training", False):
+            raise ValueError(f"GUI 补采未通过训练门禁：{audit_path}")
+    elif require_audit:
+        raise FileNotFoundError(f"GUI 补采验收记录不存在：{audit_path}")
     metadata: dict[str, Any] = {}
     steps: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as stream:
@@ -971,6 +980,8 @@ def _load_captured_frames(
         "sha256": _sha256_file(path),
         "schema": metadata.get("schema"),
         "observation_source": metadata.get("observation_source"),
+        "audit_path": str(audit_path) if audit is not None else None,
+        "audit_sha256": _sha256_file(audit_path) if audit is not None else None,
     }
 
 
@@ -1055,7 +1066,7 @@ def _load_generic_robodojo_policy_demonstrations(
             if not np.allclose(action[side][:-1], state[side][1:], atol=2.0e-4):
                 raise ValueError(f"官方演示 action[t] != state[t+1]：{episode} {side}")
         captured_frames, capture_record = _load_captured_frames(
-            capture_root, task_name, index, length
+            capture_root, task_name, index, length, require_audit=capture_root is not None
         )
         if candidate.arm_mode == "single":
             active = max(
@@ -1232,7 +1243,7 @@ def load_robodojo_policy_demonstrations(
                 raise ValueError(f"官方演示 action[t] != state[t+1]：{episode} {side}")
         record = {"episode": str(episode), "sha256": _sha256_file(episode), "steps": length}
         captured_frames, capture_record = _load_captured_frames(
-            capture_root, task_name, index, length
+            capture_root, task_name, index, length, require_audit=capture_root is not None
         )
         record["frame_source"] = capture_record
 

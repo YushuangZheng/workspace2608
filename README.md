@@ -160,7 +160,8 @@ python scripts/run.py robodojo table
 - RoboDojo 官方 HDF5 不直接提供 DynaMAC 所需的动态物体真值位姿。正式训练数据必须在
   GUI 仿真中按布局回放并同步补采任务帧；静态初始布局不能冒充整段物体轨迹。`fit` 的
   `--episodes N` 支持任意已下载数量，`--capture-root` 会强制逐条校验补采文件、步数、
-  帧集合和位姿有限性，缺失时直接失败。
+  帧集合、位姿有限性和 `.audit.json` 的 `accepted_for_training=true`，缺失或原生任务
+  失败时直接拒绝训练。
 - 数据流程分为两步：`robodojo demos` 下载官方专家 HDF5（动作来源），`robodojo
   capture-batch` 自动启动 GUI 回放并生成带任务帧的 JSONL（训练输入）。第二步不是手动
   示教；只有布局匹配失败或 GUI 原生成功验收失败时才需要人工检查，不能直接拿下载的 HDF5
