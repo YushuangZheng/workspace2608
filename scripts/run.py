@@ -16,6 +16,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from essay2608.data import (
+    ROBODOJO_CAPTURE_ROOT,
+    ROBODOJO_DEMO_ROOT,
+    ROBODOJO_SOURCE_LAYOUT_ROOT,
     TASK_CANDIDATES,
     audit_robodojo_capture,
     demonstration_environment_config_for,
@@ -30,6 +33,7 @@ from essay2608.data import (
     robodojo_status,
     robodojo_task_candidates,
     robodojo_task_catalog,
+    sync_robodojo_official_snapshot,
     write_robodojo_paper_table,
 )
 from essay2608.policy import (
@@ -68,6 +72,10 @@ def arguments() -> argparse.Namespace:
     robodojo_commands.add_parser("catalog", help="列出上游全部可运行任务候选")
     robodojo_commands.add_parser("resources", help="列出任务、场景、机器人和 policy 资源")
     robodojo_commands.add_parser("prepare", help="生成可丢弃运行层")
+    official_sync = robodojo_commands.add_parser(
+        "official-sync", help="同步官方 HF 根文件与 Assets，排除 data/ckpt"
+    )
+    official_sync.add_argument("--revision", default="main")
     robodojo_commands.add_parser("table", help="从原始结果生成论文级 CSV/Markdown 表")
     assets = robodojo_commands.add_parser("assets", help="按任务下载官方资产；--all 覆盖全部任务")
     assets.add_argument("--tasks", nargs="+")
@@ -136,9 +144,9 @@ def arguments() -> argparse.Namespace:
     capture_batch.add_argument("--task", required=True)
     capture_batch.add_argument("--episodes", type=int, default=5)
     capture_batch.add_argument("--start-index", type=int, default=0)
-    capture_batch.add_argument("--output-root", type=Path, default=Path("data/robodojo/captured"))
+    capture_batch.add_argument("--output-root", type=Path, default=ROBODOJO_CAPTURE_ROOT)
     capture_batch.add_argument(
-        "--source-layout-root", type=Path, default=Path("data/robodojo/source_layouts")
+        "--source-layout-root", type=Path, default=ROBODOJO_SOURCE_LAYOUT_ROOT
     )
     capture_batch.add_argument(
         "--auto-reconstruct",
@@ -706,7 +714,7 @@ def _run_robodojo_capture_batch(args: argparse.Namespace) -> None:
 
     if args.episodes < 1 or args.start_index < 0:
         raise ValueError("episodes 必须为正数，start-index 不能为负数")
-    task_root = PROJECT_ROOT / "data" / "robodojo" / "data" / "RoboDojo" / args.task / "arx_x5" / "data"
+    task_root = ROBODOJO_DEMO_ROOT / args.task / "arx_x5" / "data"
     output_root = args.output_root.resolve() / args.task
     layout_root = args.source_layout_root.resolve() / args.task
     records: list[dict[str, object]] = []
@@ -815,6 +823,9 @@ def _run_robodojo(args: argparse.Namespace) -> None:
             )
         )
     elif args.robodojo_command == "prepare":
+        print(prepare_robodojo_runtime())
+    elif args.robodojo_command == "official-sync":
+        print(sync_robodojo_official_snapshot(revision=args.revision))
         print(prepare_robodojo_runtime())
     elif args.robodojo_command == "assets":
         tasks = None if args.all_tasks else tuple(args.tasks or TASK_CANDIDATES)

@@ -5,7 +5,7 @@
 
 - 官方来源：`hf://datasets/RoboDojo-Benchmark/RoboDojo/Assets/`
 - 上游代码：`third_party/RoboDojo` Git 子模块固定提交
-- 本地目录：`assets/robodojo/Assets/`
+- 本地目录：`third_party/RoboDojoOfficial/Assets/`
 - 运行期链接：`.runtime/robodojo/Assets`
 
 机器人库统一下载上游当前提供的 X5 和 Franka；默认只下载论文子集

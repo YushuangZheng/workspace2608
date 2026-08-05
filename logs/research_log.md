@@ -262,3 +262,17 @@ DINOv2/SAM 候选前端。前者复现约束目标和增广更新但没有 Kinev
 布局并不是官方专家采集时保存的布局；因此 `push_T` 原生成功判据仍未通过，样本继续标记为
 诊断数据而不进入训练。该结果证明失败来自“演示—布局配对缺失/适配层”，不是下载数据被改写，
 也不能通过降低成功阈值解决。正式 RoboDojo 评测仍使用官方布局和官方成功判据。
+# 2026-08-05：RoboDojo 官方快照与项目产物分离
+
+- 官方 Hugging Face 数据集 `RoboDojo-Benchmark/RoboDojo@main` 的根目录实际包含
+  `Assets/`、`data/`、`ckpt/` 以及三个根文件；本项目已把根文件和官方 `Assets/` 统一放入
+  `third_party/RoboDojoOfficial/`，明确不下载 `ckpt/`，`data/` 只保留选择性任务演示。
+- 当前官方数据清单固定为 `push_T`、`pour_liquid_into_cup`、`sweep_blocks` 各 5 条，来源
+  revision 为 `c037c1b3183a030724e694d69a08cb62369ed285`；清单见官方目录下的
+  `assets_manifest.json` 与 `data_manifest.json`。
+- 项目 GUI 回放 JSONL、源布局估计和标定文件不再放在官方目录，统一放到
+  `results/robodojo/{captures,source_layouts,calibration}`，以免把项目生成物误当成官方数据。
+- HDF5 专家演示仍只包含机器人状态/动作/相机，不包含原始布局 JSON；因此整理目录能消除
+  版本混用，但不能单独保证“官方 HDF5 逐条物理回放必成功”。要宣称可训练，仍必须有配对
+  布局并通过 RoboDojo 原生成功判据；当前重建布局回放失败应记录为配对布局/动力学问题，不能
+  放宽门禁。

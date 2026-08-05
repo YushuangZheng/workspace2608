@@ -10,6 +10,10 @@ import numpy as np
 from essay2608.policy.dynamac import DynaMACDemonstration
 
 from .robodojo import (
+    ROBODOJO_CAPTURE_ROOT,
+    ROBODOJO_DEMO_ROOT,
+    ROBODOJO_OFFICIAL_ROOT,
+    ROBODOJO_SOURCE_LAYOUT_ROOT,
     TASK_CANDIDATES,
     RoboDojoPaths,
     RoboDojoPolicyCandidate,
@@ -31,6 +35,7 @@ from .robodojo import (
     robodojo_status,
     robodojo_task_candidates,
     robodojo_task_catalog,
+    sync_robodojo_official_snapshot,
     write_robodojo_paper_table,
 )
 from .robodojo_pose import (
@@ -150,6 +155,10 @@ def load_demonstrations(path: str | Path) -> DemonstrationBundle:
 __all__ = [
     "DemonstrationBundle",
     "RoboDojoPaths",
+    "ROBODOJO_CAPTURE_ROOT",
+    "ROBODOJO_DEMO_ROOT",
+    "ROBODOJO_OFFICIAL_ROOT",
+    "ROBODOJO_SOURCE_LAYOUT_ROOT",
     "RoboDojoPolicyCandidate",
     "RoboDojoPolicyDemonstrations",
     "RoboDojoRobotCandidate",
@@ -171,6 +180,7 @@ __all__ = [
     "robodojo_resource_catalog",
     "robodojo_task_candidates",
     "robodojo_task_catalog",
+    "sync_robodojo_official_snapshot",
     "write_robodojo_paper_table",
     "OraclePoseEstimator",
     "PoseEstimator",

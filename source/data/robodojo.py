@@ -26,10 +26,21 @@ from .tapas import TapasSegmentationConfig, tapas_skill_labels
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ROBODOJO_ROOT = PROJECT_ROOT / "third_party" / "RoboDojo"
-ROBODOJO_ASSET_ROOT = PROJECT_ROOT / "assets" / "robodojo" / "Assets"
-ROBODOJO_DEMO_ROOT = PROJECT_ROOT / "data" / "robodojo" / "data" / "RoboDojo"
+# 官方 Hugging Face 快照和项目适配产物分开管理。这里的目录只保存
+# RoboDojo 官方下载物（Assets、选择性 data 和下载元数据），不再把它拆散到
+# 项目根目录的 assets/ 与 data/ 下。
+ROBODOJO_OFFICIAL_ROOT = Path(
+    os.environ.get(
+        "ESSAY2608_ROBODOJO_OFFICIAL_ROOT",
+        str(PROJECT_ROOT / "third_party" / "RoboDojoOfficial"),
+    )
+).resolve()
+ROBODOJO_ASSET_ROOT = ROBODOJO_OFFICIAL_ROOT / "Assets"
+ROBODOJO_DEMO_ROOT = ROBODOJO_OFFICIAL_ROOT / "data" / "RoboDojo"
 ROBODOJO_RUNTIME_ROOT = PROJECT_ROOT / ".runtime" / "robodojo"
 ROBODOJO_RESULT_ROOT = PROJECT_ROOT / "results" / "robodojo" / "raw"
+ROBODOJO_CAPTURE_ROOT = PROJECT_ROOT / "results" / "robodojo" / "captures"
+ROBODOJO_SOURCE_LAYOUT_ROOT = PROJECT_ROOT / "results" / "robodojo" / "source_layouts"
 
 
 COMMON_ASSET_PATTERNS = (
@@ -427,8 +438,12 @@ def _link_directory(link: Path, target: Path) -> None:
 
     relative_target = Path(os.path.relpath(target, link.parent))
     if link.is_symlink():
-        if Path(os.readlink(link)) != relative_target:
-            raise RuntimeError(f"运行期链接指向异常：{link} -> {os.readlink(link)}")
+        if Path(os.readlink(link)) == relative_target:
+            return
+        # 运行层是可丢弃的适配目录；官方下载根目录切换后，更新由本项目
+        # 创建的旧链接，避免继续引用已不存在的 assets/robodojo 路径。
+        link.unlink()
+        link.symlink_to(relative_target, target_is_directory=True)
         return
     if link.exists():
         raise RuntimeError(f"运行期路径已存在且不是受管链接：{link}")
@@ -794,7 +809,7 @@ def download_robodojo_assets(
         "files": sorted(files),
         "generated_curobo_configs": [str(path.relative_to(local_root)) for path in planner_configs],
     }
-    (local_root / "manifest.json").write_text(
+    (local_root / "assets_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -805,10 +820,11 @@ def download_robodojo_demonstrations(
     task_names: tuple[str, ...] | None = None,
     episode_count: int = 5,
     revision: str = "main",
+    paths: RoboDojoPaths = RoboDojoPaths(),
 ) -> Path:
     """按冻结数量下载指定任务的官方 HDF5 专家演示。"""
 
-    task_names = _resolve_task_names(task_names, RoboDojoPaths())
+    task_names = _resolve_task_names(task_names, paths)
     if episode_count < 1:
         raise ValueError("episode_count 必须为正")
     try:
@@ -820,7 +836,7 @@ def download_robodojo_demonstrations(
         for task_name in task_names
         for index in range(episode_count)
     ]
-    local_root = ROBODOJO_DEMO_ROOT.parents[1]
+    local_root = paths.asset_root.parent
     local_root.mkdir(parents=True, exist_ok=True)
     resolved_revision = HfApi().dataset_info("RoboDojo-Benchmark/RoboDojo", revision=revision).sha
     # 这里都是精确文件名。逐文件请求可避免 ``snapshot_download`` 为筛选少量
@@ -855,10 +871,58 @@ def download_robodojo_demonstrations(
             "RoboDojo HDF5 不含本项目真值任务帧；必须经 GUI 回放补采后才能训练 DynaMAC/MiDiGaP"
         ),
     }
-    (local_root / "manifest.json").write_text(
+    (local_root / "data_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    return ROBODOJO_DEMO_ROOT
+    return paths.asset_root.parent / "data" / "RoboDojo"
+
+
+def sync_robodojo_official_snapshot(
+    paths: RoboDojoPaths = RoboDojoPaths(),
+    revision: str = "main",
+) -> Path:
+    """同步官方 HF 根文件和全部任务资产，明确跳过 ``data/``、``ckpt/``。
+
+    专家 HDF5 不在这里隐式全量下载；调用方再用
+    :func:`download_robodojo_demonstrations` 选择任务和条数。这样本地目录始终能从
+    清单区分“官方快照”与“项目训练数据”。
+    """
+
+    try:
+        from huggingface_hub import HfApi, hf_hub_download
+    except ImportError as error:
+        raise RuntimeError("同步官方 RoboDojo 快照需要先安装 huggingface_hub") from error
+    official_root = paths.asset_root.parent
+    official_root.mkdir(parents=True, exist_ok=True)
+    api = HfApi()
+    resolved_revision = api.dataset_info(
+        "RoboDojo-Benchmark/RoboDojo", revision=revision
+    ).sha
+    root_files = (".gitattributes", ".gitignore", "README.md")
+    for filename in root_files:
+        hf_hub_download(
+            repo_id="RoboDojo-Benchmark/RoboDojo",
+            repo_type="dataset",
+            revision=resolved_revision,
+            filename=filename,
+            local_dir=official_root,
+        )
+    download_robodojo_assets(task_names=None, paths=paths, revision=revision)
+    data_manifest = official_root / "data_manifest.json"
+    selected_data = json.loads(data_manifest.read_text(encoding="utf-8")) if data_manifest.is_file() else None
+    manifest = {
+        "schema": "essay2608.robodojo.official_snapshot.v1",
+        "repository": "RoboDojo-Benchmark/RoboDojo",
+        "requested_revision": revision,
+        "resolved_revision": resolved_revision,
+        "downloaded_prefixes": ["Assets/"],
+        "downloaded_root_files": list(root_files),
+        "excluded_prefixes": ["data/", "ckpt/"],
+        "selected_data_manifest": selected_data,
+    }
+    target = official_root / "official_snapshot_manifest.json"
+    target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return official_root
 
 
 def _three_phase_skill_labels(length: int):
@@ -1255,7 +1319,7 @@ def load_robodojo_policy_demonstrations(
             else:
                 layout_path = (
                     paths.project_root
-                    / "data"
+                    / "results"
                     / "robodojo"
                     / "source_layouts"
                     / "push_T"
@@ -1975,10 +2039,8 @@ def reconstruct_push_t_source_layout(
     layout = json.loads(template_path.read_text(encoding="utf-8"))
     rigid = layout["Rigid"]["t"][0]
     cushion = layout["Geometry"]["t_cushion"][0]
-    # ``push_T.yml`` 的官方类别列表只有 index 0。颜色来自材质/渲染，不是第二个
-    # 几何类别；强行写成 1 会让回放加载另一套 T 资产，末端轨迹虽相同但接触动力学
-    # 和最终朝向会错误。
-    rigid["category_idx"] = 0
+    # 保留官方布局模板选择的资产类别。HDF5 只提供轨迹和图像，重建只应替换
+    # 位姿；覆盖 category_idx 会把演示换成另一套官方 T 资产，破坏接触动力学。
     rigid["default_pos"] = [*initial_position.tolist(), 0.7725]
     rigid["default_ori"] = [
         math.cos(initial_yaw / 2.0),
@@ -2191,10 +2253,13 @@ def write_robodojo_paper_table(
 
 __all__ = [
     "ROBODOJO_ASSET_ROOT",
+    "ROBODOJO_CAPTURE_ROOT",
     "ROBODOJO_DEMO_ROOT",
+    "ROBODOJO_OFFICIAL_ROOT",
     "ROBODOJO_RESULT_ROOT",
     "ROBODOJO_ROOT",
     "ROBODOJO_RUNTIME_ROOT",
+    "ROBODOJO_SOURCE_LAYOUT_ROOT",
     "RoboDojoPaths",
     "RoboDojoPolicyDemonstrations",
     "RoboDojoPolicyCandidate",
@@ -2216,6 +2281,7 @@ __all__ = [
     "prepare_robodojo_runtime",
     "reconstruct_push_t_source_layout",
     "robodojo_task_catalog",
+    "sync_robodojo_official_snapshot",
     "robodojo_status",
     "write_robodojo_paper_table",
 ]

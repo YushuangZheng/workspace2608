@@ -13,7 +13,14 @@ dependencies = ["numpy>=1.24"]
 [project.optional-dependencies]
 baselines = ["torch>=2.1"]
 midigap = ["scipy>=1.10"]
-robodojo = ["h5py>=3.8", "huggingface_hub>=0.30", "pyyaml>=6", "websockets>=13"]
+robodojo = [
+    "h5py>=3.8",
+    "huggingface_hub>=0.30",
+    "msgpack>=1.0.8",
+    "msgpack-numpy>=0.4.8",
+    "pyyaml>=6",
+    "websockets>=13",
+]
 vision = ["pillow>=10", "torch>=2.1", "transformers>=4.40"]
 test = ["pytest>=8"]
 
