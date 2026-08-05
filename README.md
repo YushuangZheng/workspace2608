@@ -38,6 +38,13 @@ results/robodojo/           # 可审计 CSV 与论文 Markdown 表
 `essay2608_dual_{x5,franka}` 配置；上游 `arx_x5` 等原生配置仍可直接使用。新组合复用
 官方物体布局，并在生成配置时记录布局来源，不修改 RoboDojo 子模块。
 
+官方边界固定如下：`third_party/RoboDojo` 保持上游锁定提交且工作树只读；任务逻辑、奖励函数、
+官方 `arx_x5` 配置、资产目录和评测结果判据均不在项目内改写。项目适配只发生在可丢弃的
+`.runtime/robodojo` 和 `source/data/robodojo_gui.py`：增加项目策略 WebSocket、任务位姿注入、
+近景视口以及单臂字段兼容。要复现官方流程，仍以 RoboDojo 上游的 `scripts/robodojo.sh`、
+`env_cfg/arx_x5.yml` 和官方布局为准；`capture/capture-batch` 是项目额外的训练数据诊断工具，
+不是对上游评测实现的替换。
+
 RoboDojo 上游清单中的 54 个可运行配置全部作为项目任务候选池，可用
 `python scripts/run.py robodojo resources` 同时查看任务、场景、机器人、环境配置和
 XPolicyLab policy。当前论文正式预注册子集为：
@@ -71,12 +78,13 @@ python scripts/run.py robodojo assets --all
 python scripts/run.py robodojo demos --all --episodes 5
 
 # 真实位姿训练数据不是手工示教：官方 HDF5 已包含专家动作，下面命令会让 Isaac Sim
-# GUI 自动逐条回放这些动作，并同步写出每一帧的任务位姿 JSONL。push_T 的源布局也会
-# 自动从 HDF5 RGB 重建；用户只需观察 GUI，不需要逐点操纵机器人。
+# GUI 按官方 ee 动作接口逐条回放，并同步写出每一帧的任务位姿 JSONL。push_T 的源布局也会
+# 尝试从 HDF5 RGB 重建；源布局与演示无法一一对应时会严格失败，绝不伪造训练数据。
 python scripts/run.py robodojo capture-batch \
   --task push_T --episodes 5 --auto-reconstruct \
   --output-root data/robodojo/captured \
-  --source-layout-root data/robodojo/source_layouts
+  --source-layout-root data/robodojo/source_layouts \
+  --replay-action ee_pose
 
 # 如需 RGB-D 轨道，可使用内置 DINOv2/SAM 候选前端（首次运行会下载模型权重），
 # 或替换为自己的 module:function；默认仍是 Oracle Pose。

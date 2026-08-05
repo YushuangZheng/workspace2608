@@ -1975,8 +1975,10 @@ def reconstruct_push_t_source_layout(
     layout = json.loads(template_path.read_text(encoding="utf-8"))
     rigid = layout["Rigid"]["t"][0]
     cushion = layout["Geometry"]["t_cushion"][0]
-    # 官方演示中的紫色 T 块是官方类别 1；几何、质量和摩擦与类别 0 相同。
-    rigid["category_idx"] = 1
+    # ``push_T.yml`` 的官方类别列表只有 index 0。颜色来自材质/渲染，不是第二个
+    # 几何类别；强行写成 1 会让回放加载另一套 T 资产，末端轨迹虽相同但接触动力学
+    # 和最终朝向会错误。
+    rigid["category_idx"] = 0
     rigid["default_pos"] = [*initial_position.tolist(), 0.7725]
     rigid["default_ori"] = [
         math.cos(initial_yaw / 2.0),

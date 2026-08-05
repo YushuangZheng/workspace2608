@@ -17,6 +17,7 @@ from .midigap import TaskParameterizedMiDiGaP
 
 PolicyName = Literal["dp", "midigap", "dynamac"]
 ArmMode = Literal["single", "bimanual"]
+ReplayActionType = Literal["joint", "ee_pose"]
 
 
 def _pose(value, field: str) -> np.ndarray:
@@ -220,6 +221,7 @@ class RoboDojoReplayCaptureModel:
         output_path: str | Path,
         arm_mode: ArmMode,
         active_side: Literal["auto", "left", "right"] = "auto",
+        replay_action_type: ReplayActionType = "joint",
     ) -> None:
         try:
             import h5py
@@ -228,6 +230,9 @@ class RoboDojoReplayCaptureModel:
         self.episode_path = Path(episode_path).resolve()
         self.output_path = Path(output_path).resolve()
         self.arm_mode = arm_mode
+        if replay_action_type not in {"joint", "ee_pose"}:
+            raise ValueError(f"未知回放动作类型：{replay_action_type}")
+        self.replay_action_type = replay_action_type
         with h5py.File(self.episode_path, "r") as archive:
             self.actions = {
                 side: {
@@ -265,7 +270,7 @@ class RoboDojoReplayCaptureModel:
             "arm_mode": self.arm_mode,
             "active_side": self.active_side,
             "steps": self.length,
-            "replay_action_type": "joint",
+            "replay_action_type": self.replay_action_type,
             "observation_mode": os.environ.get("ESSAY2608_OBSERVATION_MODE", "oracle_pose"),
             "observation_source": (
                 "robodojo_simulator_ground_truth"
@@ -316,15 +321,24 @@ class RoboDojoReplayCaptureModel:
         step = min(self._index, self.length - 1)
         if self.arm_mode == "single":
             values = self.actions[self.active_side]
-            action = {
-                "arm_joint_state": values["joint"][step].astype(np.float32),
-                "ee_joint_state": values["gripper"][step].astype(np.float32),
-            }
+            if self.replay_action_type == "ee_pose":
+                action = {
+                    "ee_pose": values["pose"][step].astype(np.float32),
+                    "ee_joint_state": values["gripper"][step].astype(np.float32),
+                }
+            else:
+                action = {
+                    "arm_joint_state": values["joint"][step].astype(np.float32),
+                    "ee_joint_state": values["gripper"][step].astype(np.float32),
+                }
         else:
             action = {}
             for side in ("left", "right"):
                 values = self.actions[side]
-                action[f"{side}_arm_joint_state"] = values["joint"][step].astype(np.float32)
+                if self.replay_action_type == "ee_pose":
+                    action[f"{side}_ee_pose"] = values["pose"][step].astype(np.float32)
+                else:
+                    action[f"{side}_arm_joint_state"] = values["joint"][step].astype(np.float32)
                 action[f"{side}_ee_joint_state"] = values["gripper"][step].astype(np.float32)
         if self._index < self.length:
             self._record(action)
@@ -377,6 +391,7 @@ def serve_robodojo_replay_capture(
     output_path: str | Path,
     arm_mode: ArmMode,
     active_side: Literal["auto", "left", "right"] = "auto",
+    replay_action_type: ReplayActionType = "joint",
     host: str = "127.0.0.1",
     port: int = 19000,
     xpolicylab_root: str | Path | None = None,
@@ -391,7 +406,13 @@ def serve_robodojo_replay_capture(
         sys.path.insert(0, str(xpolicylab_root))
     from client_server.ws.model_server import PolicyServer, PolicyServerConfig
 
-    model = RoboDojoReplayCaptureModel(episode_path, output_path, arm_mode, active_side)
+    model = RoboDojoReplayCaptureModel(
+        episode_path,
+        output_path,
+        arm_mode,
+        active_side,
+        replay_action_type,
+    )
     server = PolicyServer(
         model,
         PolicyServerConfig(
@@ -412,6 +433,7 @@ def serve_robodojo_replay_capture(
 __all__ = [
     "RoboDojoPolicyModel",
     "RoboDojoReplayCaptureModel",
+    "ReplayActionType",
     "serve_robodojo_policy",
     "serve_robodojo_replay_capture",
 ]

@@ -157,6 +157,12 @@ def test_algorithm_1_masks_linked_object_and_uses_virtual_frame(tmp_path) -> Non
     assert policy.skills[1].link_diagnostics["object"]["linked"]
     assert "object" not in policy.skills[1].selected_frames
     assert "virtual_skill_20" in policy.skills[1].selected_frames
+    assert all(
+        frame == f"virtual_skill_{skill.label}"
+        for skill in policy.skills
+        for frame in skill.selected_frames
+        if frame.startswith("virtual_skill_")
+    )
 
     first = synthetic_demonstrations()[0]
     observation = DynaMACObservation(

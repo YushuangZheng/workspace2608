@@ -254,6 +254,26 @@ def test_replay_capture_selects_the_actually_moving_arm(tmp_path: Path) -> None:
         "right_ee_joint_state",
     }
 
+    ee_model = RoboDojoReplayCaptureModel(
+        episode, tmp_path / "capture_ee.jsonl", "bimanual", replay_action_type="ee_pose"
+    )
+    ee_model.reset()
+    ee_model.update_obs(
+        {
+            "state": {
+                "left_ee_pose": [0, 0, 0, 1, 0, 0, 0],
+                "right_ee_pose": [0, 0, 0, 1, 0, 0, 0],
+            },
+            "task": {"object_poses": {}},
+        }
+    )
+    assert set(ee_model.get_action()[0]) == {
+        "left_ee_pose",
+        "left_ee_joint_state",
+        "right_ee_pose",
+        "right_ee_joint_state",
+    }
+
 
 def test_capture_audit_rejects_native_failure(tmp_path: Path) -> None:
     capture = tmp_path / "capture.jsonl"

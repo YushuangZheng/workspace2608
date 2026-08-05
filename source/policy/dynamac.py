@@ -730,6 +730,9 @@ class DynaMAC:
         virtual_starts: dict[int, list[Array]] = {}
         previous_mode_labels: Array | None = None
         for label in self.skill_sequence:
+            # 虚拟帧只在对应技能开始时可观测。训练当前技能时把其它技能的
+            # 起始位姿也塞进候选集，会让离线选择出推理时尚未捕获的未来帧，
+            # 最终在 act() 中触发“虚拟帧尚未捕获”。
             virtual_starts[label] = [
                 demonstration.ee_pose[_skill_slice(demonstration, label)[0]].copy()
                 for demonstration in demonstrations
@@ -737,7 +740,7 @@ class DynaMAC:
             lengths = [len(_skill_slice(demonstration, label)) for demonstration in demonstrations]
             duration = max(int(round(float(np.mean(lengths)))), 1)
             ee, actions, frames, extra = _resampled_skill_data(
-                demonstrations, label, duration, virtual_starts
+                demonstrations, label, duration, {label: virtual_starts[label]}
             )
 
             local_ee = {
@@ -785,7 +788,7 @@ class DynaMAC:
 
             candidate_frames = [
                 *valid_real_frames,
-                *(f"virtual_skill_{item}" for item in virtual_starts),
+                f"virtual_skill_{label}",
             ]
             scores = task_parameter_scores(
                 {name: policy_covariance[name] for name in candidate_frames}

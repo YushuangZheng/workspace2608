@@ -107,6 +107,10 @@ def arguments() -> argparse.Namespace:
     capture_server.add_argument("--output", type=Path, required=True)
     capture_server.add_argument("--arm-mode", choices=("single", "bimanual"), required=True)
     capture_server.add_argument("--active-side", choices=("auto", "left", "right"), default="auto")
+    capture_server.add_argument(
+        "--replay-action", choices=("ee_pose", "joint"), default="ee_pose",
+        help="回放 HDF5 中的末端位姿或关节动作（默认 ee_pose）",
+    )
     capture_server.add_argument("--host", default="127.0.0.1")
     capture_server.add_argument("--port", type=int, required=True)
 
@@ -117,6 +121,10 @@ def arguments() -> argparse.Namespace:
     capture.add_argument("--source-layout", type=Path, required=True)
     capture.add_argument("--seed", type=int, default=0)
     capture.add_argument("--active-side", choices=("auto", "left", "right"), default="auto")
+    capture.add_argument(
+        "--replay-action", choices=("ee_pose", "joint"), default="ee_pose",
+        help="回放 HDF5 中的末端位姿或关节动作（默认 ee_pose）",
+    )
     capture.add_argument("--device-id", type=int, default=0)
     capture.add_argument(
         "--observation-mode", choices=("oracle_pose", "rgbd_pose"), default="oracle_pose"
@@ -140,6 +148,10 @@ def arguments() -> argparse.Namespace:
     )
     capture_batch.add_argument("--seed", type=int, default=0)
     capture_batch.add_argument("--active-side", choices=("auto", "left", "right"), default="auto")
+    capture_batch.add_argument(
+        "--replay-action", choices=("ee_pose", "joint"), default="ee_pose",
+        help="回放 HDF5 中的末端位姿或关节动作（默认 ee_pose）",
+    )
     capture_batch.add_argument("--device-id", type=int, default=0)
     capture_batch.add_argument(
         "--observation-mode", choices=("oracle_pose", "rgbd_pose"), default="oracle_pose"
@@ -604,6 +616,8 @@ def _run_robodojo_capture(args: argparse.Namespace) -> None:
         arm_mode,
         "--active-side",
         args.active_side,
+        "--replay-action",
+        args.replay_action,
         "--port",
         str(port),
     ]
@@ -726,6 +740,7 @@ def _run_robodojo_capture_batch(args: argparse.Namespace) -> None:
                 source_layout=layout,
                 seed=args.seed,
                 active_side=args.active_side,
+                replay_action=args.replay_action,
                 device_id=args.device_id,
                 observation_mode=args.observation_mode,
             )
@@ -831,6 +846,7 @@ def _run_robodojo(args: argparse.Namespace) -> None:
             args.output,
             args.arm_mode,
             args.active_side,
+            args.replay_action,
             host=args.host,
             port=args.port,
         )
