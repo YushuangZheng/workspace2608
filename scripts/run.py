@@ -24,6 +24,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+
+def _project_environment() -> dict[str, str]:
+    """为从 RoboDojo runtime cwd 启动的 GUI 子进程保留项目适配包路径。"""
+
+    environment = os.environ.copy()
+    pythonpath = [str(PROJECT_ROOT)]
+    if environment.get("PYTHONPATH"):
+        pythonpath.append(environment["PYTHONPATH"])
+    environment["PYTHONPATH"] = os.pathsep.join(pythonpath)
+    return environment
+
 from essay2608.data import load_demonstrations
 from essay2608.policy import (
     BimanualDynaMAC,
@@ -455,7 +466,7 @@ def _run_robodojo_eval(args: argparse.Namespace) -> None:
         "--port",
         str(port),
     ]
-    environment = os.environ.copy()
+    environment = _project_environment()
     environment.update(
         {
             "CUDA_VISIBLE_DEVICES": str(args.device_id),
@@ -543,7 +554,7 @@ def _run_robodojo_external_eval(args: argparse.Namespace) -> None:
         runtime_root=runtime,
     )
     _validate_layout_seed(runtime, env_cfg, args.seed)
-    environment = os.environ.copy()
+    environment = _project_environment()
     environment.update(
         {
             "EVAL_NUM": str(args.episodes),
@@ -639,7 +650,7 @@ def _run_robodojo_capture(args: argparse.Namespace) -> None:
         "--port",
         str(port),
     ]
-    environment = os.environ.copy()
+    environment = _project_environment()
     environment.update(
         {
             "CUDA_VISIBLE_DEVICES": str(args.device_id),
