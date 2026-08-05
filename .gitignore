@@ -1,74 +1,17 @@
-# C++
-**/cmake-build*/
-**/build*/
-**/*.so
-**/*.log*
-
-# Omniverse
-**/*.dmp
-**/.thumbs
-
-# No USD files allowed in the repo
-**/*.usd
-**/*.usda
-**/*.usdc
-**/*.usdz
-
-# Python
-.DS_Store
-**/*.egg-info/
+# Python caches and build products
 **/__pycache__/
-**/.pytest_cache/
-**/*.pyc
-**/*.pb
+**/*.py[cod]
+**/*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
 
-# Docker/Singularity
-**/*.sif
-docker/cluster/exports/
-docker/.container.cfg
-
-# IDE
-**/.idea/
-**/.vscode/
-# Don't ignore the top-level .vscode directory as it is
-# used to configure VS Code settings
-!.vscode
-
-# Outputs
-**/output/*
-**/outputs/*
-**/videos/*
-**/wandb/*
-**/.neptune/*
-docker/artifacts/
+# Local experiment outputs
+outputs/
+*.log
 *.tmp
 
-# Doc Outputs
-**/docs/_build/*
-**/generated/*
-
-# Isaac-Sim packman
-_isaac_sim*
-_repo
-_build
-.lastformat
-
-# RL-Games
-**/runs/*
-**/logs/*
-!/logs/
-!/logs/research_log.md
-**/recordings/*
-
-# Pre-Trained Checkpoints
-/.pretrained_checkpoints/
-
-# Teleop Recorded Dataset
-/datasets/
-
-# Docker history
-.isaac-lab-docker-history
-
-# TacSL sensor
-**/tactile_record/*
-**/gelsight_r15_data/*
+# Local tooling
+.venv/
+.DS_Store
