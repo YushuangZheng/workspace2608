@@ -60,6 +60,15 @@ _build
 !/logs/research_log.md
 **/recordings/*
 
+# RoboDojo：上游代码由子模块固定，大资产、运行覆盖层和原始评测不进 Git
+/.runtime/
+/assets/robodojo/*
+!/assets/robodojo/README.md
+/data/robodojo/*
+!/data/robodojo/README.md
+/results/robodojo/raw/*
+!/results/robodojo/raw/README.md
+
 # Pre-Trained Checkpoints
 /.pretrained_checkpoints/
 

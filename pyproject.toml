@@ -12,10 +12,13 @@ dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
 baselines = ["torch>=2.1"]
+midigap = ["scipy>=1.10"]
+robodojo = ["h5py>=3.8", "huggingface_hub>=0.30", "pyyaml>=6", "websockets>=13"]
 test = ["pytest>=8"]
 
-[tool.setuptools.packages.find]
-where = ["source/essay2608"]
+[tool.setuptools]
+packages = ["essay2608", "essay2608.data", "essay2608.policy"]
+package-dir = { essay2608 = "source" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
