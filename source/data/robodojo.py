@@ -22,6 +22,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Literal
 
+from .tapas import TapasSegmentationConfig, tapas_skill_labels
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ROBODOJO_ROOT = PROJECT_ROOT / "third_party" / "RoboDojo"
 ROBODOJO_ASSET_ROOT = PROJECT_ROOT / "assets" / "robodojo" / "Assets"
@@ -860,19 +862,116 @@ def download_robodojo_demonstrations(
 
 
 def _three_phase_skill_labels(length: int):
-    """给无人工技能标签的官方演示建立冻结的三阶段时间分段。"""
+    """兼容旧调用名。
+
+    旧的固定三段切分不再用于正式加载路径；保留这个私有符号是为了避免旧脚本
+    导入时报错，并明确要求调用方提供真实轨迹后使用 :func:`_tapas_labels`。
+    """
+
+    if length < 6:
+        raise ValueError("RoboDojo 演示过短，无法进行技能分割")
+    raise ValueError("固定长度接口无法进行 TAPAS 分割，请传入末端轨迹")
+
+
+def _tapas_labels(poses, gripper):
+    config = _tapas_config(len(poses))
+    return tapas_skill_labels(poses, gripper, config)
+
+
+def _tapas_config(length: int) -> TapasSegmentationConfig:
+    """返回当前实验冻结的、随轨迹长度轻微自适应的 TAPAS 参数。"""
+
+    return TapasSegmentationConfig(
+        minimum_skill_length=max(8, min(24, length // 12)),
+        maximum_skills=3,
+    )
+
+
+def _tapas_provenance() -> dict[str, Any]:
+    return {
+        "backend": "kinematic_velocity_valleys_v1",
+        "minimum_skill_length": "max(8,min(24,T//12))",
+        "maximum_skills": 3,
+        "velocity_quantile": TapasSegmentationConfig.velocity_quantile,
+        "smoothing_window": TapasSegmentationConfig.smoothing_window,
+        "gripper_change_quantile": TapasSegmentationConfig.gripper_change_quantile,
+    }
+
+
+def _capture_path(capture_root: str | Path | None, task_name: str, index: int) -> Path | None:
+    """解析 GUI 补采 JSONL 路径；同时支持根目录和任务目录两种布局。"""
+
+    if capture_root is None:
+        return None
+    root = Path(capture_root).expanduser().resolve()
+    filename = f"episode_{index:07d}.jsonl"
+    candidates = [root / task_name / filename, root / filename]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _load_captured_frames(
+    capture_root: str | Path | None,
+    task_name: str,
+    index: int,
+    expected_length: int,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """读取一次 GUI 回放的逐时刻任务帧。
+
+    如果显式指定了 ``capture_root``，文件存在但帧为空或长度不匹配时直接报错，
+    防止把失败的补采悄悄降级成静态布局。
+    """
 
     import numpy as np
 
-    if length < 6:
-        raise ValueError("RoboDojo 演示过短，无法划分接近/操作/撤回三阶段")
-    approach_end = max(1, min(round(0.30 * length), length - 2))
-    manipulation_end = max(approach_end + 1, min(round(0.68 * length), length - 1))
-    labels = np.empty(length, dtype=np.int64)
-    labels[:approach_end] = 0
-    labels[approach_end:manipulation_end] = 1
-    labels[manipulation_end:] = 2
-    return labels
+    path = _capture_path(capture_root, task_name, index)
+    if path is None:
+        if capture_root is not None:
+            raise FileNotFoundError(
+                f"GUI 补采不存在：{Path(capture_root) / task_name / f'episode_{index:07d}.jsonl'}"
+            )
+        return None, {"source": "not_provided"}
+    metadata: dict[str, Any] = {}
+    steps: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"GUI 补采 JSONL 无法解析：{path}:{line_number}") from error
+            if record.get("type") == "metadata":
+                metadata = record
+            elif record.get("type") == "step":
+                steps.append(record)
+    if len(steps) != expected_length:
+        raise ValueError(f"GUI 补采步数与 HDF5 不一致：{path} ({len(steps)} != {expected_length})")
+    if [step.get("index") for step in steps] != list(range(expected_length)):
+        raise ValueError(f"GUI 补采 step index 不连续：{path}")
+    names = tuple(sorted(steps[0].get("frames", {})))
+    if not names:
+        raise ValueError(f"GUI 补采没有任务真值帧：{path}")
+    frames: dict[str, Any] = {}
+    for name in names:
+        values = []
+        for step in steps:
+            if tuple(sorted(step.get("frames", {}))) != names:
+                raise ValueError(f"GUI 补采各时刻任务帧集合不一致：{path}")
+            value = np.asarray(step["frames"][name], dtype=np.float64)
+            if value.shape != (7,) or not np.all(np.isfinite(value)):
+                raise ValueError(f"GUI 补采帧 {name} 不是有限的 xyz+wxyz：{path}")
+            values.append(value)
+        frames[name] = np.stack(values)
+    return frames, {
+        "source": "gui_capture",
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "schema": metadata.get("schema"),
+        "observation_source": metadata.get("observation_source"),
+    }
 
 
 def _layout_pose(record: dict, field: str):
@@ -888,6 +987,7 @@ def _load_generic_robodojo_policy_demonstrations(
     task_name: str,
     episode_count: int,
     paths: RoboDojoPaths,
+    capture_root: str | Path | None = None,
 ) -> RoboDojoPolicyDemonstrations:
     """加载任意 RoboDojo 任务的机器人轨迹。
 
@@ -951,10 +1051,12 @@ def _load_generic_robodojo_policy_demonstrations(
         if len(lengths) != 1:
             raise ValueError(f"官方演示长度不一致：{episode}")
         length = lengths.pop()
-        skill = _three_phase_skill_labels(length)
         for side in ("left", "right"):
             if not np.allclose(action[side][:-1], state[side][1:], atol=2.0e-4):
                 raise ValueError(f"官方演示 action[t] != state[t+1]：{episode} {side}")
+        captured_frames, capture_record = _load_captured_frames(
+            capture_root, task_name, index, length
+        )
         if candidate.arm_mode == "single":
             active = max(
                 ("left", "right"),
@@ -962,23 +1064,30 @@ def _load_generic_robodojo_policy_demonstrations(
                     np.linalg.norm(np.diff(state[side][:, :3], axis=0), axis=1).sum()
                 ),
             )
+            skill = _tapas_labels(state[active], gripper[active])
+            frames = captured_frames or {"active_ee": state[active].copy()}
             single_arm.append(
                 DynaMACDemonstration(
                     ee_pose=state[active],
                     action_pose=action[active],
                     gripper=gripper[active],
-                    frames={},
+                    frames=frames,
                     skill=skill,
                     name=f"robodojo_{task_name}_{index:03d}_{active}",
                 )
             )
         else:
+            skill = _tapas_labels(state["left"], gripper["left"])
+            left_frames = dict(captured_frames or {})
+            left_frames.setdefault("right_ee", state["right"].copy())
+            right_frames = dict(captured_frames or {})
+            right_frames.setdefault("left_ee", state["left"].copy())
             left_arm.append(
                 DynaMACDemonstration(
                     ee_pose=state["left"],
                     action_pose=action["left"],
                     gripper=gripper["left"],
-                    frames={"right_ee": state["right"].copy()},
+                    frames=left_frames,
                     skill=skill,
                     name=f"robodojo_{task_name}_{index:03d}_left",
                 )
@@ -988,13 +1097,18 @@ def _load_generic_robodojo_policy_demonstrations(
                     ee_pose=state["right"],
                     action_pose=action["right"],
                     gripper=gripper["right"],
-                    frames={"left_ee": state["left"].copy()},
+                    frames=right_frames,
                     skill=skill,
                     name=f"robodojo_{task_name}_{index:03d}_right",
                 )
             )
         episode_records.append(
-            {"episode": str(episode), "sha256": _sha256_file(episode), "steps": length}
+            {
+                "episode": str(episode),
+                "sha256": _sha256_file(episode),
+                "steps": length,
+                "frame_source": capture_record,
+            }
         )
     return RoboDojoPolicyDemonstrations(
         tuple(single_arm),
@@ -1006,8 +1120,16 @@ def _load_generic_robodojo_policy_demonstrations(
             "task_arm_mode": candidate.arm_mode,
             "source_embodiment": "arx_x5",
             "episode_count": episode_count,
-            "observation_frames": [] if candidate.arm_mode == "single" else ["opposite_ee_only"],
-            "limitations": "通用入口尚未完成该任务的 GUI 物体位姿补采；仅用于打通训练和接口测试，不能直接作为正式 DynaMAC 任务参数结果。",
+            "skill_segmentation": "tapas_velocity_valleys_v1",
+            "skill_segmentation_config": _tapas_provenance(),
+            "observation_frames": sorted(
+                single_arm[0].frames if single_arm else left_arm[0].frames
+            ),
+            "limitations": (
+                "使用 GUI 逐时刻任务帧；视觉候选生成仍由 RoboDojo/外部感知提供。"
+                if capture_root is not None
+                else "未提供 GUI 物体帧，使用末端退化条件；不能作为正式任务参数结果。"
+            ),
             "episodes": episode_records,
         },
     )
@@ -1017,12 +1139,12 @@ def load_robodojo_policy_demonstrations(
     task_name: str,
     episode_count: int = 5,
     paths: RoboDojoPaths = RoboDojoPaths(),
+    capture_root: str | Path | None = None,
 ) -> RoboDojoPolicyDemonstrations:
     """把冻结官方演示转换为 DynaMAC/MiDiGaP/DP 共用的真值状态输入。
 
-    ``push_T`` 的 HDF5 没有物体位姿，因此使用同文件 RGB 重建的初始 T 块与目标
-    垫位姿，并在整条演示内冻结为任务参数。``sweep_blocks`` 首轮只使用对侧末端
-    作为动态任务参数；物体真值缺失是结果表必须披露的限制。
+    ``capture_root`` 指向 ``robodojo capture`` 生成的 JSONL 根目录时，优先使用
+    GUI 每一时刻补采的任务帧；未提供时才回退到静态布局/对侧末端条件。
     """
 
     try:
@@ -1034,11 +1156,13 @@ def load_robodojo_policy_demonstrations(
 
     if task_name not in robodojo_task_candidates(paths):
         raise ValueError(f"RoboDojo 任务不存在或不可运行：{task_name}")
-    if episode_count != 5:
-        raise ValueError("论文首轮协议冻结为每任务恰好五条专家演示")
+    if episode_count < 1:
+        raise ValueError("episode_count 必须为正整数")
 
     if task_name not in {"push_T", "sweep_blocks"}:
-        return _load_generic_robodojo_policy_demonstrations(task_name, episode_count, paths)
+        return _load_generic_robodojo_policy_demonstrations(
+            task_name, episode_count, paths, capture_root
+        )
 
     single_arm = []
     left_arm = []
@@ -1046,7 +1170,11 @@ def load_robodojo_policy_demonstrations(
     episode_records = []
     for index in range(episode_count):
         episode = (
-            ROBODOJO_DEMO_ROOT
+            paths.project_root
+            / "data"
+            / "robodojo"
+            / "data"
+            / "RoboDojo"
             / task_name
             / "arx_x5"
             / "data"
@@ -1102,31 +1230,48 @@ def load_robodojo_policy_demonstrations(
             ee_shift_error = float(np.max(np.abs(action[side][:-1] - state[side][1:])))
             if not exact_joint_shift or ee_shift_error > 2.0e-4:
                 raise ValueError(f"官方演示 action[t] != state[t+1]：{episode} {side}")
-        skill = _three_phase_skill_labels(length)
         record = {"episode": str(episode), "sha256": _sha256_file(episode), "steps": length}
+        captured_frames, capture_record = _load_captured_frames(
+            capture_root, task_name, index, length
+        )
+        record["frame_source"] = capture_record
 
         if task_name == "push_T":
-            layout_path = (
-                paths.project_root
-                / "data"
-                / "robodojo"
-                / "source_layouts"
-                / "push_T"
-                / f"episode_{index:07d}.json"
-            )
-            evidence_path = layout_path.with_suffix(".reconstruction.json")
-            if not layout_path.is_file() or not evidence_path.is_file():
-                raise FileNotFoundError(f"push_T RGB 源布局重建不存在：{layout_path}")
-            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
-            if evidence.get("source_sha256") != record["sha256"]:
-                raise ValueError(f"源布局与官方演示哈希不匹配：{layout_path}")
-            layout = json.loads(layout_path.read_text(encoding="utf-8"))
-            initial_t = _layout_pose(layout["Rigid"]["t"][0], "Rigid.t")
-            target_t = _layout_pose(layout["Geometry"]["t_cushion"][0], "Geometry.t_cushion")
-            frames = {
-                "t": np.repeat(initial_t[None], length, axis=0),
-                "target_t": np.repeat(target_t[None], length, axis=0),
-            }
+            skill = _tapas_labels(state["right"], gripper["right"])
+            if captured_frames is not None:
+                frames = captured_frames
+                record["frame_source"] = capture_record
+            else:
+                layout_path = (
+                    paths.project_root
+                    / "data"
+                    / "robodojo"
+                    / "source_layouts"
+                    / "push_T"
+                    / f"episode_{index:07d}.json"
+                )
+                evidence_path = layout_path.with_suffix(".reconstruction.json")
+                if not layout_path.is_file() or not evidence_path.is_file():
+                    raise FileNotFoundError(f"push_T RGB 源布局重建不存在：{layout_path}")
+                evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+                if evidence.get("source_sha256") != record["sha256"]:
+                    raise ValueError(f"源布局与官方演示哈希不匹配：{layout_path}")
+                layout = json.loads(layout_path.read_text(encoding="utf-8"))
+                initial_t = _layout_pose(layout["Rigid"]["t"][0], "Rigid.t")
+                target_t = _layout_pose(
+                    layout["Geometry"]["t_cushion"][0], "Geometry.t_cushion"
+                )
+                frames = {
+                    "t": np.repeat(initial_t[None], length, axis=0),
+                    "target_t": np.repeat(target_t[None], length, axis=0),
+                }
+                record.update(
+                    {
+                        "layout": str(layout_path),
+                        "layout_sha256": _sha256_file(layout_path),
+                        "layout_method": evidence.get("method"),
+                    }
+                )
             single_arm.append(
                 DynaMACDemonstration(
                     ee_pose=state["right"],
@@ -1140,18 +1285,21 @@ def load_robodojo_policy_demonstrations(
             record.update(
                 {
                     "active_side": "right",
-                    "layout": str(layout_path),
-                    "layout_sha256": _sha256_file(layout_path),
-                    "layout_method": evidence.get("method"),
+                    "frame_names": sorted(frames),
                 }
             )
         else:
+            skill = _tapas_labels(state["left"], gripper["left"])
+            left_frames = dict(captured_frames or {})
+            left_frames.setdefault("right_ee", state["right"].copy())
+            right_frames = dict(captured_frames or {})
+            right_frames.setdefault("left_ee", state["left"].copy())
             left_arm.append(
                 DynaMACDemonstration(
                     ee_pose=state["left"],
                     action_pose=action["left"],
                     gripper=gripper["left"],
-                    frames={"right_ee": state["right"].copy()},
+                    frames=left_frames,
                     skill=skill,
                     name=f"robodojo_sweep_blocks_{index:03d}_left",
                 )
@@ -1161,7 +1309,7 @@ def load_robodojo_policy_demonstrations(
                     ee_pose=state["right"],
                     action_pose=action["right"],
                     gripper=gripper["right"],
-                    frames={"left_ee": state["left"].copy()},
+                    frames=right_frames,
                     skill=skill,
                     name=f"robodojo_sweep_blocks_{index:03d}_right",
                 )
@@ -1174,14 +1322,19 @@ def load_robodojo_policy_demonstrations(
         "task_arm_mode": robodojo_task_candidates()[task_name].arm_mode,
         "source_embodiment": "arx_x5",
         "episode_count": episode_count,
-        "skill_segmentation": "normalized_time:[0,0.30),[0.30,0.68),[0.68,1.0]",
-        "observation_frames": (
-            ["t", "target_t"] if task_name == "push_T" else ["opposite_ee_only"]
+        "skill_segmentation": "tapas_velocity_valleys_v1",
+        "skill_segmentation_config": _tapas_provenance(),
+        "observation_frames": sorted(
+            single_arm[0].frames if single_arm else left_arm[0].frames
         ),
         "limitations": (
-            "RGB重建的初始/目标位姿；原轨迹在当前仿真版本未通过接触确定性回放"
-            if task_name == "push_T"
-            else "首轮双臂基线没有物体真值，只建模左右末端协调关系"
+            "使用 GUI 逐时刻任务帧；视觉候选生成仍由 RoboDojo/外部感知提供。"
+            if capture_root is not None
+            else (
+                "RGB 重建的初始/目标位姿；原轨迹在当前仿真版本未通过接触确定性回放"
+                if task_name == "push_T"
+                else "首轮双臂基线没有物体真值，只建模左右末端协调关系"
+            )
         ),
         "episodes": episode_records,
     }

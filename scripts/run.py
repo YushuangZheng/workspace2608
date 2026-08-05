@@ -88,10 +88,18 @@ def arguments() -> argparse.Namespace:
     reconstruct.add_argument("--calibration-frame", type=int, default=250)
 
     robodojo_fit = robodojo_commands.add_parser(
-        "fit", help="从五条冻结官方演示拟合任务专用策略"
+        "fit", help="从冻结官方演示拟合任务专用策略"
     )
     robodojo_fit.add_argument("--policy", choices=("dp", "midigap", "dynamac"), required=True)
     robodojo_fit.add_argument("--task", required=True)
+    robodojo_fit.add_argument(
+        "--episodes", type=int, default=5, help="使用前 N 条演示（默认 5；DP 正式训练可设为 100）"
+    )
+    robodojo_fit.add_argument(
+        "--capture-root",
+        type=Path,
+        help="GUI 补采 JSONL 根目录；提供后使用每时刻 Oracle/RGB-D 任务帧",
+    )
     robodojo_fit.add_argument("--output", type=Path, required=True)
 
     capture_server = robodojo_commands.add_parser("capture-server", help=argparse.SUPPRESS)
@@ -240,7 +248,11 @@ def _checkpoint_digest(path: Path, arm_mode: str) -> str:
 
 
 def _run_robodojo_fit(args: argparse.Namespace) -> None:
-    bundle = load_robodojo_policy_demonstrations(args.task)
+    bundle = load_robodojo_policy_demonstrations(
+        args.task,
+        episode_count=args.episodes,
+        capture_root=args.capture_root,
+    )
     arm_mode = robodojo_task_candidates()[args.task].arm_mode
     config = load_config(args.config)
     policy_class = {
@@ -288,6 +300,8 @@ def _run_robodojo_fit(args: argparse.Namespace) -> None:
     provenance = {
         **bundle.metadata,
         "policy": args.policy,
+        "episodes": args.episodes,
+        "capture_root": str(args.capture_root.resolve()) if args.capture_root else None,
         "checkpoint": str(output),
         "checkpoint_id": _checkpoint_digest(output, arm_mode),
         "summary": summary,

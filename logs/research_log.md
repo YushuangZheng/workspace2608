@@ -197,3 +197,27 @@ Isaac Sim 5.1 成功创建房间、相机、桌面、T 形物体和 Franka 资�
 
 此外，`external-eval` 接口允许任意上游 XPolicyLab policy server 复用同一 GUI 环境；项目
 内置 `dp/midigap/dynamac` 仍是唯一论文策略入口，避免把上游 adapter 误称为项目复现。
+
+## 2026-08-05：审计缺口修正——TAPAS 后端与真实位姿训练入口
+
+根据本轮复现审计，修正了三个会影响科学闭环的工程缺口：
+
+- 新增 `source/data/tapas.py`。它使用末端平移/旋转速度低谷、夹爪变化候选和最小段长约束
+  生成连续技能边界；RoboDojo 的通用、`push_T` 和 `sweep_blocks` 加载路径均改用该分割，
+  不再使用固定的 30%/68% 时间切段。运动学阈值、平滑窗口和技能上限均在实现中显式冻结，
+  训练 provenance 记录分割版本。这里是可独立复现的 TAPAS 风格后端，不包含论文外部的
+  DINO/SAM 视觉候选生成器，不能把后者写成已完成。
+- `robodojo fit` 新增 `--episodes N` 和 `--capture-root`。加载器现在支持任意已下载的演示
+  数量；若给出补采根目录，会逐条读取 `gui_capture.v1` JSONL，校验连续 step、步数、帧名
+  集合和 `xyz+wxyz` 有限性，并优先使用逐时刻 Oracle/RGB-D 任务帧。没有补采时只保留旧的
+  静态布局/对侧末端回退，并在元数据中明确限制。
+- DP 的真实位姿训练命令固定为：先用 GUI `robodojo capture` 为同一任务的每条演示生成
+  `data/robodojo/captured/<task>/episode_XXXXXXX.jsonl`，再执行
+  `python scripts/run.py robodojo fit --policy dp --task push_T --episodes 5
+  --capture-root data/robodojo/captured --output results/robodojo/checkpoints/push_T/dp_real_pose.npz`。
+  若已下载并补采 100 条演示，将 `--episodes 5` 改为 `--episodes 100`；缺文件时入口会直接
+  失败，不会用静态位姿伪造真实训练集。
+
+本轮验证：`RoboDojo` 环境下 `ruff check source scripts tests` 通过，`pytest -q` 共 32 项
+通过。MiDiGaP 的 Kineverse/增广拉格朗日求解器和 TAPAS 的外部视觉前端仍属于明确的外部
+依赖边界，当前实现继续标注为独立数值复现。

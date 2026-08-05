@@ -41,6 +41,7 @@ from .robodojo_pose import (
     rgbd_from_observation,
     validate_pose_map,
 )
+from .tapas import TapasSegmentationConfig, tapas_skill_boundaries, tapas_skill_labels
 
 
 @dataclass(frozen=True)
@@ -176,4 +177,7 @@ __all__ = [
     "estimate_rgbd_pose",
     "rgbd_from_observation",
     "validate_pose_map",
+    "TapasSegmentationConfig",
+    "tapas_skill_boundaries",
+    "tapas_skill_labels",
 ]

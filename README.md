@@ -70,6 +70,21 @@ python scripts/run.py robodojo demos --episodes 5
 python scripts/run.py robodojo assets --all
 python scripts/run.py robodojo demos --all --episodes 5
 
+# 真实位姿训练：先用 GUI 回放每条官方演示并生成 JSONL 任务帧，再拟合 DP。
+# capture-root 下的布局为 captured/<task>/episode_XXXXXXX.jsonl；每条文件必须
+# 含完整 steps 和每一时刻 xyz+wxyz 任务帧，来源可为 Oracle Pose 或 RGB-D Pose。
+python scripts/run.py robodojo capture \
+  --task push_T \
+  --episode data/robodojo/data/RoboDojo/push_T/arx_x5/data/episode_0000000.hdf5 \
+  --output data/robodojo/captured/push_T/episode_0000000.jsonl \
+  --source-layout /path/to/push_T/episode_0000000.json
+
+# 对已补采的一个任务使用前五条演示训练真实位姿 DP；--episodes 可扩展到 100。
+python scripts/run.py robodojo fit \
+  --policy dp --task push_T --episodes 5 \
+  --capture-root data/robodojo/captured \
+  --output results/robodojo/checkpoints/push_T/dp_real_pose.npz
+
 # 选择任务、场景、机器人和 Oracle Pose 做 GUI 评测；命令不提供 headless 选项
 python scripts/run.py robodojo eval \
   --task push_T --policy dynamac \
@@ -124,12 +139,17 @@ python scripts/run.py robodojo table
 - DynaMAC 实现 `R3 × S3` 任务参数流、黎曼高斯 marginal、Product-of-Experts、式 (5)
   链接判定、式 (6) 流选择、虚拟末端帧、MiDiGaP 模态与技能转移；双臂是两套并发策略，
   对侧末端作为候选任务参数。
+- RoboDojo 演示加载器使用 TAPAS 风格的运动学后端：由末端平移/旋转速度低谷和夹爪变化
+  生成连续技能边界，并把阈值、平滑窗口和技能上限写入训练 provenance。它替代固定
+  `[0,0.30),[0.30,0.68),[0.68,1.0]` 切段，但不声称包含论文外部的 DINO/SAM 视觉候选前端。
 - MiDiGaP 静态帧对照保留任务参数、轨迹模态和 PoE，但不做 DynaMAC 的运动学链接过滤与
   虚拟帧补偿。
 - DP 是真值状态条件的一维时序 U-Net DDPM 独立复现，checkpoint 使用无 pickle NPZ。
   当前双臂 DP 为左右臂独立模型，必须单列，完成联合动作 DP 前不能冒充论文同配置基线。
 - RoboDojo 官方 HDF5 不直接提供 DynaMAC 所需的动态物体真值位姿。正式训练数据必须在
-  GUI 仿真中按布局回放并同步补采任务帧；静态初始布局不能冒充整段物体轨迹。
+  GUI 仿真中按布局回放并同步补采任务帧；静态初始布局不能冒充整段物体轨迹。`fit` 的
+  `--episodes N` 支持任意已下载数量，`--capture-root` 会强制逐条校验补采文件、步数、
+  帧集合和位姿有限性，缺失时直接失败。
 - `data/dynamac_demos.npz` 只用于算法结构回归测试，不是 RoboDojo 训练数据，也不能产生
   论文成功率。
 
