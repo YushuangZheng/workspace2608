@@ -33,6 +33,13 @@ def _project_environment() -> dict[str, str]:
     if environment.get("PYTHONPATH"):
         pythonpath.append(environment["PYTHONPATH"])
     environment["PYTHONPATH"] = os.pathsep.join(pythonpath)
+    # 直接使用 RoboDojo 环境的解释器时，调用方未必先执行 conda activate；
+    # GUI 的视频写入器需要同一环境中的 ffmpeg 等可执行文件。
+    python_bin = str(Path(sys.executable).resolve().parent)
+    path_entries = [python_bin]
+    if environment.get("PATH"):
+        path_entries.append(environment["PATH"])
+    environment["PATH"] = os.pathsep.join(path_entries)
     return environment
 
 from essay2608.data import load_demonstrations
