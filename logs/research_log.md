@@ -265,11 +265,12 @@ DINOv2/SAM 候选前端。前者复现约束目标和增广更新但没有 Kinev
 # 2026-08-05：RoboDojo 官方快照与项目产物分离
 
 - 官方 Hugging Face 数据集 `RoboDojo-Benchmark/RoboDojo@main` 的根目录实际包含
-  `Assets/`、`data/`、`ckpt/` 以及三个根文件；本项目已把根文件和官方 `Assets/` 统一放入
-  `third_party/RoboDojoOfficial/`，明确不下载 `ckpt/`，`data/` 只保留选择性任务演示。
+  `Assets/`、`data/`、`ckpt/` 以及三个根文件；本项目已把根文件和官方 `Assets/` 统一归档到
+  唯一的 `third_party/RoboDojo/`（根文件位于其 `.cache/essay2608/hf_root/`），明确不下载
+  `ckpt/`，`data/` 只保留选择性任务演示。
 - 当前官方数据清单固定为 `push_T`、`pour_liquid_into_cup`、`sweep_blocks` 各 5 条，来源
-  revision 为 `c037c1b3183a030724e694d69a08cb62369ed285`；清单见官方目录下的
-  `assets_manifest.json` 与 `data_manifest.json`。
+  revision 为 `c037c1b3183a030724e694d69a08cb62369ed285`；清单见
+  `third_party/RoboDojo/.cache/essay2608/` 下的 `assets_manifest.json` 与 `data_manifest.json`。
 - 项目 GUI 回放 JSONL、源布局估计和标定文件不再放在官方目录，统一放到
   `results/robodojo/{captures,source_layouts,calibration}`，以免把项目生成物误当成官方数据。
 - HDF5 专家演示仍只包含机器人状态/动作/相机，不包含原始布局 JSON；因此整理目录能消除

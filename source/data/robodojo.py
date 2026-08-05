@@ -26,17 +26,12 @@ from .tapas import TapasSegmentationConfig, tapas_skill_labels
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ROBODOJO_ROOT = PROJECT_ROOT / "third_party" / "RoboDojo"
-# 官方 Hugging Face 快照和项目适配产物分开管理。这里的目录只保存
-# RoboDojo 官方下载物（Assets、选择性 data 和下载元数据），不再把它拆散到
-# 项目根目录的 assets/ 与 data/ 下。
-ROBODOJO_OFFICIAL_ROOT = Path(
-    os.environ.get(
-        "ESSAY2608_ROBODOJO_OFFICIAL_ROOT",
-        str(PROJECT_ROOT / "third_party" / "RoboDojoOfficial"),
-    )
-).resolve()
-ROBODOJO_ASSET_ROOT = ROBODOJO_OFFICIAL_ROOT / "Assets"
-ROBODOJO_DEMO_ROOT = ROBODOJO_OFFICIAL_ROOT / "data" / "RoboDojo"
+# 官方代码、Assets 和选择性 data 统一归属于唯一的 RoboDojo 根目录；项目只在
+# 该根目录的 .cache/essay2608 保存下载清单和 HF 根文件，不再创建第二个 RoboDojo。
+ROBODOJO_OFFICIAL_ROOT = ROBODOJO_ROOT  # 兼容旧调用名；不再指向独立目录
+ROBODOJO_ASSET_ROOT = ROBODOJO_ROOT / "Assets"
+ROBODOJO_DEMO_ROOT = ROBODOJO_ROOT / "data" / "RoboDojo"
+ROBODOJO_META_ROOT = ROBODOJO_ROOT / ".cache" / "essay2608"
 ROBODOJO_RUNTIME_ROOT = PROJECT_ROOT / ".runtime" / "robodojo"
 ROBODOJO_RESULT_ROOT = PROJECT_ROOT / "results" / "robodojo" / "raw"
 ROBODOJO_CAPTURE_ROOT = PROJECT_ROOT / "results" / "robodojo" / "captures"
@@ -440,8 +435,8 @@ def _link_directory(link: Path, target: Path) -> None:
     if link.is_symlink():
         if Path(os.readlink(link)) == relative_target:
             return
-        # 运行层是可丢弃的适配目录；官方下载根目录切换后，更新由本项目
-        # 创建的旧链接，避免继续引用已不存在的 assets/robodojo 路径。
+        # 运行层是可丢弃的适配目录；官方下载物现在与上游代码共用唯一
+        # RoboDojo 根目录，因此更新旧的外置资产路径链接。
         link.unlink()
         link.symlink_to(relative_target, target_is_directory=True)
         return
@@ -809,7 +804,9 @@ def download_robodojo_assets(
         "files": sorted(files),
         "generated_curobo_configs": [str(path.relative_to(local_root)) for path in planner_configs],
     }
-    (local_root / "assets_manifest.json").write_text(
+    meta_root = paths.asset_root.parent / ".cache" / "essay2608"
+    meta_root.mkdir(parents=True, exist_ok=True)
+    (meta_root / "assets_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -871,7 +868,9 @@ def download_robodojo_demonstrations(
             "RoboDojo HDF5 不含本项目真值任务帧；必须经 GUI 回放补采后才能训练 DynaMAC/MiDiGaP"
         ),
     }
-    (local_root / "data_manifest.json").write_text(
+    meta_root = paths.asset_root.parent / ".cache" / "essay2608"
+    meta_root.mkdir(parents=True, exist_ok=True)
+    (meta_root / "data_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     return paths.asset_root.parent / "data" / "RoboDojo"
@@ -894,6 +893,9 @@ def sync_robodojo_official_snapshot(
         raise RuntimeError("同步官方 RoboDojo 快照需要先安装 huggingface_hub") from error
     official_root = paths.asset_root.parent
     official_root.mkdir(parents=True, exist_ok=True)
+    meta_root = official_root / ".cache" / "essay2608"
+    hf_root = meta_root / "hf_root"
+    hf_root.mkdir(parents=True, exist_ok=True)
     api = HfApi()
     resolved_revision = api.dataset_info(
         "RoboDojo-Benchmark/RoboDojo", revision=revision
@@ -905,10 +907,10 @@ def sync_robodojo_official_snapshot(
             repo_type="dataset",
             revision=resolved_revision,
             filename=filename,
-            local_dir=official_root,
+            local_dir=hf_root,
         )
     download_robodojo_assets(task_names=None, paths=paths, revision=revision)
-    data_manifest = official_root / "data_manifest.json"
+    data_manifest = meta_root / "data_manifest.json"
     selected_data = json.loads(data_manifest.read_text(encoding="utf-8")) if data_manifest.is_file() else None
     manifest = {
         "schema": "essay2608.robodojo.official_snapshot.v1",
@@ -920,7 +922,7 @@ def sync_robodojo_official_snapshot(
         "excluded_prefixes": ["data/", "ckpt/"],
         "selected_data_manifest": selected_data,
     }
-    target = official_root / "official_snapshot_manifest.json"
+    target = meta_root / "official_snapshot_manifest.json"
     target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return official_root
 

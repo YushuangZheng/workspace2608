@@ -25,10 +25,10 @@ source/
 ## RoboDojo 接入结构
 
 ```text
-third_party/RoboDojo/              # 官方 Git 子模块，只读代码
-third_party/RoboDojoOfficial/      # 官方 Hugging Face 快照（Assets + 选择性 data），不进 Git
-third_party/RoboDojoOfficial/Assets/
-third_party/RoboDojoOfficial/data/RoboDojo/<task>/arx_x5/data/
+third_party/RoboDojo/              # 唯一 RoboDojo 根目录：官方代码、Assets、选择性 data
+third_party/RoboDojo/Assets/
+third_party/RoboDojo/data/RoboDojo/<task>/arx_x5/data/
+third_party/RoboDojo/.cache/essay2608/ # 下载清单与 HF 根文件，不进 Git
 .runtime/robodojo/          # 可重建运行层，不进 Git
 results/robodojo/captures/  # 项目 GUI 回放补采 JSONL，不进 Git
 results/robodojo/source_layouts/ # 项目源布局估计，不进 Git
@@ -36,7 +36,7 @@ results/robodojo/raw/       # GUI 逐回合 JSON/视频，不进 Git
 results/robodojo/           # 可审计 CSV 与论文 Markdown 表
 ```
 
-运行层把上游 `env/task/src/utils/scripts/XPolicyLab`、官方快照中的 `Assets` 和原始结果目录组合起来。项目在
+运行层把唯一 RoboDojo 根目录中的 `env/task/src/utils/scripts/XPolicyLab`、`Assets` 和原始结果目录组合起来。项目在
 运行层生成可组合的 `essay2608_single_{x5,franka}_{left,right}` 和
 `essay2608_dual_{x5,franka}` 配置；上游 `arx_x5` 等原生配置仍可直接使用。新组合复用
 官方物体布局，并在生成配置时记录布局来源，不修改 RoboDojo 子模块。
@@ -58,9 +58,9 @@ XPolicyLab policy。当前论文正式预注册子集为：
 | 单臂 | `pour_liquid_into_cup` | StoreBottle | 单活动臂瓶—容器相对位姿与倾倒约束 |
 | 双臂 | `sweep_blocks` | HandOver / SweepDust | 任务定义包含跨手交接和协同清扫 |
 
-官方 Hugging Face 数据集快照的根文件与 `Assets/` 位于 `third_party/RoboDojoOfficial/`，
-同步时明确排除官方 `data/` 与 `ckpt/` 大目录；专家数据再按任务/条数选择性放入同一快照的
-`data/RoboDojo/`。机器人资产库下载 RoboDojo 当前提供的 X5 与 Franka。默认只下载论文子集的物体资产；
+官方 Hugging Face 数据集的根文件和 `Assets/` 直接归档在唯一的 `third_party/RoboDojo/` 下，
+同步时明确排除官方 `data/` 与 `ckpt/` 大目录；专家数据再按任务/条数选择性放入
+`third_party/RoboDojo/data/RoboDojo/`。机器人资产库下载 RoboDojo 当前提供的 X5 与 Franka。默认只下载论文子集的物体资产；
 需要把全部 54 个任务作为候选时，使用 `--all`，下载过程可恢复但可能占用大量空间。
 
 ## 环境与运行
@@ -79,7 +79,7 @@ python scripts/run.py robodojo prepare
 # 此命令明确排除 data/ 和 ckpt/，不会下载 checkpoint。
 python scripts/run.py robodojo official-sync
 
-# 官方下载物集中在 third_party/RoboDojoOfficial；这里下载论文子集的官方资产与前五条专家演示
+# 官方下载物集中在唯一的 third_party/RoboDojo；这里下载论文子集的官方资产与前五条专家演示
 python scripts/run.py robodojo assets
 python scripts/run.py robodojo demos --episodes 5
 # 下载全部 54 个任务的资产/演示（按需执行）
