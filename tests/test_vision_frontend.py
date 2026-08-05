@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
-from essay2608.data.robodojo_pose import RGBDPoseEstimator
-from essay2608.data.vision_frontend import DinoSamConfig, DinoSamPoseEstimator
+
+from robodojo_adapter.pose import RGBDPoseEstimator
+from robodojo_adapter.vision_frontend import DinoSamConfig, DinoSamPoseEstimator
 
 
 def test_builtin_dino_sam_is_lazy_and_selectable(monkeypatch) -> None:

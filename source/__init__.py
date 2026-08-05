@@ -1,9 +1,8 @@
-"""DynaMAC、MiDiGaP 与 DP 论文仿真实验复现。"""
+"""DynaMAC 与 MiDiGaP 论文仿真实验复现。"""
 
 from .data import DemonstrationBundle, load_demonstrations
 from .policy import (
     BimanualDynaMAC,
-    DiffusionPolicy,
     DynaMAC,
     DynaMACConfig,
     DynaMACDemonstration,
@@ -15,7 +14,6 @@ from .policy import (
 __all__ = [
     "BimanualDynaMAC",
     "DemonstrationBundle",
-    "DiffusionPolicy",
     "DynaMAC",
     "DynaMACConfig",
     "DynaMACDemonstration",

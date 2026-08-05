@@ -1,5 +1,14 @@
 # DynaMAC 研究日志
 
+## 2026-08-05：清理 source 重复实现
+
+- `source/policy/` 现在只保留论文自身的 DynaMAC 与 MiDiGaP；DP 和 RoboDojo policy
+  不再从这里导出。
+- `source/data/` 只保留项目 NPZ 演示包加载器。RoboDojo 的任务/资产/GUI/位姿/TAPAS
+  适配集中到顶层 `robodojo_adapter/`，官方 DP/ACT 等实现仍以
+  `third_party/RoboDojo/XPolicyLab/policy/` 为唯一上游来源。
+- 所有 CLI、测试和文档入口已切换到新路径；官方子模块未被修改，功能回归测试保持通过。
+
 ## 2026-08-04：按论文语义重新收缩项目
 
 ### 最重要的纠偏
@@ -202,7 +211,7 @@ Isaac Sim 5.1 成功创建房间、相机、桌面、T 形物体和 Franka 资�
 
 根据本轮复现审计，修正了三个会影响科学闭环的工程缺口：
 
-- 新增 `source/data/tapas.py`。它使用末端平移/旋转速度低谷、夹爪变化候选和最小段长约束
+- 新增 `robodojo_adapter/tapas.py`（原 `source/data/tapas.py`）。它使用末端平移/旋转速度低谷、夹爪变化候选和最小段长约束
   生成连续技能边界；RoboDojo 的通用、`push_T` 和 `sweep_blocks` 加载路径均改用该分割，
   不再使用固定的 30%/68% 时间切段。运动学阈值、平滑窗口和技能上限均在实现中显式冻结，
   训练 provenance 记录分割版本。这里是可独立复现的 TAPAS 风格后端，不包含论文外部的

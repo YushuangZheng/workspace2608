@@ -6,7 +6,8 @@ import json
 
 import numpy as np
 import pytest
-from essay2608.data.robodojo import _load_captured_frames
+
+from robodojo_adapter.data import _load_captured_frames
 
 
 def test_capture_frames_are_loaded_as_time_series(tmp_path) -> None:

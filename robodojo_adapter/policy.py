@@ -10,10 +10,15 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+from essay2608.policy.dynamac import (
+    BimanualDynaMAC,
+    DynaMAC,
+    DynaMACAction,
+    DynaMACObservation,
+)
+from essay2608.policy.midigap import TaskParameterizedMiDiGaP
 
 from .diffusion_policy import DiffusionPolicy
-from .dynamac import BimanualDynaMAC, DynaMAC, DynaMACAction, DynaMACObservation
-from .midigap import TaskParameterizedMiDiGaP
 
 PolicyName = Literal["dp", "midigap", "dynamac"]
 ArmMode = Literal["single", "bimanual"]
@@ -361,7 +366,7 @@ def serve_robodojo_policy(
     """以前台进程启动兼容 RoboDojo 的策略服务器。"""
 
     if xpolicylab_root is None:
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[1]
         xpolicylab_root = project_root / "third_party" / "RoboDojo" / "XPolicyLab"
     xpolicylab_root = Path(xpolicylab_root).resolve()
     if str(xpolicylab_root) not in sys.path:
@@ -399,7 +404,7 @@ def serve_robodojo_replay_capture(
     """启动官方动作 GUI 回放与真值补采服务器。"""
 
     if xpolicylab_root is None:
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[1]
         xpolicylab_root = project_root / "third_party" / "RoboDojo" / "XPolicyLab"
     xpolicylab_root = Path(xpolicylab_root).resolve()
     if str(xpolicylab_root) not in sys.path:

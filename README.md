@@ -8,8 +8,8 @@ Policy。RoboDojo 作为只读 Git 子模块接入；大体积资产、专家演
 
 1. `source/policy/dynamac.py`：DynaMAC Algorithm 1 与双臂并发策略；
 2. `source/policy/midigap.py`：MiDiGaP、约束更新和 VAPOR；
-3. `source/policy/diffusion_policy.py`：state U-Net DP 独立复现；
-4. `source/data/robodojo.py`：RoboDojo 任务、资产、运行层和论文表协议；
+3. `source/data/__init__.py`：项目自身 NPZ 演示包格式；
+4. `robodojo_adapter/`：RoboDojo 的项目薄适配（不复制官方任务和策略）；
 5. `scripts/run.py`：唯一命令行入口；
 6. `logs/research_log.md`：中文研究记录与结论边界。
 
@@ -43,7 +43,7 @@ results/robodojo/           # 可审计 CSV 与论文 Markdown 表
 
 官方边界固定如下：`third_party/RoboDojo` 保持上游锁定提交且工作树只读；任务逻辑、奖励函数、
 官方 `arx_x5` 配置、资产目录和评测结果判据均不在项目内改写。项目适配只发生在可丢弃的
-`.runtime/robodojo` 和 `source/data/robodojo_gui.py`：增加项目策略 WebSocket、任务位姿注入、
+`.runtime/robodojo` 和顶层 `robodojo_adapter/`：增加项目策略 WebSocket、任务位姿注入、
 近景视口以及单臂字段兼容。要复现官方流程，仍以 RoboDojo 上游的 `scripts/robodojo.sh`、
 `env_cfg/arx_x5.yml` 和官方布局为准；`capture/capture-batch` 是项目额外的训练数据诊断工具，
 不是对上游评测实现的替换。
@@ -154,7 +154,7 @@ python scripts/run.py robodojo table
   `source=robodojo_simulator_ground_truth`，用于复现论文的真值参数条件。
 - `rgbd_pose`：读取 GUI 相机的 RGB、深度、内参和外参，调用
   `ESSAY2608_RGBD_POSE_ESTIMATOR=模块:函数`，输出 `{label: xyz+wxyz}`；接口定义在
-  `source/data/robodojo_pose.py`。估计器缺失、标定缺失或输出标签不完整会直接失败，绝不
+`robodojo_adapter/pose.py`。估计器缺失、标定缺失或输出标签不完整会直接失败，绝不
   静默回退到 Oracle。两条轨道最终都进入同一 policy 输入协议，结果表会记录
   `observation_mode`。
 
@@ -172,8 +172,10 @@ python scripts/run.py robodojo table
 - RGB-D 轨道提供 `builtin:dino_sam`：Transformers DINOv2 提取候选外观特征、SAM 网格
   提示生成候选掩码，再结合深度和相机标定反投影为位姿。它是可运行的通用候选前端，输出
   `visual_candidate_XXX`；论文专用的 TAPAS 标签提示策略仍需按任务固定标签审计。
-- DP 是真值状态条件的一维时序 U-Net DDPM 独立复现，checkpoint 使用无 pickle NPZ。
-  当前双臂 DP 为左右臂独立模型，必须单列，完成联合动作 DP 前不能冒充论文同配置基线。
+- DP 的官方实现和训练/部署脚本以 `third_party/RoboDojo/XPolicyLab/policy/DP/` 为准；
+  项目只在 `robodojo_adapter/diffusion_policy.py` 保留兼容既有 NPZ 检查点的轻量状态适配，
+  不再把它冒充成 RoboDojo 官方 DP。当前双臂 DP 为左右臂独立模型，必须单列，完成联合动作
+  DP 前不能冒充论文同配置基线。
 - RoboDojo 官方 HDF5 不直接提供 DynaMAC 所需的动态物体真值位姿。正式训练数据必须在
   GUI 仿真中按布局回放并同步补采任务帧；静态初始布局不能冒充整段物体轨迹。`fit` 的
   `--episodes N` 支持任意已下载数量，`--capture-root` 会强制逐条校验补采文件、步数、

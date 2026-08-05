@@ -1,6 +1,9 @@
-"""策略实现；非策略工具不得放入本目录。"""
+"""论文自身策略实现。
 
-from .diffusion_policy import DiffusionPolicy, DiffusionPolicyConfig
+官方 DP、ACT 以及 RoboDojo 的运行适配不在这里重复维护；它们分别位于
+``third_party/RoboDojo/XPolicyLab/policy`` 和顶层 ``robodojo_adapter``。
+"""
+
 from .dynamac import (
     BimanualDynaMAC,
     BimanualDynaMACAction,
@@ -37,18 +40,10 @@ from .midigap import (
     update_incoming_transitions,
     variance_aware_path_optimization,
 )
-from .robodojo import (
-    RoboDojoPolicyModel,
-    RoboDojoReplayCaptureModel,
-    serve_robodojo_policy,
-    serve_robodojo_replay_capture,
-)
 
 __all__ = [
     "BimanualDynaMAC",
     "BimanualDynaMACAction",
-    "DiffusionPolicy",
-    "DiffusionPolicyConfig",
     "DynaMAC",
     "DynaMACAction",
     "DynaMACConfig",
@@ -64,8 +59,6 @@ __all__ = [
     "MiDiGaPMode",
     "OccupancyConstraint",
     "ReachabilitySphere",
-    "RoboDojoPolicyModel",
-    "RoboDojoReplayCaptureModel",
     "TaskParameterizedMiDiGaP",
     "TruncatedGaussian",
     "VAPORConfig",
@@ -76,8 +69,6 @@ __all__ = [
     "kl_transition_matrix",
     "product_of_experts",
     "sample_riemannian_gaussian",
-    "serve_robodojo_policy",
-    "serve_robodojo_replay_capture",
     "task_parameter_scores",
     "truncate_riemannian_gaussian",
     "transform_marginal",

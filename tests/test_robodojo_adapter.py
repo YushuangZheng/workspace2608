@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-from essay2608.data.robodojo import (
+
+from robodojo_adapter.data import (
     TASK_CANDIDATES,
     RoboDojoPaths,
     audit_robodojo_capture,
@@ -16,12 +17,12 @@ from essay2608.data.robodojo import (
     robodojo_task_catalog,
     write_robodojo_paper_table,
 )
-from essay2608.data.robodojo_gui import (
+from robodojo_adapter.gui import (
     _patch_single_arm_ee_action_key,
     _patch_single_arm_gripper_restore,
     _viewport_camera_pose,
 )
-from essay2608.policy.robodojo import RoboDojoReplayCaptureModel
+from robodojo_adapter.policy import RoboDojoReplayCaptureModel
 
 
 def test_paper_task_mapping_distinguishes_arm_modes() -> None:
@@ -83,7 +84,7 @@ def test_runtime_overlay_keeps_upstream_read_only(tmp_path: Path) -> None:
     )
 
     # 测试夹具不是完整 Git 仓库；只在测试中替换提交读取。
-    import essay2608.data.robodojo as adapter
+    import robodojo_adapter.data as adapter
 
     original = adapter._git_commit
     adapter._git_commit = lambda _: "fixture"
@@ -115,7 +116,7 @@ def test_status_is_explicit_about_missing_assets(tmp_path: Path) -> None:
         runtime_root=tmp_path / "runtime",
         result_root=tmp_path / "results",
     )
-    import essay2608.data.robodojo as adapter
+    import robodojo_adapter.data as adapter
 
     original = adapter._git_commit
     adapter._git_commit = lambda _: "fixture"

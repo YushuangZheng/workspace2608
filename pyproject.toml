@@ -25,8 +25,8 @@ vision = ["pillow>=10", "torch>=2.1", "transformers>=4.40"]
 test = ["pytest>=8"]
 
 [tool.setuptools]
-packages = ["essay2608", "essay2608.data", "essay2608.policy"]
-package-dir = { essay2608 = "source" }
+packages = ["essay2608", "essay2608.data", "essay2608.policy", "robodojo_adapter"]
+package-dir = { essay2608 = "source", robodojo_adapter = "robodojo_adapter" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

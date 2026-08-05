@@ -14,8 +14,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
-
-from .dynamac import (
+from essay2608.policy.dynamac import (
     DynaMACAction,
     DynaMACDemonstration,
     DynaMACObservation,

@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 from .tapas import TapasSegmentationConfig, tapas_skill_labels
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ROBODOJO_ROOT = PROJECT_ROOT / "third_party" / "RoboDojo"
 # 官方代码、Assets 和选择性 data 统一归属于唯一的 RoboDojo 根目录；项目只在
 # 该根目录的 .cache/essay2608 保存下载清单和 HF 根文件，不再创建第二个 RoboDojo。

@@ -13,8 +13,8 @@ from types import MethodType
 
 import numpy as np
 
-from .robodojo import ROBODOJO_RUNTIME_ROOT
-from .robodojo_pose import RGBDPoseEstimator, estimate_rgbd_pose
+from .data import ROBODOJO_RUNTIME_ROOT
+from .pose import RGBDPoseEstimator, estimate_rgbd_pose
 
 _PERTURBATION_TARGET = {
     "push_T": "target_t",

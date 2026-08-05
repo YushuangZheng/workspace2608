@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-from essay2608.data.tapas import (
+
+from robodojo_adapter.tapas import (
     TapasSegmentationConfig,
     tapas_skill_boundaries,
     tapas_skill_labels,

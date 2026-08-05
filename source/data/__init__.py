@@ -1,4 +1,8 @@
-"""DynaMAC 演示数据的唯一加载入口。"""
+"""论文自身演示数据的加载入口。
+
+RoboDojo 的任务、资产、GUI 和上游 policy 适配统一位于顶层
+``robodojo_adapter``；本模块只保留项目自己的 NPZ 演示包格式。
+"""
 
 from __future__ import annotations
 
@@ -8,46 +12,6 @@ from pathlib import Path
 
 import numpy as np
 from essay2608.policy.dynamac import DynaMACDemonstration
-
-from .robodojo import (
-    ROBODOJO_CAPTURE_ROOT,
-    ROBODOJO_DEMO_ROOT,
-    ROBODOJO_OFFICIAL_ROOT,
-    ROBODOJO_SOURCE_LAYOUT_ROOT,
-    TASK_CANDIDATES,
-    RoboDojoPaths,
-    RoboDojoPolicyCandidate,
-    RoboDojoPolicyDemonstrations,
-    RoboDojoRobotCandidate,
-    RoboDojoSceneCandidate,
-    RoboDojoTaskCandidate,
-    audit_robodojo_capture,
-    collect_robodojo_results,
-    demonstration_environment_config_for,
-    download_robodojo_assets,
-    download_robodojo_demonstrations,
-    ensure_runtime_env_config,
-    environment_config_for,
-    load_robodojo_policy_demonstrations,
-    prepare_robodojo_runtime,
-    reconstruct_push_t_source_layout,
-    robodojo_resource_catalog,
-    robodojo_status,
-    robodojo_task_candidates,
-    robodojo_task_catalog,
-    sync_robodojo_official_snapshot,
-    write_robodojo_paper_table,
-)
-from .robodojo_pose import (
-    OraclePoseEstimator,
-    PoseEstimator,
-    RGBDPoseEstimator,
-    estimate_rgbd_pose,
-    rgbd_from_observation,
-    validate_pose_map,
-)
-from .tapas import TapasSegmentationConfig, tapas_skill_boundaries, tapas_skill_labels
-from .vision_frontend import DinoSamConfig, DinoSamPoseEstimator
 
 
 @dataclass(frozen=True)
@@ -154,43 +118,5 @@ def load_demonstrations(path: str | Path) -> DemonstrationBundle:
 
 __all__ = [
     "DemonstrationBundle",
-    "RoboDojoPaths",
-    "ROBODOJO_CAPTURE_ROOT",
-    "ROBODOJO_DEMO_ROOT",
-    "ROBODOJO_OFFICIAL_ROOT",
-    "ROBODOJO_SOURCE_LAYOUT_ROOT",
-    "RoboDojoPolicyCandidate",
-    "RoboDojoPolicyDemonstrations",
-    "RoboDojoRobotCandidate",
-    "RoboDojoSceneCandidate",
-    "RoboDojoTaskCandidate",
-    "TASK_CANDIDATES",
-    "audit_robodojo_capture",
-    "demonstration_environment_config_for",
-    "collect_robodojo_results",
-    "download_robodojo_assets",
-    "download_robodojo_demonstrations",
-    "ensure_runtime_env_config",
-    "environment_config_for",
     "load_demonstrations",
-    "load_robodojo_policy_demonstrations",
-    "prepare_robodojo_runtime",
-    "reconstruct_push_t_source_layout",
-    "robodojo_status",
-    "robodojo_resource_catalog",
-    "robodojo_task_candidates",
-    "robodojo_task_catalog",
-    "sync_robodojo_official_snapshot",
-    "write_robodojo_paper_table",
-    "OraclePoseEstimator",
-    "PoseEstimator",
-    "RGBDPoseEstimator",
-    "estimate_rgbd_pose",
-    "rgbd_from_observation",
-    "validate_pose_map",
-    "TapasSegmentationConfig",
-    "tapas_skill_boundaries",
-    "tapas_skill_labels",
-    "DinoSamConfig",
-    "DinoSamPoseEstimator",
 ]

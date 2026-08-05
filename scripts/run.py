@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """论文复现实验的唯一命令行入口。"""
 
+# 直接执行脚本时需要先把仓库根加入 sys.path，再导入顶层适配包。
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -15,7 +18,21 @@ from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlparse
 
-from essay2608.data import (
+# 允许直接执行 ``python scripts/run.py``；此时 Python 默认只把 scripts/ 放进
+# sys.path，顶层的项目 RoboDojo 适配包仍需显式加入。
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from essay2608.data import load_demonstrations
+from essay2608.policy import (
+    BimanualDynaMAC,
+    DynaMAC,
+    DynaMACConfig,
+    TaskParameterizedMiDiGaP,
+)
+
+from robodojo_adapter import (
     ROBODOJO_CAPTURE_ROOT,
     ROBODOJO_DEMO_ROOT,
     ROBODOJO_SOURCE_LAYOUT_ROOT,
@@ -25,7 +42,6 @@ from essay2608.data import (
     download_robodojo_assets,
     download_robodojo_demonstrations,
     environment_config_for,
-    load_demonstrations,
     load_robodojo_policy_demonstrations,
     prepare_robodojo_runtime,
     reconstruct_push_t_source_layout,
@@ -36,17 +52,11 @@ from essay2608.data import (
     sync_robodojo_official_snapshot,
     write_robodojo_paper_table,
 )
-from essay2608.policy import (
-    BimanualDynaMAC,
-    DiffusionPolicy,
-    DynaMAC,
-    DynaMACConfig,
-    TaskParameterizedMiDiGaP,
+from robodojo_adapter.diffusion_policy import DiffusionPolicy
+from robodojo_adapter.policy import (
     serve_robodojo_policy,
     serve_robodojo_replay_capture,
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def arguments() -> argparse.Namespace:
@@ -468,7 +478,7 @@ def _run_robodojo_eval(args: argparse.Namespace) -> None:
         client_command = [
             sys.executable,
             "-m",
-            "essay2608.data.robodojo_gui",
+            "robodojo_adapter.gui",
             "--task_name",
             args.task,
             "--num_envs",
@@ -550,7 +560,7 @@ def _run_robodojo_external_eval(args: argparse.Namespace) -> None:
     client_command = [
         sys.executable,
         "-m",
-        "essay2608.data.robodojo_gui",
+        "robodojo_adapter.gui",
         "--task_name",
         args.task,
         "--num_envs",
@@ -647,7 +657,7 @@ def _run_robodojo_capture(args: argparse.Namespace) -> None:
         client_command = [
             sys.executable,
             "-m",
-            "essay2608.data.robodojo_gui",
+            "robodojo_adapter.gui",
             "--task_name",
             args.task,
             "--num_envs",

@@ -7,12 +7,9 @@ import pytest
 
 pytest.importorskip("torch")
 
-from essay2608.policy import (  # noqa: E402
-    DiffusionPolicy,
-    DiffusionPolicyConfig,
-    DynaMACDemonstration,
-    DynaMACObservation,
-)
+from essay2608.policy import DynaMACDemonstration, DynaMACObservation  # noqa: E402
+
+from robodojo_adapter.diffusion_policy import DiffusionPolicy, DiffusionPolicyConfig  # noqa: E402
 
 
 def test_diffusion_policy_checkpoint_round_trip(tmp_path: Path) -> None:
