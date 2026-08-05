@@ -1,8 +1,4 @@
-"""论文自身策略实现。
-
-官方 DP、ACT 以及 RoboDojo 的运行适配不在这里重复维护；它们分别位于
-``third_party/RoboDojo/XPolicyLab/policy`` 和顶层 ``robodojo_adapter``。
-"""
+"""论文自身策略实现。"""
 
 from .dynamac import (
     BimanualDynaMAC,

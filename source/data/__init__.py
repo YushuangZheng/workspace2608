@@ -1,8 +1,4 @@
-"""论文自身演示数据的加载入口。
-
-RoboDojo 的任务、资产、GUI 和上游 policy 适配统一位于顶层
-``robodojo_adapter``；本模块只保留项目自己的 NPZ 演示包格式。
-"""
+"""论文自身演示数据的加载入口。"""
 
 from __future__ import annotations
 

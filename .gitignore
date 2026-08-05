@@ -60,16 +60,6 @@ _build
 !/logs/research_log.md
 **/recordings/*
 
-# RoboDojo：唯一上游目录由子模块固定；其官方 Assets/data/.cache 已由上游 .gitignore 排除
-/.runtime/
-/assets/robodojo/
-/data/robodojo/
-/results/robodojo/raw/*
-!/results/robodojo/raw/README.md
-/results/robodojo/captures/
-/results/robodojo/source_layouts/
-/results/robodojo/calibration/
-
 # Pre-Trained Checkpoints
 /.pretrained_checkpoints/
 
