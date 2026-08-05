@@ -218,6 +218,28 @@ Isaac Sim 5.1 成功创建房间、相机、桌面、T 形物体和 Franka 资�
   若已下载并补采 100 条演示，将 `--episodes 5` 改为 `--episodes 100`；缺文件时入口会直接
   失败，不会用静态位姿伪造真实训练集。
 
-本轮验证：`RoboDojo` 环境下 `ruff check source scripts tests` 通过，`pytest -q` 共 32 项
+本轮验证：`RoboDojo` 环境下 `ruff check source scripts tests` 通过，`pytest -q` 共 34 项
 通过。MiDiGaP 的 Kineverse/增广拉格朗日求解器和 TAPAS 的外部视觉前端仍属于明确的外部
 依赖边界，当前实现继续标注为独立数值复现。
+
+## 2026-08-05：自动化训练数据补采流程
+
+澄清训练数据边界：RoboDojo 官方 HDF5 是“专家动作数据”，不是完整的 DynaMAC/MiDiGaP
+训练输入，因为其中没有逐时刻动态任务物体真值位姿。现在新增 `robodojo capture-batch`：
+
+1. 自动读取已下载的 `episode_XXXXXXX.hdf5`；
+2. 对 `push_T` 缺失的源布局自动执行 HDF5 RGB 轮廓重建；
+3. 逐条启动 Isaac Sim GUI，由 `RoboDojoReplayCaptureModel` 自动按官方关节动作回放；
+4. 同步把 GUI 的 Oracle Pose 或 RGB-D Pose 任务帧写入
+   `data/robodojo/captured/<task>/episode_XXXXXXX.jsonl`；
+5. 每条回放结束后执行原生成功、步数和真值帧完整性验收，并写出 `capture_batch.json`。
+
+因此用户不需要手动拖动机器人或逐帧标注；只需保持 GUI 可见并观察回放。只有源布局不匹配、
+原生任务失败或 RGB-D 估计器缺失时才需要人工检查。默认轨道是 Oracle Pose；设置
+`ESSAY2608_RGBD_POSE_ESTIMATOR=模块:函数` 并加 `--observation-mode rgbd_pose` 才会走视觉估计。
+
+本轮还加入两个可选后端：`VAPORConfig(solver="augmented_lagrangian_fd")` 的有限差分增广
+拉格朗日求解器，以及 `ESSAY2608_RGBD_POSE_ESTIMATOR=builtin:dino_sam` 的 Transformers
+DINOv2/SAM 候选前端。前者复现约束目标和增广更新但没有 Kineverse 符号 Jacobian；后者会
+在首次运行时下载模型权重并输出通用 `visual_candidate_XXX`，不能把它误写成论文未公开
+的任务专用 TAPAS 提示/标注实现。

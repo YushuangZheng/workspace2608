@@ -70,14 +70,19 @@ python scripts/run.py robodojo demos --episodes 5
 python scripts/run.py robodojo assets --all
 python scripts/run.py robodojo demos --all --episodes 5
 
-# 真实位姿训练：先用 GUI 回放每条官方演示并生成 JSONL 任务帧，再拟合 DP。
-# capture-root 下的布局为 captured/<task>/episode_XXXXXXX.jsonl；每条文件必须
-# 含完整 steps 和每一时刻 xyz+wxyz 任务帧，来源可为 Oracle Pose 或 RGB-D Pose。
-python scripts/run.py robodojo capture \
-  --task push_T \
-  --episode data/robodojo/data/RoboDojo/push_T/arx_x5/data/episode_0000000.hdf5 \
-  --output data/robodojo/captured/push_T/episode_0000000.jsonl \
-  --source-layout /path/to/push_T/episode_0000000.json
+# 真实位姿训练数据不是手工示教：官方 HDF5 已包含专家动作，下面命令会让 Isaac Sim
+# GUI 自动逐条回放这些动作，并同步写出每一帧的任务位姿 JSONL。push_T 的源布局也会
+# 自动从 HDF5 RGB 重建；用户只需观察 GUI，不需要逐点操纵机器人。
+python scripts/run.py robodojo capture-batch \
+  --task push_T --episodes 5 --auto-reconstruct \
+  --output-root data/robodojo/captured \
+  --source-layout-root data/robodojo/source_layouts
+
+# 如需 RGB-D 轨道，可使用内置 DINOv2/SAM 候选前端（首次运行会下载模型权重），
+# 或替换为自己的 module:function；默认仍是 Oracle Pose。
+export ESSAY2608_RGBD_POSE_ESTIMATOR='builtin:dino_sam'
+python scripts/run.py robodojo capture-batch \
+  --task push_T --episodes 5 --observation-mode rgbd_pose
 
 # 对已补采的一个任务使用前五条演示训练真实位姿 DP；--episodes 可扩展到 100。
 python scripts/run.py robodojo fit \
@@ -144,12 +149,22 @@ python scripts/run.py robodojo table
   `[0,0.30),[0.30,0.68),[0.68,1.0]` 切段，但不声称包含论文外部的 DINO/SAM 视觉候选前端。
 - MiDiGaP 静态帧对照保留任务参数、轨迹模态和 PoE，但不做 DynaMAC 的运动学链接过滤与
   虚拟帧补偿。
+- VAPOR 同时提供 `slsqp` 和 `augmented_lagrangian_fd` 两个可审计后端；后者复现增广
+  拉格朗日更新，但因项目没有论文所用的 Kineverse 机器人符号模型，只使用有限差分
+  `forward_kinematics`，不能宣称与 Kineverse Jacobian 完全等价。
+- RGB-D 轨道提供 `builtin:dino_sam`：Transformers DINOv2 提取候选外观特征、SAM 网格
+  提示生成候选掩码，再结合深度和相机标定反投影为位姿。它是可运行的通用候选前端，输出
+  `visual_candidate_XXX`；论文专用的 TAPAS 标签提示策略仍需按任务固定标签审计。
 - DP 是真值状态条件的一维时序 U-Net DDPM 独立复现，checkpoint 使用无 pickle NPZ。
   当前双臂 DP 为左右臂独立模型，必须单列，完成联合动作 DP 前不能冒充论文同配置基线。
 - RoboDojo 官方 HDF5 不直接提供 DynaMAC 所需的动态物体真值位姿。正式训练数据必须在
   GUI 仿真中按布局回放并同步补采任务帧；静态初始布局不能冒充整段物体轨迹。`fit` 的
   `--episodes N` 支持任意已下载数量，`--capture-root` 会强制逐条校验补采文件、步数、
   帧集合和位姿有限性，缺失时直接失败。
+- 数据流程分为两步：`robodojo demos` 下载官方专家 HDF5（动作来源），`robodojo
+  capture-batch` 自动启动 GUI 回放并生成带任务帧的 JSONL（训练输入）。第二步不是手动
+  示教；只有布局匹配失败或 GUI 原生成功验收失败时才需要人工检查，不能直接拿下载的 HDF5
+  冒充 DynaMAC/MiDiGaP 的完整训练集。
 - `data/dynamac_demos.npz` 只用于算法结构回归测试，不是 RoboDojo 训练数据，也不能产生
   论文成功率。
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 
@@ -550,12 +550,15 @@ class VAPORConfig:
     confidence_z: float = 1.96
     maximum_iterations: int = 300
     tolerance: float = 1.0e-7
+    solver: Literal["slsqp", "augmented_lagrangian_fd"] = "slsqp"
 
     def __post_init__(self) -> None:
         if self.lambda_pose <= 0.0 or self.lambda_joint < 0.0:
             raise ValueError("VAPOR 代价权重非法")
         if self.confidence_z <= 0.0 or self.maximum_iterations < 1 or self.tolerance <= 0.0:
             raise ValueError("VAPOR 约束或求解器参数非法")
+        if self.solver not in {"slsqp", "augmented_lagrangian_fd"}:
+            raise ValueError("VAPOR solver 必须为 slsqp 或 augmented_lagrangian_fd")
 
 
 @dataclass(frozen=True)
@@ -579,8 +582,10 @@ def variance_aware_path_optimization(
 ) -> VAPORResult:
     """复现 VAPOR 式 (29)--(32) 的方差感知全轨迹关节优化。
 
-    论文实现使用未公开的 Kineverse Jacobian 与增广拉格朗日求解器；这里用 SciPy SLSQP
-    对同一目标、关节边界和 95% 分量置信约束求解，Jacobian 由有限差分获得。
+    论文实现使用未公开的 Kineverse Jacobian 与增广拉格朗日求解器；默认用 SciPy SLSQP
+    对同一目标、关节边界和 95% 分量置信约束求解，Jacobian 由有限差分获得。设置
+    ``VAPORConfig(solver="augmented_lagrangian_fd")`` 可切换到同一约束的有限差分增广
+    拉格朗日后端；它复现求解目标和更新形式，但不冒充 Kineverse 的符号 Jacobian。
     """
 
     try:
@@ -651,18 +656,59 @@ def variance_aware_path_optimization(
         errors = pose_errors(flat)
         return np.concatenate(((allowed - errors).ravel(), (allowed + errors).ravel()))
 
-    result = minimize(
-        objective,
-        initial_path.ravel(),
-        method="SLSQP",
-        bounds=bounds,
-        constraints=({"type": "ineq", "fun": confidence_constraint},),
-        options={
-            "maxiter": config.maximum_iterations,
-            "ftol": config.tolerance,
-            "disp": False,
-        },
-    )
+    if config.solver == "slsqp":
+        result = minimize(
+            objective,
+            initial_path.ravel(),
+            method="SLSQP",
+            bounds=bounds,
+            constraints={"type": "ineq", "fun": confidence_constraint},
+            options={
+                "maxiter": config.maximum_iterations,
+                "ftol": config.tolerance,
+                "disp": False,
+            },
+        )
+    else:
+        # Kineverse 的公开论文描述使用增广拉格朗日；在没有其机器人模型/Jacobian
+        # 对象时，仍可对本项目提供的 forward_kinematics 做同目标的有限差分 AL，
+        # 这样求解器选择不会被错误地宣称成 Kineverse 原实现。
+        flat = initial_path.ravel()
+        multipliers = np.zeros_like(confidence_constraint(flat))
+        penalty = 10.0
+        result = None
+        for _ in range(config.maximum_iterations):
+            def augmented_objective(value):
+                constraints = confidence_constraint(value)
+                violation = np.minimum(constraints, 0.0)
+                return float(
+                    objective(value)
+                    - multipliers @ constraints
+                    + 0.5 * penalty * (violation @ violation)
+                )
+
+            result = minimize(
+                augmented_objective,
+                flat,
+                method="L-BFGS-B",
+                bounds=bounds,
+                options={"maxiter": max(20, config.maximum_iterations // 4), "ftol": config.tolerance},
+            )
+            flat = np.asarray(result.x)
+            constraints = confidence_constraint(flat)
+            if float(np.max(np.maximum(-constraints, 0.0))) <= config.tolerance:
+                break
+            multipliers = np.maximum(0.0, multipliers - penalty * constraints)
+            penalty *= 2.0
+        assert result is not None
+        final_constraints = confidence_constraint(flat)
+        result.fun = objective(flat)
+        result.success = bool(np.max(np.maximum(-final_constraints, 0.0)) <= config.tolerance)
+        result.message = (
+            "有限差分增广拉格朗日收敛"
+            if result.success
+            else "有限差分增广拉格朗日达到迭代上限"
+        )
     joint_trajectory = np.asarray(result.x).reshape(len(mean), joints)
     pose_trajectory = np.stack([forward_kinematics(q) for q in joint_trajectory])
     deviations = np.abs(

@@ -128,3 +128,21 @@ def test_vapor_tracks_pose_distribution_with_joint_limits() -> None:
     assert result.maximum_normalized_deviation <= 1.96 + 1.0e-5
     assert np.all(result.joint_trajectory <= 1.0)
     assert np.all(result.joint_trajectory >= -1.0)
+
+
+def test_vapor_finite_difference_augmented_lagrangian_backend() -> None:
+    def forward_kinematics(joints: np.ndarray) -> np.ndarray:
+        return pose(joints.tolist())
+
+    mean = np.stack([pose([x, 0.2 * x, 0.1]) for x in np.linspace(0.1, 0.5, 5)])
+    covariance = np.repeat((np.eye(6) * 0.01)[None], len(mean), axis=0)
+    result = variance_aware_path_optimization(
+        mean,
+        covariance,
+        initial_joint_position=np.zeros(3),
+        forward_kinematics=forward_kinematics,
+        joint_lower=np.full(3, -1.0),
+        joint_upper=np.ones(3),
+        config=VAPORConfig(maximum_iterations=40, solver="augmented_lagrangian_fd"),
+    )
+    assert result.success, result.message

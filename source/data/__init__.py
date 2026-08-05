@@ -42,6 +42,7 @@ from .robodojo_pose import (
     validate_pose_map,
 )
 from .tapas import TapasSegmentationConfig, tapas_skill_boundaries, tapas_skill_labels
+from .vision_frontend import DinoSamConfig, DinoSamPoseEstimator
 
 
 @dataclass(frozen=True)
@@ -180,4 +181,6 @@ __all__ = [
     "TapasSegmentationConfig",
     "tapas_skill_boundaries",
     "tapas_skill_labels",
+    "DinoSamConfig",
+    "DinoSamPoseEstimator",
 ]

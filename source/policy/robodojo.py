@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Literal
@@ -265,6 +266,12 @@ class RoboDojoReplayCaptureModel:
             "active_side": self.active_side,
             "steps": self.length,
             "replay_action_type": "joint",
+            "observation_mode": os.environ.get("ESSAY2608_OBSERVATION_MODE", "oracle_pose"),
+            "observation_source": (
+                "robodojo_simulator_ground_truth"
+                if os.environ.get("ESSAY2608_OBSERVATION_MODE", "oracle_pose") == "oracle_pose"
+                else "rgbd_pose_estimator"
+            ),
         }
         self.output_path.write_text(
             json.dumps({"type": "metadata", **metadata}, ensure_ascii=False) + "\n",

@@ -5,8 +5,9 @@
 * ``oracle_pose``：直接读取 RoboDojo layout manager 的真值；
 * ``rgbd_pose``：只把 RGB-D 和相机标定交给用户提供的 PoseEstimator。
 
-RGB-D 估计器通过 ``ESSAY2608_RGBD_POSE_ESTIMATOR=module:function`` 注入，避免把
-尚未确定的物体检测/配准算法冒充成基准实现。
+RGB-D 估计器通过 ``ESSAY2608_RGBD_POSE_ESTIMATOR=module:function`` 注入，也可使用
+``builtin:dino_sam`` 启用可选的 Transformers DINOv2/SAM 候选前端；默认不会下载模型
+或改变 Oracle Pose 基准。
 """
 
 from __future__ import annotations
@@ -66,6 +67,10 @@ class RGBDPoseEstimator:
     @classmethod
     def from_environment(cls) -> RGBDPoseEstimator:
         spec = os.environ.get("ESSAY2608_RGBD_POSE_ESTIMATOR", "").strip()
+        if spec == "builtin:dino_sam":
+            from .vision_frontend import DinoSamPoseEstimator
+
+            return cls(estimator=DinoSamPoseEstimator(), name=spec)
         if not spec or ":" not in spec:
             raise RuntimeError(
                 "rgbd_pose 模式需要设置 ESSAY2608_RGBD_POSE_ESTIMATOR=module:function；"

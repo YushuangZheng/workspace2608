@@ -118,6 +118,35 @@ def arguments() -> argparse.Namespace:
     capture.add_argument("--seed", type=int, default=0)
     capture.add_argument("--active-side", choices=("auto", "left", "right"), default="auto")
     capture.add_argument("--device-id", type=int, default=0)
+    capture.add_argument(
+        "--observation-mode", choices=("oracle_pose", "rgbd_pose"), default="oracle_pose"
+    )
+
+    capture_batch = robodojo_commands.add_parser(
+        "capture-batch", help="自动逐条 GUI 回放官方演示并验收真值帧"
+    )
+    capture_batch.add_argument("--task", required=True)
+    capture_batch.add_argument("--episodes", type=int, default=5)
+    capture_batch.add_argument("--start-index", type=int, default=0)
+    capture_batch.add_argument("--output-root", type=Path, default=Path("data/robodojo/captured"))
+    capture_batch.add_argument(
+        "--source-layout-root", type=Path, default=Path("data/robodojo/source_layouts")
+    )
+    capture_batch.add_argument(
+        "--auto-reconstruct",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="push_T 缺布局时自动从 HDF5 RGB 重建（默认开启）",
+    )
+    capture_batch.add_argument("--seed", type=int, default=0)
+    capture_batch.add_argument("--active-side", choices=("auto", "left", "right"), default="auto")
+    capture_batch.add_argument("--device-id", type=int, default=0)
+    capture_batch.add_argument(
+        "--observation-mode", choices=("oracle_pose", "rgbd_pose"), default="oracle_pose"
+    )
+    capture_batch.add_argument(
+        "--continue-on-error", action="store_true", help="记录失败并继续后续演示"
+    )
 
     server = robodojo_commands.add_parser("policy-server", help=argparse.SUPPRESS)
     _add_policy_eval_arguments(server, include_eval=False)
@@ -583,6 +612,7 @@ def _run_robodojo_capture(args: argparse.Namespace) -> None:
         {
             "CUDA_VISIBLE_DEVICES": str(args.device_id),
             "EVAL_NUM": "1",
+            "ESSAY2608_OBSERVATION_MODE": getattr(args, "observation_mode", "oracle_pose"),
             "ESSAY2608_ROBODOJO_RUNTIME": str(runtime),
             "OMNI_KIT_ACCEPT_EULA": "YES",
             "PYTHONUNBUFFERED": "1",
@@ -657,6 +687,95 @@ def _run_robodojo_capture(args: argparse.Namespace) -> None:
             server.wait()
 
 
+def _run_robodojo_capture_batch(args: argparse.Namespace) -> None:
+    """批量自动回放演示；用户不需要在每条轨迹中手动操纵机器人。"""
+
+    if args.episodes < 1 or args.start_index < 0:
+        raise ValueError("episodes 必须为正数，start-index 不能为负数")
+    task_root = PROJECT_ROOT / "data" / "robodojo" / "data" / "RoboDojo" / args.task / "arx_x5" / "data"
+    output_root = args.output_root.resolve() / args.task
+    layout_root = args.source_layout_root.resolve() / args.task
+    records: list[dict[str, object]] = []
+    for offset in range(args.episodes):
+        index = args.start_index + offset
+        episode = task_root / f"episode_{index:07d}.hdf5"
+        output = output_root / f"episode_{index:07d}.jsonl"
+        layout = layout_root / f"episode_{index:07d}.json"
+        record: dict[str, object] = {
+            "index": index,
+            "episode": str(episode),
+            "output": str(output),
+            "observation_mode": args.observation_mode,
+        }
+        try:
+            if not episode.is_file():
+                raise FileNotFoundError(f"官方演示不存在：{episode}")
+            if args.task == "push_T" and args.auto_reconstruct:
+                evidence = layout.with_suffix(".reconstruction.json")
+                if not layout.is_file() or not evidence.is_file():
+                    reconstruct_push_t_source_layout(episode, layout)
+            if not layout.is_file():
+                raise FileNotFoundError(
+                    f"任务 {args.task} 的源布局不存在：{layout}；"
+                    "非 push_T 任务请先提供与演示对应的 source layout"
+                )
+            single_args = argparse.Namespace(
+                task=args.task,
+                episode=episode,
+                output=output,
+                source_layout=layout,
+                seed=args.seed,
+                active_side=args.active_side,
+                device_id=args.device_id,
+                observation_mode=args.observation_mode,
+            )
+            _run_robodojo_capture(single_args)
+            record["status"] = "accepted_for_training"
+        except Exception as error:
+            record["status"] = "failed"
+            record["error"] = str(error)
+            records.append(record)
+            if not args.continue_on_error:
+                summary_path = output_root / "capture_batch.json"
+                summary_path.parent.mkdir(parents=True, exist_ok=True)
+                summary_path.write_text(
+                    json.dumps(
+                        {
+                            "schema": "essay2608.robodojo.capture_batch.v1",
+                            "task": args.task,
+                            "records": records,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                raise
+        else:
+            records.append(record)
+    summary_path = output_root / "capture_batch.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "schema": "essay2608.robodojo.capture_batch.v1",
+                "task": args.task,
+                "episodes": args.episodes,
+                "start_index": args.start_index,
+                "observation_mode": args.observation_mode,
+                "records": records,
+                "accepted": sum(item.get("status") == "accepted_for_training" for item in records),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(summary_path)
+
+
 def _run_robodojo(args: argparse.Namespace) -> None:
     if args.robodojo_command == "status":
         print(json.dumps(robodojo_status(), ensure_ascii=False, indent=2))
@@ -717,6 +836,8 @@ def _run_robodojo(args: argparse.Namespace) -> None:
         )
     elif args.robodojo_command == "capture":
         _run_robodojo_capture(args)
+    elif args.robodojo_command == "capture-batch":
+        _run_robodojo_capture_batch(args)
     elif args.robodojo_command == "table":
         paths = write_robodojo_paper_table()
         print("\n".join(str(path) for path in paths))
