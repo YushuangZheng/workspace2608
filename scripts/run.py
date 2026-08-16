@@ -18,23 +18,24 @@ from essay2608.policy import BimanualDynaMAC, DynaMAC, DynaMACConfig  # noqa: E4
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", type=Path, default=Path("data/dynamac_demos.npz"))
     parser.add_argument(
         "--config", type=Path, default=Path("configs/dynamac_smoke.json")
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    fit = commands.add_parser("fit", help="Fit the bundled demonstrations and save a checkpoint")
+    fit = commands.add_parser("fit", help="Fit local demonstrations and save a checkpoint")
+    fit.add_argument("--data", type=Path, required=True, help="Local demonstration NPZ bundle")
     fit.add_argument("--task", choices=("single", "bimanual"), required=True)
     fit.add_argument("--output", type=Path, required=True)
 
     inspect = commands.add_parser("inspect", help="Inspect a DynaMAC checkpoint without modifying it")
     inspect.add_argument("checkpoint", type=Path)
 
-    commands.add_parser(
+    verify = commands.add_parser(
         "verify",
-        help="Fit the bundled single-arm and bimanual data and print a summary",
+        help="Fit local single-arm and bimanual data and print a summary",
     )
+    verify.add_argument("--data", type=Path, required=True, help="Local demonstration NPZ bundle")
     return parser.parse_args()
 
 
