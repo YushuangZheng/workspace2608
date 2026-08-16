@@ -1,4 +1,4 @@
-"""论文自身演示数据的加载入口。"""
+"""Loader for the compact demonstration bundle used by the core CLI smoke test."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from essay2608.policy.dynamac import DynaMACDemonstration
 
 @dataclass(frozen=True)
 class DemonstrationBundle:
-    """仓库随附的五条单臂与五条真实接触双臂演示。"""
+    """Bundled single-arm and paired bimanual demonstrations."""
 
     single_arm: tuple[DynaMACDemonstration, ...]
     left_arm: tuple[DynaMACDemonstration, ...]
@@ -23,18 +23,18 @@ class DemonstrationBundle:
 def _required(archive: np.lib.npyio.NpzFile, keys: set[str]) -> None:
     missing = keys.difference(archive.files)
     if missing:
-        raise ValueError(f"打包演示缺少字段：{sorted(missing)}")
+        raise ValueError(f"demonstration bundle is missing fields: {sorted(missing)}")
 
 
 def load_demonstrations(path: str | Path) -> DemonstrationBundle:
-    """读取无 pickle、单文件的 DynaMAC 演示包。"""
+    """Load a single-file DynaMAC demonstration bundle without pickle."""
 
     path = Path(path)
     with np.load(path, allow_pickle=False) as archive:
         _required(archive, {"metadata_json", "single_count", "bimanual_count"})
         metadata = json.loads(str(archive["metadata_json"].item()))
         if metadata.get("schema") != "essay2608.dynamac.demonstrations.v1":
-            raise ValueError("不支持的演示包 schema")
+            raise ValueError("unsupported demonstration bundle schema")
         single_count = int(archive["single_count"].item())
         bimanual_count = int(archive["bimanual_count"].item())
         single = []

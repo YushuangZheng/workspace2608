@@ -1,43 +1,44 @@
-# DynaMAC / MiDiGaP 算法复现
+# DynaMAC Reproduction
 
-本仓库只维护论文中的 DynaMAC 与 MiDiGaP 数学和策略实现，不包含仿真器、机器人资产或
-外部任务库数据。
+This repository contains an independent implementation of DynaMAC and MiDiGaP, together with an RLBench reproduction suite for simulator Tables I–III. It is based on the papers, pinned public TAPAS/RLBench code, and written implementation clarifications; it does not contain unreleased author code.
 
-## 只需要看的文件
+## Repository layout
 
-1. `source/policy/dynamac.py`：DynaMAC Algorithm 1 与双臂并发策略；
-2. `source/policy/midigap.py`：MiDiGaP、约束更新和 VAPOR；
-3. `source/data/__init__.py`：项目自身 NPZ 演示包格式；
-4. `scripts/run.py`：唯一命令行入口；
-5. `configs/dynamac.json`：冻结的数值选择；
-6. `logs/research_log.md`：中文研究记录和结论边界。
+- `source/policy/`: DynaMAC, DiGaP, MiDiGaP, and environment-independent TAPAS skill segmentation.
+- `configs/dynamac.json`: the fully explicit, fail-closed core configuration.
+- `configs/dynamac_smoke.json`: the runnable configuration for the bundled smoke data.
+- `scripts/run.py`: compact fit, verify, and inspect commands.
+- `tests/`: mathematical, persistence, integration, and TAPAS-oracle tests.
+- `integrations/rlbench/`: pinned-source metadata, task adapters, low-dimensional demonstrations, authenticated checkpoints, evaluators, and results.
 
-## 运行
+The local RLBench workspace uses the following compact artifact set:
+
+- 45 five-demonstration `low_dim_obs.pkl` episodes for Tables I–III;
+- `integrations/rlbench/models/v1/` as the only checkpoint set;
+- `integrations/rlbench/results/v1/` as the only numerical result set;
+- nine confirmed-failure replay videos and the canonical paper comparison.
+
+Raw RGB, depth, and mask observations are not used by policy fitting and are not retained.
+Demonstrations, checkpoints, evaluation JSON, and videos are local experiment artifacts and
+are intentionally excluded from Git. The repository publishes the implementation, frozen
+protocols, tests, dependency pins, and commands needed to regenerate them.
+
+## Verification
 
 ```bash
 python -m pip install -e '.[test,midigap]'
-
-# 验证随附单臂/双臂演示能走完整训练链
 python scripts/run.py verify
-
-# 保存单臂 checkpoint
-python scripts/run.py fit --task single --output outputs/single_dynamac.npz
-
-# 保存左右两套双臂 checkpoint
-python scripts/run.py fit --task bimanual --output outputs/bimanual_dynamac
-
-# 检查 checkpoint
-python scripts/run.py inspect outputs/single_dynamac.npz
-
-pytest -q
-ruff check source scripts tests
+PYTHONDONTWRITEBYTECODE=1 pytest -q -p no:cacheprovider
+ruff check --no-cache source scripts tests integrations/rlbench
 ```
 
-## 实现边界
+The small `data/dynamac_demos.npz` file is a self-contained core training smoke test, not an RLBench benchmark dataset. Its coarse skill labels are precomputed and do not come from the RLBench/TAPAS segmentation pipeline.
 
-DynaMAC 覆盖 `R3 × S3` 任务参数、黎曼高斯 marginal、Product-of-Experts、链接过滤、
-虚拟末端帧、技能序列和双臂并发策略。MiDiGaP 覆盖流形均值、模态聚类、技能转移、
-约束更新和 VAPOR 的可审计数值实现。
+The generic skill segmenter is [source/policy/tapas_segmentation.py](source/policy/tapas_segmentation.py). It accepts only normalized NumPy pose, task-frame, and gripper-state trajectories. RLBench-specific observation extraction, next-observation gripper encoding, task profiles, default config paths, and debug-plot handling remain in [integrations/rlbench/rlbench_dynamac/](integrations/rlbench/rlbench_dynamac/).
 
-`data/dynamac_demos.npz` 只用于接口和算法结构回归，不代表论文基准成功率；论文外部的
-仿真任务、视觉系统、真机数据和官方评测仍需单独部署。
+## RLBench
+
+See [integrations/rlbench/README.md](integrations/rlbench/README.md) for setup, artifact layout,
+training, evaluation, and report-generation commands.
+
+Pinned external revisions and licenses are recorded in [integrations/rlbench/THIRD_PARTY.md](integrations/rlbench/THIRD_PARTY.md). Third-party source trees and CoppeliaSim are installed separately.

@@ -1,0 +1,167 @@
+{
+  "schema": "rlbench-dynamac-task-specs-v2",
+  "source": {
+    "repository": "https://github.com/vonHartz/RLBench",
+    "branch": "tapas",
+    "commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
+    "status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE"
+  },
+  "claim_boundary": "All get_low_dim_state frames are candidates. StoreBottle uses independent arm segmentation; HandOver uses the shared union. LiftTray and SweepDust coordination remain local choices pending author confirmation.",
+  "tasks": {
+    "stack_wine": {
+      "paper_task_name": "StackWine",
+      "module": "rlbench.tasks.stack_wine",
+      "class_name": "StackWine",
+      "bimanual": false,
+      "paper_evaluation_group": "Unimanual",
+      "paper_scenarios": ["static", "smooth", "teleport"],
+      "source_expression": "StackWine.get_low_dim_state: [wine_bottle, success_sensor]",
+      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+      "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single",
+      "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE",
+      "segmentation_debug_plots_required": true,
+      "pose_chunks": [
+        {"name": "wine_bottle", "role": "operated_object"},
+        {"name": "success_sensor", "role": "placement_reference"}
+      ]
+    },
+    "place_cups": {
+      "paper_task_name": "PlaceCups",
+      "module": "rlbench.tasks.place_cups",
+      "class_name": "PlaceCups",
+      "bimanual": false,
+      "paper_evaluation_group": "Unimanual",
+      "paper_scenarios": ["static", "smooth", "teleport"],
+      "source_expression": "PlaceCups.get_low_dim_state: [mug0, mug1, mug2, spoke0]",
+      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+      "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single",
+      "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE",
+      "segmentation_debug_plots_required": true,
+      "pose_chunks": [
+        {"name": "mug0", "role": "operated_object"},
+        {"name": "mug1", "role": "candidate_object"},
+        {"name": "mug2", "role": "candidate_object"},
+        {"name": "spoke0", "role": "placement_reference"}
+      ]
+    },
+    "open_microwave": {
+      "paper_task_name": "OpenMicrowave",
+      "module": "rlbench.tasks.open_microwave",
+      "class_name": "OpenMicrowave",
+      "bimanual": false,
+      "paper_evaluation_group": "Unimanual",
+      "paper_scenarios": ["static", "smooth", "teleport"],
+      "source_expression": "OpenMicrowave.get_low_dim_state: [microwave_door]",
+      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+      "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single",
+      "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE",
+      "segmentation_debug_plots_required": true,
+      "pose_chunks": [
+        {"name": "microwave_door", "role": "articulated_object"}
+      ]
+    },
+    "wipe_desk": {
+      "paper_task_name": "WipeDesk",
+      "module": "rlbench.tasks.wipe_desk",
+      "class_name": "WipeDesk",
+      "bimanual": false,
+      "paper_evaluation_group": "Unimanual",
+      "paper_scenarios": ["static", "smooth", "teleport"],
+      "source_expression": "WipeDesk.get_low_dim_state: [sponge]",
+      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+      "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single",
+      "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE",
+      "segmentation_debug_plots_required": true,
+      "pose_chunks": [
+        {"name": "sponge", "role": "operated_tool"}
+      ]
+    },
+    "bimanual_put_bottle_in_fridge": {
+      "paper_task_name": "StoreBottle",
+      "module": "rlbench.bimanual_tasks.bimanual_put_bottle_in_fridge",
+      "class_name": "BimanualPutBottleInFridge",
+      "bimanual": true,
+      "paper_evaluation_group": "Bimanual",
+      "paper_scenarios": ["static", "dynamic_unspecified"],
+      "source_expression": "BimanualPutBottleInFridge.get_low_dim_state: [bottle, fridge_root]",
+      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+      "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "independent",
+      "segmentation_coordination_source_status": "AUTHOR_EMAIL_EXPLICIT_STOREBOTTLE_INDEPENDENT_20260814",
+      "segmentation_debug_plots_required": false,
+      "pose_chunks": [
+        {"name": "bottle", "role": "operated_object"},
+        {"name": "fridge_root", "role": "environment_reference"}
+      ]
+    },
+    "bimanual_handover_item": {
+      "paper_task_name": "HandOver",
+      "module": "rlbench.bimanual_tasks.bimanual_handover_item",
+      "class_name": "BimanualHandoverItem",
+      "bimanual": true,
+      "paper_evaluation_group": "Bimanual",
+      "paper_scenarios": ["static", "dynamic_unspecified"],
+      "source_expression": "BimanualHandoverItem.get_low_dim_state: [item0, item1, item2, item3, item4]",
+      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+      "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "shared_union",
+      "segmentation_coordination_source_status": "AUTHOR_EMAIL_EXPLICIT_HANDOVER_SHARED_UNION_20260814",
+      "segmentation_debug_plots_required": false,
+      "pose_chunks": [
+        {"name": "item0", "role": "variation_target"},
+        {"name": "item1", "role": "distractor"},
+        {"name": "item2", "role": "distractor"},
+        {"name": "item3", "role": "distractor"},
+        {"name": "item4", "role": "distractor"}
+      ]
+    },
+    "bimanual_lift_tray": {
+      "paper_task_name": "LiftTray",
+      "module": "rlbench.bimanual_tasks.bimanual_lift_tray",
+      "class_name": "BimanualLiftTray",
+      "bimanual": true,
+      "paper_evaluation_group": "Bimanual",
+      "paper_scenarios": ["static", "dynamic_unspecified"],
+      "source_expression": "BimanualLiftTray.get_low_dim_state: [item, tray]",
+      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+      "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "shared_union",
+      "segmentation_coordination_source_status": "LOCAL_INTERACTION_INFERENCE_REQUIRES_DEBUG_PLOTS",
+      "segmentation_debug_plots_required": true,
+      "pose_chunks": [
+        {"name": "item", "role": "carried_object"},
+        {"name": "tray", "role": "cooperatively_operated_object"}
+      ]
+    },
+    "bimanual_sweep_to_dustpan": {
+      "paper_task_name": "SweepDust",
+      "module": "rlbench.bimanual_tasks.bimanual_sweep_to_dustpan",
+      "class_name": "BimanualSweepToDustpan",
+      "bimanual": true,
+      "paper_evaluation_group": "Bimanual",
+      "paper_scenarios": ["static", "dynamic_unspecified"],
+      "source_expression": "BimanualSweepToDustpan.get_low_dim_state: [broom, Dustpan_4]",
+      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+      "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "shared_union",
+      "segmentation_coordination_source_status": "LOCAL_INTERACTION_INFERENCE_REQUIRES_DEBUG_PLOTS",
+      "segmentation_debug_plots_required": true,
+      "pose_chunks": [
+        {"name": "broom", "role": "operated_tool"},
+        {"name": "dustpan", "role": "cooperatively_operated_tool"}
+      ]
+    }
+  }
+}

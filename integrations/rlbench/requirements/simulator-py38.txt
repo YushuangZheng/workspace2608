@@ -1,0 +1,18 @@
+# Paper-runtime candidate grounded in PerAct² INSTALLATION.md and
+# scripts/install_dependencies.sh: Python 3.8, CoppeliaSim V4.1.0, and
+# cffi==1.14.2.  CoppeliaSim must be installed and licensed separately.
+-r runtime-bootstrap-py38.txt
+
+# These package versions are local reproducibility pins within the pinned
+# RLBench fork's declared ranges; they are not claimed as the author's exact
+# 2026 environment.  The runtime receipt records the resolved versions.
+Pillow==9.5.0
+pyquaternion==0.9.9
+click-prompt==0.5.1
+rich-click==1.8.3
+natsort==8.4.0
+
+# WARNING: upstream setup.py writes into COPPELIASIM_ROOT.  Do not run this
+# line before the user has separately installed CoppeliaSim under an applicable
+# licence and intentionally chosen that directory.
+PyRep @ git+https://github.com/vonHartz/PyRep.git@b8bd1d7a3182adcd570d001649c0849047ebf197

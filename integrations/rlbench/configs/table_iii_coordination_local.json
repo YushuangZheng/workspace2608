@@ -1,0 +1,28 @@
+{
+  "schema": "dynamac-table-iii-coordination-local-protocol-v1",
+  "paper_comparable": false,
+  "task": "bimanual_handover_item_dynamic",
+  "demonstrations": 5,
+  "segmentation": {
+    "base": "tapas_segmentation.json#bimanual_handover_item",
+    "coordination": "shared_union",
+    "boundary_selection": "temporal_consensus",
+    "expected_boundary_count": 6,
+    "source_status": "LOCAL_DYNAMIC_HANDOVER_COHORT_DIAGNOSTIC_20260815",
+    "note": "The shared-union candidates contain six boundaries in three demos and seven in two. Six matches the author's static HandOver plot; temporal consensus removes one unmatched candidate in the two seven-boundary demos."
+  },
+  "perturbation": {
+    "translation_world_m": [0.0, 0.0, 0.03],
+    "application": "persistent offset on every predicted EE target from trigger",
+    "trigger_fraction_of_fitted_policy_clock": 0.3333333333333333,
+    "source_status": "LOCAL_EXPLICIT_DIAGNOSTIC_20260815"
+  },
+  "unpublished_paper_fields": [
+    "perturbation axis",
+    "perturbation magnitude",
+    "perturbation start time",
+    "perturbation duration",
+    "demonstration IDs and seeds",
+    "evaluation seeds"
+  ]
+}

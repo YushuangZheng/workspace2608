@@ -1,4 +1,4 @@
-"""DynaMAC 与 MiDiGaP 论文仿真实验复现。"""
+"""Independent DynaMAC and MiDiGaP implementations."""
 
 from .data import DemonstrationBundle, load_demonstrations
 from .policy import (

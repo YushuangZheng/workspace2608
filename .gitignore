@@ -7,10 +7,26 @@
 build/
 dist/
 
+# Pinned third-party research worktrees are fetched separately and must not be
+# vendored into this repository (see integrations/rlbench/THIRD_PARTY.md).
+/RLBench/
+/TAPAS/
+/PyRep/
+/RoboTwin/
+/RoboDojo/
+/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04/
+
 # Local experiment outputs
 outputs/
+integrations/rlbench/models/
+integrations/rlbench/results/
 *.log
 *.tmp
+
+# RLBench demonstrations are large, simulator-generated artifacts.  Keep only
+# the protocol note in Git; collection manifests belong with the local data.
+integrations/rlbench/data/**
+!integrations/rlbench/data/README.md
 
 # Local tooling
 .venv/

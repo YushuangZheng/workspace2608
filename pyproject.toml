@@ -19,7 +19,7 @@ packages = ["essay2608", "essay2608.data", "essay2608.policy"]
 package-dir = { essay2608 = "source" }
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "integrations/rlbench/tests"]
 
 [tool.ruff]
 line-length = 100

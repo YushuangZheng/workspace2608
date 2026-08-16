@@ -1,0 +1,89 @@
+{
+  "schema": "rlbench-dynamac-author-clarified-segmentation-v2",
+  "implementation": "tapas_velocity_gripper_union_author_clarified",
+  "reference_commit": "52e35214b9baa7b190b87196c36b9e98f4006149",
+  "min_len": 1,
+  "distance_based": false,
+  "gripper_based": true,
+  "velocity_based": true,
+  "distance_threshold": 0.06,
+  "repeat_first_step": 0,
+  "repeat_final_step": 0,
+  "fix_frames": true,
+  "min_end_distance": 10,
+  "velocity_threshold": 0.005,
+  "gripper_threshold": 0.2,
+  "max_idx_distance": 4,
+  "gripper_min_end_distance": null,
+  "candidate_merge_fraction": 0.0,
+  "boundary_selection": "all",
+  "expected_boundary_count": null,
+  "task_profiles": {
+    "stack_wine": {
+      "candidate_merge_fraction": 0.05,
+      "boundary_selection": "temporal_consensus",
+      "expected_boundary_count": 3,
+      "source_status": "PUBLIC_TAPAS_STACKWINE_PATTERN_LOCAL_DYNAMAC_PROTOCOL",
+      "note": "Three boundaries match the public TAPAS StackWine five-demo cohort; live DynaMAC demos remain a local cohort and require plot inspection."
+    },
+    "place_cups": {
+      "candidate_merge_fraction": 0.05,
+      "boundary_selection": "single_grasp_contact_cycle",
+      "expected_boundary_count": 4,
+      "source_status": "LOCAL_CONTACT_PHASE_ALIGNMENT_VALIDATED_20260815",
+      "note": "Use the single retained gripper-close event as the contact anchor; select the immediately preceding approach stop, immediately following lift stop, and final pre-release stop. This fixes phase alignment without pinning demonstration indices; exact author settings remain unavailable."
+    },
+    "open_microwave": {
+      "candidate_merge_fraction": 0.05,
+      "boundary_selection": "temporal_consensus",
+      "expected_boundary_count": 2,
+      "source_status": "LOCAL_LIVE_COHORT_SIGNAL_DIAGNOSTIC_20260815",
+      "note": "All five live demonstrations contain the same two merged velocity/gripper boundary groups."
+    },
+    "wipe_desk": {
+      "candidate_merge_fraction": 0.05,
+      "boundary_selection": "temporal_consensus_require_gripper",
+      "expected_boundary_count": 3,
+      "source_status": "LOCAL_LIVE_COHORT_SIGNAL_DIAGNOSTIC_20260815",
+      "note": "Three cohort-consistent groups retain approach/grasp, wiping, and release while treating variable internal wipe pauses as skill duration."
+    },
+    "bimanual_put_bottle_in_fridge": {
+      "gripper_min_end_distance": 0,
+      "candidate_merge_fraction": 0.03,
+      "boundary_selection": "gripper_preferred_temporal_consensus",
+      "expected_boundary_count": 2,
+      "source_status": "AUTHOR_ATTACHMENTS_2_BOUNDARIES_PER_ARM_20260814",
+      "note": "Keep the two gripper transitions when present; velocity candidates only fill a missing transition at the cohort's median normalized times."
+    },
+    "bimanual_handover_item": {
+      "velocity_threshold": 0.001,
+      "max_idx_distance": 1,
+      "candidate_merge_fraction": 0.05,
+      "boundary_selection": "all",
+      "expected_boundary_count": 6,
+      "source_status": "AUTHOR_ATTACHMENTS_6_SHARED_BOUNDARIES_20260814",
+      "note": "Merge each arm's nearby velocity/gripper candidates, then merge the shared union and require six boundaries."
+    },
+    "bimanual_lift_tray": {
+      "candidate_merge_fraction": 0.05,
+      "boundary_selection": "temporal_consensus",
+      "expected_boundary_count": 2,
+      "source_status": "LOCAL_EXPLICIT_DEFAULT_PENDING_AUTHOR_PLOT",
+      "note": "Two cohort-consistent boundary groups on the collected five demos; must be checked against a debug plot or author metadata."
+    },
+    "bimanual_sweep_to_dustpan": {
+      "candidate_merge_fraction": 0.05,
+      "boundary_selection": "temporal_consensus",
+      "expected_boundary_count": 4,
+      "source_status": "LOCAL_EXPLICIT_DEFAULT_PENDING_AUTHOR_PLOT",
+      "note": "Four cohort-consistent boundary groups on the collected five demos; must be checked against a debug plot or author metadata."
+    }
+  },
+  "evidence": {
+    "parameters": "TAPAS_HELPER_DEFAULTS_PLUS_AUTHOR_EMAIL_SIGNAL_UNION_20260814",
+    "numpy_port": "INDEPENDENT_CODE_ALIGNED_PORT",
+    "boundary_signals": "AUTHOR_EMAIL_EXPLICIT_EE_VELOCITY_UNION_GRIPPER_CHANGE_20260814",
+    "cross_demo_alignment": "AUTHOR_EMAIL_FAIL_CLOSED_NO_PREFIX_OR_MIN_COUNT_TRUNCATION_20260814",
+    "repeat_padding": "RECORDED_BUT_NOT_APPLIED_TO_DYNAMAC_RAW_LABELS"
+  }
+}
