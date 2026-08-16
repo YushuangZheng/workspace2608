@@ -16,6 +16,11 @@ dist/
 /RoboDojo/
 /CoppeliaSim_Edu_V4_1_0_Ubuntu20_04/
 
+# Reference papers and demonstration bundles stay local.
+/DynaMAC.pdf
+/MiDiGaP.pdf
+/data/
+
 # Local experiment outputs
 outputs/
 integrations/rlbench/models/

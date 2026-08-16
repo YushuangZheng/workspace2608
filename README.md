@@ -6,10 +6,10 @@ This repository contains an independent implementation of DynaMAC and MiDiGaP, t
 
 - `source/policy/`: DynaMAC, DiGaP, MiDiGaP, and environment-independent TAPAS skill segmentation.
 - `configs/dynamac.json`: the fully explicit, fail-closed core configuration.
-- `configs/dynamac_smoke.json`: the runnable configuration for the bundled smoke data.
-- `scripts/run.py`: compact fit, verify, and inspect commands.
+- `configs/dynamac_smoke.json`: a lightweight configuration for local smoke data.
+- `scripts/run.py`: compact fit, verify, and inspect commands using an explicit local dataset.
 - `tests/`: mathematical, persistence, integration, and TAPAS-oracle tests.
-- `integrations/rlbench/`: pinned-source metadata, task adapters, low-dimensional demonstrations, authenticated checkpoints, evaluators, and results.
+- `integrations/rlbench/`: pinned-source metadata, task adapters, evaluators, protocols, and tests.
 
 The local RLBench workspace uses the following compact artifact set:
 
@@ -19,20 +19,26 @@ The local RLBench workspace uses the following compact artifact set:
 - nine confirmed-failure replay videos and the canonical paper comparison.
 
 Raw RGB, depth, and mask observations are not used by policy fitting and are not retained.
-Demonstrations, checkpoints, evaluation JSON, and videos are local experiment artifacts and
+Demonstrations, checkpoints, evaluation JSON, videos, and local copies of the reference papers
 are intentionally excluded from Git. The repository publishes the implementation, frozen
-protocols, tests, dependency pins, and commands needed to regenerate them.
+protocols, tests, dependency pins, and commands needed to regenerate the experiment artifacts.
 
 ## Verification
 
 ```bash
 python -m pip install -e '.[test,midigap]'
-python scripts/run.py verify
 PYTHONDONTWRITEBYTECODE=1 pytest -q -p no:cacheprovider
 ruff check --no-cache source scripts tests integrations/rlbench
 ```
 
-The small `data/dynamac_demos.npz` file is a self-contained core training smoke test, not an RLBench benchmark dataset. Its coarse skill labels are precomputed and do not come from the RLBench/TAPAS segmentation pipeline.
+The optional core smoke command takes an explicitly supplied local demonstration bundle:
+
+```bash
+python scripts/run.py verify --data /path/to/dynamac_demos.npz
+```
+
+No demonstration bundle is tracked in this repository. The smoke bundle uses precomputed coarse
+skill labels and is separate from the RLBench/TAPAS segmentation pipeline.
 
 The generic skill segmenter is [source/policy/tapas_segmentation.py](source/policy/tapas_segmentation.py). It accepts only normalized NumPy pose, task-frame, and gripper-state trajectories. RLBench-specific observation extraction, next-observation gripper encoding, task profiles, default config paths, and debug-plot handling remain in [integrations/rlbench/rlbench_dynamac/](integrations/rlbench/rlbench_dynamac/).
 
