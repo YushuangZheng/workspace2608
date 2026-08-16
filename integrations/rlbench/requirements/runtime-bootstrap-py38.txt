@@ -1,0 +1,13 @@
+# Source-faithful, pre-simulator bootstrap dependencies for the RLBench2 lane.
+#
+# PerAct²'s official scripts/install_dependencies.sh creates Python 3.8 and
+# installs cffi==1.14.2.  The shared markusgrotz/vonHartz PyRep commit also
+# pins cffi==1.14.2 and leaves NumPy unpinned.  Keep that unresolved NumPy pin
+# visible instead of inventing an "author exact" version.
+numpy
+cffi==1.14.2
+
+# This file intentionally does NOT install PyRep.  Its pinned setup.py writes
+# into COPPELIASIM_ROOT (usrset.txt, a shared-library symlink, and an add-on),
+# so that step must only follow the user's separately licensed CoppeliaSim 4.1
+# installation.

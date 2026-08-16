@@ -1,0 +1,16 @@
+diff --git a/rlbench/backend/scene.py b/rlbench/backend/scene.py
+index 8ebbf8c0..e2a6fc45 100644
+--- a/rlbench/backend/scene.py
++++ b/rlbench/backend/scene.py
+@@ -1,1 +1,3 @@
++from __future__ import annotations
++
+ from typing import List, Callable
+diff --git a/rlbench/backend/task.py b/rlbench/backend/task.py
+index be22d83b..03ae9a24 100644
+--- a/rlbench/backend/task.py
++++ b/rlbench/backend/task.py
+@@ -1,1 +1,3 @@
++from __future__ import annotations
++
+ import os

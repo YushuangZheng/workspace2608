@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DynaMAC 与 MiDiGaP 的唯一命令行入口。"""
+"""Command-line entry point for the DynaMAC and MiDiGaP implementations."""
 
 from __future__ import annotations
 
@@ -19,17 +19,22 @@ from essay2608.policy import BimanualDynaMAC, DynaMAC, DynaMACConfig  # noqa: E4
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=Path("data/dynamac_demos.npz"))
-    parser.add_argument("--config", type=Path, default=Path("configs/dynamac.json"))
+    parser.add_argument(
+        "--config", type=Path, default=Path("configs/dynamac_smoke.json")
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    fit = commands.add_parser("fit", help="从随附演示拟合并保存 checkpoint")
+    fit = commands.add_parser("fit", help="Fit the bundled demonstrations and save a checkpoint")
     fit.add_argument("--task", choices=("single", "bimanual"), required=True)
     fit.add_argument("--output", type=Path, required=True)
 
-    inspect = commands.add_parser("inspect", help="只读检查一个 DynaMAC checkpoint")
+    inspect = commands.add_parser("inspect", help="Inspect a DynaMAC checkpoint without modifying it")
     inspect.add_argument("checkpoint", type=Path)
 
-    commands.add_parser("verify", help="拟合随附单臂/双臂数据并打印结构摘要，不保存模型")
+    commands.add_parser(
+        "verify",
+        help="Fit the bundled single-arm and bimanual data and print a summary",
+    )
     return parser.parse_args()
 
 
@@ -95,7 +100,8 @@ def main() -> None:
                 "bimanual_left": compact_summary(bimanual.left),
                 "bimanual_right": compact_summary(bimanual.right),
                 "claim_boundary": (
-                    "算法结构验证；随附数据不产出论文基准性能，不能替代外部仿真任务数据。"
+                    "Structural verification only; the bundled data do not produce paper "
+                    "benchmark results or replace simulator task data."
                 ),
             },
             ensure_ascii=False,

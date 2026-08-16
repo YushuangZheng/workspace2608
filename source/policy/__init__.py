@@ -1,4 +1,4 @@
-"""论文自身策略实现。"""
+"""Policy implementations used in the paper."""
 
 from .dynamac import (
     BimanualDynaMAC,
@@ -12,6 +12,8 @@ from .dynamac import (
     GaussianMarginal,
     geometric_mean_standard_deviation,
     product_of_experts,
+    static_task_parameter_score_details,
+    static_task_parameter_scores,
     task_parameter_scores,
     transform_marginal,
 )
@@ -24,6 +26,7 @@ from .midigap import (
     MiDiGaPMode,
     OccupancyConstraint,
     ReachabilitySphere,
+    SelfCollisionSphere,
     TaskParameterizedMiDiGaP,
     TruncatedGaussian,
     VAPORConfig,
@@ -36,10 +39,24 @@ from .midigap import (
     update_incoming_transitions,
     variance_aware_path_optimization,
 )
+from .tapas_segmentation import (
+    BimanualTAPASSegmentation,
+    TAPASSegmentation,
+    TAPASSegmentationConfig,
+    align_tapas_boundaries,
+    gripper_change_boundaries,
+    segment_bimanual_trajectories,
+    segment_trajectories,
+    tapas_distance_boundaries,
+    tapas_gripper_boundaries,
+    tapas_velocity_boundaries,
+    translation_action_magnitude,
+)
 
 __all__ = [
     "BimanualDynaMAC",
     "BimanualDynaMACAction",
+    "BimanualTAPASSegmentation",
     "DynaMAC",
     "DynaMACAction",
     "DynaMACConfig",
@@ -55,19 +72,32 @@ __all__ = [
     "MiDiGaPMode",
     "OccupancyConstraint",
     "ReachabilitySphere",
+    "SelfCollisionSphere",
     "TaskParameterizedMiDiGaP",
+    "TAPASSegmentation",
+    "TAPASSegmentationConfig",
     "TruncatedGaussian",
     "VAPORConfig",
     "VAPORResult",
     "constrained_midigap_update",
+    "align_tapas_boundaries",
     "gaussian_pose_kl",
     "geometric_mean_standard_deviation",
+    "gripper_change_boundaries",
     "kl_transition_matrix",
     "product_of_experts",
     "sample_riemannian_gaussian",
+    "segment_bimanual_trajectories",
+    "segment_trajectories",
+    "static_task_parameter_score_details",
+    "static_task_parameter_scores",
     "task_parameter_scores",
+    "tapas_distance_boundaries",
+    "tapas_gripper_boundaries",
+    "tapas_velocity_boundaries",
     "truncate_riemannian_gaussian",
     "transform_marginal",
+    "translation_action_magnitude",
     "update_incoming_transitions",
     "variance_aware_path_optimization",
 ]

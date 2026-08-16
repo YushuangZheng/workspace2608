@@ -1,7 +1,7 @@
 {
   "tau_m": 0.005,
   "tau_omega": 0.5,
-  "eq6_empty_selection": "error",
+  "eq6_empty_selection": "keep_argmax",
   "eq6_covariance_scope": "full_pose",
   "policy_model": "time_state",
   "eq5_position_weight": 1.0,

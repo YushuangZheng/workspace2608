@@ -1,0 +1,45 @@
+{
+  "snapshot_date": "2026-08-10",
+  "sources": {
+    "rlbench": {
+      "repository": "https://github.com/vonHartz/RLBench",
+      "branch": "tapas",
+      "commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
+      "role": "RLBench and RLBench2-derived task/environment infrastructure",
+      "license_file": "RLBench/LICENSE",
+      "evidence": "EXACT_FROM_PUBLIC_CODE"
+    },
+    "tapas": {
+      "repository": "https://github.com/robot-learning-freiburg/TAPAS",
+      "branch": "master",
+      "commit": "52e35214b9baa7b190b87196c36b9e98f4006149",
+      "role": "skill segmentation and RLBench action-timing reference",
+      "license_file": "TAPAS/LICENSE",
+      "evidence": "EXACT_FROM_PUBLIC_CODE"
+    },
+    "pyrep": {
+      "repository": "https://github.com/vonHartz/PyRep",
+      "branch": "main",
+      "commit": "b8bd1d7a3182adcd570d001649c0849047ebf197",
+      "role": "dual-Panda PyRep classes required by the RLBench fork",
+      "simulator_compatibility": "CoppeliaSim 4.1 on Linux per the pinned PyRep README; exact simulator build remains to be frozen by a successful runtime validation",
+      "evidence": "REQUIRED_DEPENDENCY_PIN"
+    }
+  },
+  "papers": {
+    "dynamac": {
+      "url": "https://arxiv.org/abs/2607.22119v1",
+      "version": "v1",
+      "date": "2026-07-24"
+    },
+    "midigap": {
+      "url": "https://arxiv.org/abs/2505.03296v2",
+      "version": "v2",
+      "date": "2026-06-10"
+    },
+    "tapas": {
+      "url": "https://doi.org/10.1109/LRA.2024.3487506"
+    }
+  },
+  "claim_boundary": "The RLBench and TAPAS pins are author-published or author-maintained public sources with upstream provenance retained. MiDiGaP/DynaMAC under integrations/rlbench reuses essay2608's independent, paper-driven implementation and is not official author source."
+}
