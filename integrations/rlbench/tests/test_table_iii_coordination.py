@@ -125,6 +125,9 @@ def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
             assert timeout == 7.0
             self.policy_steps = 37
             self.model_identity = {"manifest_authenticated": True, "fingerprint": "x"}
+            self.policy_clock_semantics_id = (
+                "policy-tick-transaction-commit-on-primary-action-success-v1"
+            )
 
         def close(self):
             lifecycle["worker_closed"] = True
@@ -138,12 +141,14 @@ def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
         horizon,
         arm,
         trigger,
+        max_primary_action_attempts,
     ):
         assert worker.policy_steps == 37
         assert seed == 5
         assert horizon == 1000
         assert arm == "left"
         assert trigger == 12
+        assert max_primary_action_attempts == 3
         return {
             "episode": episode,
             "seed": seed + episode,
@@ -186,6 +191,10 @@ def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
     assert payload["evaluation_protocol_id"] == coordination.EVALUATION_PROTOCOL_ID
     assert payload["model_identity"]["manifest_authenticated"] is True
     assert payload["controller"]["joint_target_max_steps"] == 200
+    assert payload["controller"]["policy_clock_rollback"] is True
+    assert payload["controller"]["policy_clock_semantics_id"] == (
+        "policy-tick-transaction-commit-on-primary-action-success-v1"
+    )
     assert payload["ik_execution_diagnostics"] == {"joint_target_reached": 2}
     assert payload["learned_policy_steps"] == 37
     assert payload["successes"] == 1

@@ -38,7 +38,9 @@ are intentionally omitted.
 3. **Covariance regularization and frame-selection edge cases**
 
    For the reported runs, was the covariance ridge `1e-6` or `1e-5`, and was it
-   constant across tasks and arms? Was `tau_omega = 0.5` used for every task? Did
+   constant across tasks and arms? Did Equation (6) use the same weighted 3D
+   position subspace as Equation (5), or the full 6D pose covariance? Was
+   `tau_omega = 0.5` used for every task? Did
    any skill produce no frame under the strict condition
    `omega(f) > tau_omega`; if so, what did the implementation do? Did the
    reported models use temporal-variance filtering before promoting the link
@@ -52,8 +54,17 @@ are intentionally omitted.
    each arm retain its own schedule on the shared continuous clock, with the
    earlier-completing arm holding its final command, or were the schedules
    resynchronized? Which exact absolute-EE action-mode constructor, collision
-   settings, and IK fallback parameters were used, and did the clock advance
-   after a fallback no-op?
+   settings, IK fallback parameters, and gripper actuation velocity were used?
+   In particular, did evaluation use the demonstration generator's `0.04`
+   gripper velocity or the public discrete action mode's `0.2`? When a primary
+   command raised `InvalidAction`, did the reported evaluator terminate,
+   advance the policy clock, or abort it and recompute the same tick from a
+   fresh observation, and how many such controller attempts were allowed?
+   Separately, when a command executed but the intended grasp contact was not
+   established, did the fixed skill schedule continue, or was there any
+   contact-conditioned phase hold or semantic re-grasp? Our local limit of
+   three attempts applies only to `InvalidAction`; it is not assumed to be a
+   DynaMAC grasp-retry mechanism.
 
 5. **Experiment manifest**
 

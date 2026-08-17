@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -20,27 +21,86 @@ from typing import Any
 
 from essay2608.policy import DynaMACConfig
 
+from .runtime import (
+    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+    LOW_DIM_POSE_ROTATION_TOLERANCE_RAD,
+    LOW_DIM_POSE_TRANSLATION_TOLERANCE_M,
+    LOW_DIM_STATE_ROUNDTRIP_ATOL,
+    PRESERVE_INSTANCE_MOTION_PROTOCOL_ID,
+    ROOT_ACTUAL_MOTION_ROTATION_TOLERANCE_RAD,
+    ROOT_ACTUAL_MOTION_TRANSLATION_TOLERANCE_M,
+    ROOT_COMMAND_ROTATION_TOLERANCE_RAD,
+    ROOT_COMMAND_TRANSLATION_TOLERANCE_M,
+    DiscreteGripperProtocol,
+)
+from .unimanual_evaluate import (
+    DYNAMIC_EPISODE_ACCOUNTING_SCHEMA,
+    EXPECTED_UNIMANUAL_BASE_SCENE_SHA256,
+    EXPECTED_UNIMANUAL_BASE_VISION_SENSOR_COUNT,
+    LOW_DIM_HEADLESS_SCENE_PROTOCOL_ID,
+)
+
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results"
-DEFAULT_RELEASE = "v1"
+DEFAULT_RELEASE = "v2"
+DEFAULT_OUTPUT_DIR = DEFAULT_RESULTS_DIR / DEFAULT_RELEASE
 PAPER_REFERENCE = "DynaMAC, arXiv:2607.22119v1"
-EXPECTED_LOCAL_CONFIG = asdict(
-    DynaMACConfig(
-        **json.loads(
-            (INTEGRATION_ROOT / "configs" / "dynamac_rlbench_local.json").read_text(
-                encoding="utf-8"
-            )
-        )
+
+
+def _canonical_config(path: Path) -> dict[str, Any]:
+    return asdict(
+        DynaMACConfig(**json.loads(path.read_text(encoding="utf-8")))
     )
-)
+
+
+EXPECTED_RELEASE_CONFIGS = {
+    "v1": _canonical_config(
+        INTEGRATION_ROOT / "configs" / "dynamac_rlbench_v1.json"
+    ),
+    "v2": _canonical_config(
+        INTEGRATION_ROOT / "configs" / "dynamac_rlbench_local.json"
+    ),
+}
+EXPECTED_LOCAL_CONFIG = EXPECTED_RELEASE_CONFIGS[DEFAULT_RELEASE]
 EXPECTED_MODEL_SCHEMA_VERSION = 13
 EXPECTED_TAPAS_COMMIT = "52e35214b9baa7b190b87196c36b9e98f4006149"
 EXPECTED_SELECTION_SEMANTICS_ID = (
     "eq5_skill_majority_mask_before_eq6_time_state_position3d_unimodal_v1"
 )
-EXPECTED_EVALUATION_PROTOCOL_ID = (
+LEGACY_V1_EVALUATION_PROTOCOL_ID = (
     "rlbench-absolute-ee-ik-jacobian-sampling5-timeout200-noop-clock-v2"
 )
+V2_EVALUATION_PROTOCOL_BASE_ID = (
+    "rlbench-absolute-ee-ik-jacobian-sampling5-timeout200-"
+    "noop-retry-same-policy-tick-fresh-observation-"
+    f"primary-attempt{DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS}-v4"
+)
+EXPECTED_RELEASE_EVALUATION_PROTOCOL_IDS = {
+    "v1": {
+        "unimanual": LEGACY_V1_EVALUATION_PROTOCOL_ID,
+        "bimanual": LEGACY_V1_EVALUATION_PROTOCOL_ID,
+    },
+    "v2": {
+        "unimanual": DiscreteGripperProtocol(
+            bimanual=False
+        ).extend_evaluation_protocol_id(V2_EVALUATION_PROTOCOL_BASE_ID),
+        "bimanual": DiscreteGripperProtocol(
+            bimanual=True
+        ).extend_evaluation_protocol_id(V2_EVALUATION_PROTOCOL_BASE_ID),
+    },
+}
+# Backward-compatible name for callers that construct bimanual default-release
+# fixtures.  Real selection uses the task-aware mapping above.
+EXPECTED_EVALUATION_PROTOCOL_ID = EXPECTED_RELEASE_EVALUATION_PROTOCOL_IDS[
+    DEFAULT_RELEASE
+]["bimanual"]
+
+UNIMANUAL_TASKS = {
+    "stack_wine",
+    "place_cups",
+    "open_microwave",
+    "wipe_desk",
+}
 
 
 @dataclass(frozen=True)
@@ -85,12 +145,6 @@ TABLE_SCOPES = {
     "IV": "Real-world bimanual hardware",
 }
 
-WIPE_DESK_DYNAMIC_UNAVAILABLE = (
-    "Unavailable: the public generic Scene movement path cannot restore WipeDesk "
-    "after dirt objects are changed mid-episode."
-)
-
-
 def _cells() -> tuple[PaperCell, ...]:
     table_i_tasks = (
         ("stack_wine", "StackWine", 1.00, 1.00, 1.00),
@@ -105,11 +159,6 @@ def _cells() -> tuple[PaperCell, ...]:
             ("Smooth dynamics", "smooth", smooth),
             ("Teleportation", "teleport", teleport),
         ):
-            unavailable_reason = (
-                WIPE_DESK_DYNAMIC_UNAVAILABLE
-                if task == "wipe_desk" and scenario != "static"
-                else ""
-            )
             stopped_reason = ""
             cells.append(
                 PaperCell(
@@ -117,15 +166,14 @@ def _cells() -> tuple[PaperCell, ...]:
                     condition=condition,
                     task=label,
                     paper_rate=paper_rate,
-                    local_task=None if unavailable_reason else task,
-                    local_scenarios=() if unavailable_reason else (scenario,),
+                    local_task=task,
+                    local_scenarios=(scenario,),
                     result_family="table_i",
                     note=(
                         "Independent five-demonstration cohort."
                         if scenario == "static"
-                        else "Local public-RLBench motion schedule; paper defaults unpublished."
+                        else "Local preserve-instance task-root motion schedule; paper defaults unpublished."
                     ),
-                    unavailable_reason=unavailable_reason,
                     stopped_reason=stopped_reason,
                 )
             )
@@ -326,7 +374,40 @@ def _family_matches(cell: PaperCell, run: LocalRun, results_dir: Path) -> bool:
     return True
 
 
-def _model_identity_rank(run: LocalRun) -> int:
+def _expected_training_config(release: str | None) -> dict[str, Any] | None:
+    if release is None:
+        return EXPECTED_LOCAL_CONFIG
+    return EXPECTED_RELEASE_CONFIGS.get(release)
+
+
+def _expected_evaluation_protocol_ids(
+    release: str | None,
+) -> dict[str, str] | None:
+    selected_release = DEFAULT_RELEASE if release is None else release
+    return EXPECTED_RELEASE_EVALUATION_PROTOCOL_IDS.get(selected_release)
+
+
+def expected_evaluation_protocol_id(
+    task: str,
+    *,
+    release: str | None = DEFAULT_RELEASE,
+) -> str | None:
+    """Return the authenticated evaluator ID for a task/release pair."""
+
+    protocols = _expected_evaluation_protocol_ids(release)
+    if protocols is None:
+        return None
+    layout = "unimanual" if task in UNIMANUAL_TASKS else "bimanual"
+    return protocols[layout]
+
+
+def _model_identity_rank(
+    run: LocalRun,
+    expected_training_config: dict[str, Any] | None = EXPECTED_LOCAL_CONFIG,
+    expected_evaluation_protocol_ids: dict[str, str] | None = (
+        EXPECTED_RELEASE_EVALUATION_PROTOCOL_IDS[DEFAULT_RELEASE]
+    ),
+) -> int:
     """Rank exact corrected runs before mismatched and legacy results."""
 
     identity = run.payload.get("model_identity")
@@ -335,16 +416,23 @@ def _model_identity_rank(run: LocalRun) -> int:
     fingerprint_present = bool(identity.get("fingerprint")) or bool(
         identity.get("left_fingerprint") and identity.get("right_fingerprint")
     )
+    layout = "unimanual" if run.task in UNIMANUAL_TASKS else "bimanual"
+    expected_protocol_id = (
+        expected_evaluation_protocol_ids.get(layout)
+        if expected_evaluation_protocol_ids is not None
+        else None
+    )
     if (
         identity.get("manifest_authenticated") is True
-        and identity.get("training_config") == EXPECTED_LOCAL_CONFIG
+        and expected_training_config is not None
+        and expected_protocol_id is not None
+        and identity.get("training_config") == expected_training_config
         and identity.get("model_schema_version") == EXPECTED_MODEL_SCHEMA_VERSION
         and identity.get("selection_semantics_id")
         == EXPECTED_SELECTION_SEMANTICS_ID
         and identity.get("tapas_reference_commit") == EXPECTED_TAPAS_COMMIT
         and fingerprint_present
-        and run.payload.get("evaluation_protocol_id")
-        == EXPECTED_EVALUATION_PROTOCOL_ID
+        and run.payload.get("evaluation_protocol_id") == expected_protocol_id
     ):
         return 0
     return 1
@@ -372,6 +460,10 @@ def _select_run(
     seed: int,
     episodes: int,
     horizon: int,
+    expected_training_config: dict[str, Any] | None = EXPECTED_LOCAL_CONFIG,
+    expected_evaluation_protocol_ids: dict[str, str] | None = (
+        EXPECTED_RELEASE_EVALUATION_PROTOCOL_IDS[DEFAULT_RELEASE]
+    ),
 ) -> LocalRun | None:
     if cell.local_task is None:
         return None
@@ -392,18 +484,34 @@ def _select_run(
     candidates.sort(
         key=lambda run: (
             scenario_rank[run.scenario],
-            _model_identity_rank(run),
+            _model_identity_rank(
+                run,
+                expected_training_config,
+                expected_evaluation_protocol_ids,
+            ),
             str(run.path),
         )
     )
     best_key = (
         scenario_rank[candidates[0].scenario],
-        _model_identity_rank(candidates[0]),
+        _model_identity_rank(
+            candidates[0],
+            expected_training_config,
+            expected_evaluation_protocol_ids,
+        ),
     )
     equally_ranked = [
         run
         for run in candidates
-        if (scenario_rank[run.scenario], _model_identity_rank(run)) == best_key
+        if (
+            scenario_rank[run.scenario],
+            _model_identity_rank(
+                run,
+                expected_training_config,
+                expected_evaluation_protocol_ids,
+            ),
+        )
+        == best_key
     ]
     if best_key[1] == 0 and len(equally_ranked) > 1:
         identities = {_model_fingerprint_key(run) for run in equally_ranked}
@@ -423,6 +531,45 @@ def _protocol_metadata(run: LocalRun) -> dict[str, Any]:
     return {}
 
 
+def _valid_v2_unimanual_scene_launch(run: LocalRun) -> bool:
+    controller = run.payload.get("controller")
+    scene_launch = (
+        controller.get("scene_launch") if isinstance(controller, dict) else None
+    )
+    if not isinstance(scene_launch, dict):
+        return False
+    handling = scene_launch.get("vision_sensor_handling")
+    derived_sha256 = scene_launch.get("derived_scene_sha256")
+    if not isinstance(handling, list) or not isinstance(derived_sha256, str):
+        return False
+    try:
+        int(derived_sha256, 16)
+    except ValueError:
+        return False
+    return (
+        len(derived_sha256) == 64
+        and scene_launch.get("protocol_id")
+        == LOW_DIM_HEADLESS_SCENE_PROTOCOL_ID
+        and scene_launch.get("applied") is True
+        and scene_launch.get("source_scene_sha256")
+        == EXPECTED_UNIMANUAL_BASE_SCENE_SHA256
+        and scene_launch.get("vision_sensor_count")
+        == EXPECTED_UNIMANUAL_BASE_VISION_SENSOR_COUNT
+        and len(handling) == EXPECTED_UNIMANUAL_BASE_VISION_SENSOR_COUNT
+        and all(
+            isinstance(item, dict) and item.get("after") == 1
+            for item in handling
+        )
+        and scene_launch.get("populated_scene_steps_before_patch") == 0
+        and scene_launch.get("camera_observations_requested") is False
+        and scene_launch.get("task_model_loaded_during_rewrite") is False
+        and scene_launch.get("physics_modified") is False
+        and scene_launch.get("task_modified") is False
+        and scene_launch.get("policy_input_modified") is False
+        and scene_launch.get("qt_qpa_platform") == "offscreen"
+    )
+
+
 def _applied_events(run: LocalRun) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     rows = run.payload.get("results")
@@ -431,15 +578,534 @@ def _applied_events(run: LocalRun) -> list[dict[str, Any]]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        scenario_events = row.get("scenario_events")
-        if not isinstance(scenario_events, list):
+        events.extend(_row_applied_events(row))
+    return events
+
+
+def _row_applied_events(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read the shared controller events from either evaluator schema."""
+
+    events: list[dict[str, Any]] = []
+    for key in ("scenario_events", "interventions"):
+        values = row.get(key)
+        if not isinstance(values, list):
             continue
         events.extend(
             event
-            for event in scenario_events
+            for event in values
             if isinstance(event, dict) and event.get("applied") is True
         )
     return events
+
+
+def _expected_v4_root_motion_protocol() -> dict[str, Any]:
+    """Return the complete authenticated preserve-instance v4 contract."""
+
+    return {
+        "protocol_id": PRESERVE_INSTANCE_MOTION_PROTOCOL_ID,
+        "episode_instance_semantics": "preserve_initialized_episode",
+        "goal_object": "task.boundary_root()",
+        "goal_sampling": "scene_workspace_boundary_without_task_reinitialization",
+        "sampling_rollback": "task_configuration_tree_only_live_robot_untouched",
+        "sampling_rollback_frequency": "after_each_attempt_and_outer_finally",
+        "task_configuration_tree_restore_api": "Task.get_state/restore_state",
+        "task_tree_object_count_guard": True,
+        "live_robot_state_during_goal_sampling": "untouched",
+        "live_robot_configuration_tree_access": "none",
+        "online_task_waypoint_validation": "disabled_to_preserve_live_robot_state",
+        "calls_task_validate": False,
+        "grasp_membership_and_parentage_audited": True,
+        "robot_collision_validation": (
+            "reject_candidate_external_pairs_absent_at_source"
+        ),
+        "robot_collision_pair_granularity": (
+            "named_arm_collection_x_external_collidable_scene_shape"
+        ),
+        "source_robot_contacts_allowed": True,
+        "grasped_tool_collision_semantics": (
+            "current_arm_collection_membership_without_task_filters"
+        ),
+        "self_collision_semantics": (
+            "current_arm_collection_members_excluded_matching_all_other"
+        ),
+        "low_dim_state_roundtrip_comparison": (
+            "valid_pose_chunks_sign_invariant_else_scalar_max_abs"
+        ),
+        "low_dim_state_roundtrip_scalar_tolerance": (
+            LOW_DIM_STATE_ROUNDTRIP_ATOL
+        ),
+        "low_dim_state_roundtrip_pose_translation_tolerance_m": (
+            LOW_DIM_POSE_TRANSLATION_TOLERANCE_M
+        ),
+        "low_dim_state_roundtrip_pose_rotation_tolerance_rad": (
+            LOW_DIM_POSE_ROTATION_TOLERANCE_RAD
+        ),
+        "root_application_validation": (
+            "planned_motion_and_actual_motion_and_commanded_pose_reached"
+        ),
+        "root_actual_motion_translation_tolerance_m": (
+            ROOT_ACTUAL_MOTION_TRANSLATION_TOLERANCE_M
+        ),
+        "root_actual_motion_rotation_tolerance_rad": (
+            ROOT_ACTUAL_MOTION_ROTATION_TOLERANCE_RAD
+        ),
+        "root_command_translation_tolerance_m": (
+            ROOT_COMMAND_TRANSLATION_TOLERANCE_M
+        ),
+        "root_command_rotation_tolerance_rad": (
+            ROOT_COMMAND_ROTATION_TOLERANCE_RAD
+        ),
+        "dynamic_state_note": (
+            "the task configuration tree restores task poses and joints and "
+            "resets task dynamics; live robot trees remain untouched; the "
+            "subsequent root-motion intervention resets moved task dynamics"
+        ),
+        "goal_validation": "workspace_fit_no_new_robot_external_collision_pairs",
+        "calls_task_init_episode": False,
+        "calls_scene_kidnap": False,
+        "calls_scene_move_task_smoothly": False,
+        "smooth_schedule": "fractions_1_over_n_through_n_over_n",
+        "smooth_endpoint_validation": "final_goal_pose_reached",
+        "smooth_endpoint_guaranteed": True,
+    }
+
+
+def _finite_nonnegative_number(value: object) -> bool:
+    return _is_number(value) and math.isfinite(float(value)) and float(value) >= 0.0
+
+
+def _collision_pair_keys(
+    value: object,
+    *,
+    expected_arms: frozenset[str],
+) -> tuple[tuple[str, int, str], ...] | None:
+    """Validate and normalize JSON collision-pair evidence."""
+
+    if not isinstance(value, list):
+        return None
+    keys: list[tuple[str, int, str]] = []
+    expected_fields = {
+        "arm",
+        "external_object_handle",
+        "external_object_name",
+    }
+    for row in value:
+        if not isinstance(row, dict) or set(row) != expected_fields:
+            return None
+        arm = row.get("arm")
+        handle = row.get("external_object_handle")
+        name = row.get("external_object_name")
+        if (
+            arm not in expected_arms
+            or not isinstance(handle, int)
+            or isinstance(handle, bool)
+            or handle < 0
+            or not isinstance(name, str)
+            or not name
+        ):
+            return None
+        keys.append((arm, handle, name))
+    if keys != sorted(keys) or len(keys) != len(set(keys)):
+        return None
+    return tuple(keys)
+
+
+def _valid_v4_preservation_evidence(
+    preservation: object,
+    *,
+    expected_arms: frozenset[str],
+    max_sampling_attempts: int,
+) -> bool:
+    if not isinstance(preservation, dict):
+        return False
+    if (
+        preservation.get("initialized_episode_preserved") is not True
+        or preservation.get("task_init_episode_called") is not False
+        or preservation.get("task_validate_called") is not False
+        or preservation.get("low_dim_state_roundtrip_preserved") is not True
+        or preservation.get("condition_and_grasp_registry_identity_preserved")
+        is not True
+        or preservation.get("gripper_grasp_membership_and_parentage_preserved")
+        is not True
+        or preservation.get("task_configuration_tree_restored") is not True
+        or preservation.get("live_robot_state_untouched") is not True
+        or preservation.get("live_robot_configuration_trees_accessed") is not False
+        or preservation.get("waypoint_cache_identity_preserved") is not True
+        or preservation.get("configuration_tree_rollback")
+        != "task_only_after_each_attempt_and_outer_finally"
+        or preservation.get("robot_collision_pair_policy")
+        != "reject_candidate_external_pairs_absent_at_source"
+        or preservation.get("robot_collision_pair_granularity")
+        != "named_arm_collection_x_external_collidable_scene_shape"
+    ):
+        return False
+
+    roundtrip_l2 = preservation.get("low_dim_state_roundtrip_l2")
+    roundtrip_max_abs = preservation.get("low_dim_state_roundtrip_max_abs")
+    comparison_mode = preservation.get(
+        "low_dim_state_roundtrip_comparison_mode"
+    )
+    chunk_count = preservation.get("low_dim_state_roundtrip_chunk_count")
+    max_translation = preservation.get(
+        "low_dim_state_roundtrip_max_translation_m"
+    )
+    max_rotation = preservation.get("low_dim_state_roundtrip_max_rotation_rad")
+    attempts = preservation.get("sampling_attempts")
+    rejected = preservation.get(
+        "sampling_attempts_rejected_for_new_robot_collision_pairs"
+    )
+    if (
+        not _finite_nonnegative_number(roundtrip_l2)
+        or not _finite_nonnegative_number(roundtrip_max_abs)
+        or not isinstance(chunk_count, int)
+        or isinstance(chunk_count, bool)
+        or chunk_count < 0
+        or not isinstance(attempts, int)
+        or isinstance(attempts, bool)
+        or not 1 <= attempts <= max_sampling_attempts
+        or not isinstance(rejected, int)
+        or isinstance(rejected, bool)
+        or not 0 <= rejected < attempts
+    ):
+        return False
+
+    if comparison_mode == "pose_chunks_sign_invariant":
+        if (
+            chunk_count < 1
+            or not _finite_nonnegative_number(max_translation)
+            or not _finite_nonnegative_number(max_rotation)
+            or float(max_translation) > LOW_DIM_POSE_TRANSLATION_TOLERANCE_M
+            or float(max_rotation) > LOW_DIM_POSE_ROTATION_TOLERANCE_RAD
+        ):
+            return False
+    elif comparison_mode == "scalar_max_abs":
+        if (
+            chunk_count != 0
+            or max_translation is not None
+            or max_rotation is not None
+            or float(roundtrip_max_abs) > LOW_DIM_STATE_ROUNDTRIP_ATOL
+        ):
+            return False
+    else:
+        return False
+
+    source_pairs = _collision_pair_keys(
+        preservation.get("source_robot_external_collision_pairs"),
+        expected_arms=expected_arms,
+    )
+    goal_pairs = _collision_pair_keys(
+        preservation.get("goal_robot_external_collision_pairs"),
+        expected_arms=expected_arms,
+    )
+    new_pairs = _collision_pair_keys(
+        preservation.get("goal_new_robot_external_collision_pairs"),
+        expected_arms=expected_arms,
+    )
+    if source_pairs is None or goal_pairs is None or new_pairs is None:
+        return False
+    return (
+        new_pairs == ()
+        and frozenset(goal_pairs).issubset(frozenset(source_pairs))
+        and frozenset(goal_pairs) - frozenset(source_pairs) == frozenset(new_pairs)
+    )
+
+
+def _valid_v4_root_application(
+    event: dict[str, Any],
+    *,
+    required_goal_reached: bool | None,
+) -> bool:
+    numeric_fields = (
+        "planned_root_translation_m",
+        "planned_root_rotation_rad",
+        "actual_root_translation_m",
+        "actual_root_rotation_rad",
+        "commanded_root_translation_residual_m",
+        "commanded_root_rotation_residual_rad",
+        "goal_root_translation_residual_m",
+        "goal_root_rotation_residual_rad",
+    )
+    if any(
+        not _finite_nonnegative_number(event.get(field))
+        for field in numeric_fields
+    ):
+        return False
+
+    planned_translation = float(event["planned_root_translation_m"])
+    planned_rotation = float(event["planned_root_rotation_rad"])
+    actual_translation = float(event["actual_root_translation_m"])
+    actual_rotation = float(event["actual_root_rotation_rad"])
+    commanded_translation = float(event["commanded_root_translation_residual_m"])
+    commanded_rotation = float(event["commanded_root_rotation_residual_rad"])
+    goal_translation = float(event["goal_root_translation_residual_m"])
+    goal_rotation = float(event["goal_root_rotation_residual_rad"])
+    planned_motion = (
+        planned_translation > ROOT_ACTUAL_MOTION_TRANSLATION_TOLERANCE_M
+        or planned_rotation > ROOT_ACTUAL_MOTION_ROTATION_TOLERANCE_RAD
+    )
+    actual_motion = (
+        actual_translation > ROOT_ACTUAL_MOTION_TRANSLATION_TOLERANCE_M
+        or actual_rotation > ROOT_ACTUAL_MOTION_ROTATION_TOLERANCE_RAD
+    )
+    command_reached = (
+        commanded_translation <= ROOT_COMMAND_TRANSLATION_TOLERANCE_M
+        and commanded_rotation <= ROOT_COMMAND_ROTATION_TOLERANCE_RAD
+    )
+    measured_goal_reached = (
+        goal_translation <= ROOT_COMMAND_TRANSLATION_TOLERANCE_M
+        and goal_rotation <= ROOT_COMMAND_ROTATION_TOLERANCE_RAD
+    )
+    return (
+        event.get("planned_root_motion") is True
+        and planned_motion
+        and event.get("actual_root_motion") is True
+        and actual_motion
+        and event.get("commanded_root_pose_reached") is True
+        and command_reached
+        and event.get("goal_root_pose_reached") is measured_goal_reached
+        and (
+            required_goal_reached is None
+            or measured_goal_reached is required_goal_reached
+        )
+        and event.get("protocol_effective") is True
+    )
+
+
+def _valid_v2_root_motion_protocol(run: LocalRun) -> bool:
+    """Authenticate every preserve-instance task-root intervention.
+
+    Rows that terminate with failure before the scheduled trigger are retained
+    but are explicitly ineligible for intervention.  Eligible teleport rows
+    require one event; eligible smooth rows require a strict effective prefix,
+    with the exact endpoint whenever the episode survives the full window.
+    Summary counts are recomputed from those row-level claims so legacy fields
+    or forged pre-trigger exemptions cannot authenticate a run.
+    """
+
+    metadata = _protocol_metadata(run)
+    expected_motion = _expected_v4_root_motion_protocol()
+    if metadata.get("motion_protocol") != expected_motion:
+        return False
+    if metadata.get("dynamic_episode_accounting_schema") != (
+        DYNAMIC_EPISODE_ACCOUNTING_SCHEMA
+    ):
+        return False
+    if (
+        metadata.get("pre_intervention_failure_policy")
+        != "retain_failure_with_null_intervention_effectiveness"
+        or metadata.get("pre_intervention_success_policy")
+        != "fail_closed_unexercised_dynamic_condition"
+        or metadata.get("smooth_terminal_progress_policy")
+        != "strict_effective_prefix_until_episode_terminal"
+    ):
+        return False
+
+    rows = run.payload.get("results")
+    if not isinstance(rows, list) or len(rows) != run.episodes:
+        return False
+    bimanual = run.task.startswith("bimanual_")
+    expected_arms = (
+        frozenset({"right_arm", "left_arm"})
+        if bimanual
+        else frozenset({"arm"})
+    )
+    max_attempts_key = (
+        "max_sampling_attempts" if bimanual else "intervention_max_attempts"
+    )
+    max_sampling_attempts = metadata.get(max_attempts_key)
+    if (
+        not isinstance(max_sampling_attempts, int)
+        or isinstance(max_sampling_attempts, bool)
+        or max_sampling_attempts < 1
+    ):
+        return False
+    expected_smooth_calls = 10
+    if run.scenario == "smooth":
+        smooth_calls_key = (
+            "smooth_interpolation_calls" if bimanual else "smooth_motion_calls"
+        )
+        if metadata.get(smooth_calls_key) != expected_smooth_calls:
+            return False
+
+    trigger_step = metadata.get("trigger_control_step")
+    if (
+        not isinstance(trigger_step, int)
+        or isinstance(trigger_step, bool)
+        or trigger_step < 0
+    ):
+        return False
+
+    event_key = "scenario_events" if bimanual else "interventions"
+    other_event_key = "interventions" if bimanual else "scenario_events"
+    eligible_count = 0
+    preterminal_count = 0
+    intervention_count = 0
+    effective_count = 0
+
+    for row in rows:
+        if not isinstance(row, dict):
+            return False
+        raw_events = row.get(event_key)
+        if (
+            not isinstance(raw_events, list)
+            or other_event_key in row
+            or any(not isinstance(event, dict) for event in raw_events)
+        ):
+            return False
+        events = [
+            event for event in raw_events if event.get("applied") is True
+        ]
+        if len(events) != len(raw_events):
+            return False
+
+        eligible = row.get("intervention_eligible")
+        reached = row.get("intervention_reached")
+        preterminal = row.get("pre_intervention_terminal")
+        effective = row.get("intervention_effective")
+        complete = row.get("intervention_complete")
+        steps = row.get("steps")
+        success = row.get("success")
+        reason = row.get("reason")
+        terminal_reasons = {
+            "success",
+            "terminate",
+            "policy_complete",
+            "primary_action_retry_exhausted",
+            "noop_failed",
+            "horizon",
+        }
+        if (
+            row.get("trigger_step") != trigger_step
+            or not isinstance(eligible, bool)
+            or not isinstance(reached, bool)
+            or not isinstance(preterminal, bool)
+            or eligible is not reached
+            or preterminal is reached
+            or not isinstance(steps, int)
+            or isinstance(steps, bool)
+            or steps < 0
+            or not isinstance(success, bool)
+            or reason not in terminal_reasons
+            or success is not (reason == "success")
+        ):
+            return False
+
+        if preterminal:
+            preterminal_count += 1
+            if (
+                events
+                or effective is not None
+                or complete is not None
+                or success is not False
+                or steps > trigger_step
+            ):
+                return False
+            continue
+
+        eligible_count += 1
+        if effective is not True or not events:
+            return False
+        intervention_count += 1
+        effective_count += 1
+        if run.scenario == "teleport":
+            if len(events) != 1 or complete is not True:
+                return False
+        elif run.scenario == "smooth":
+            if not 1 <= len(events) <= expected_smooth_calls:
+                return False
+            expected_complete = len(events) == expected_smooth_calls
+            if complete is not expected_complete:
+                return False
+            if not expected_complete:
+                last_event_step = trigger_step + len(events) - 1
+                if steps not in {last_event_step, last_event_step + 1}:
+                    return False
+        else:
+            return False
+        for event in events:
+            event_motion = event.get("motion_protocol")
+            preservation = event.get("instance_preservation")
+            if (
+                not isinstance(event.get("step"), int)
+                or isinstance(event.get("step"), bool)
+                or not isinstance(event.get("trigger_step"), int)
+                or isinstance(event.get("trigger_step"), bool)
+                or event_motion != expected_motion
+                or event.get("policy_observation_refreshed") is not True
+                or not _valid_v4_preservation_evidence(
+                    preservation,
+                    expected_arms=expected_arms,
+                    max_sampling_attempts=max_sampling_attempts,
+                )
+            ):
+                return False
+        if steps < events[-1]["step"]:
+            return False
+        if any(
+            event.get("instance_preservation")
+            != events[0].get("instance_preservation")
+            for event in events[1:]
+        ):
+            return False
+        if run.scenario == "teleport":
+            event = events[0]
+            if (
+                event.get("kind") != "teleport_task"
+                or event.get("step") != trigger_step
+                or event.get("trigger_step") != trigger_step
+                or not _valid_v4_root_application(
+                    event,
+                    required_goal_reached=True,
+                )
+            ):
+                return False
+        if run.scenario == "smooth":
+            for index, event in enumerate(events, start=1):
+                fraction = index / expected_smooth_calls
+                expected_endpoint = index == expected_smooth_calls
+                complete = event.get("complete")
+                endpoint_applied = event.get("endpoint_applied")
+                if (
+                    event.get("kind") != "smooth_task_motion"
+                    or event.get("step") != trigger_step + index - 1
+                    or event.get("trigger_step") != trigger_step
+                    or not isinstance(event.get("smooth_call"), int)
+                    or isinstance(event.get("smooth_call"), bool)
+                    or event.get("smooth_call") != index
+                    or not _is_number(event.get("endpoint_fraction"))
+                    or not math.isfinite(float(event["endpoint_fraction"]))
+                    or abs(float(event["endpoint_fraction"]) - fraction) > 1.0e-12
+                    or not isinstance(complete, bool)
+                    or complete is not expected_endpoint
+                    or not isinstance(endpoint_applied, bool)
+                    or endpoint_applied is not expected_endpoint
+                    or not _valid_v4_root_application(
+                        event,
+                        required_goal_reached=(True if expected_endpoint else None),
+                    )
+                ):
+                    return False
+
+    all_episodes_intervened = intervention_count == run.episodes
+    all_interventions_effective = effective_count == intervention_count
+    all_eligible_effective = effective_count == eligible_count
+    all_rows_covered = eligible_count + preterminal_count == run.episodes
+    return (
+        all_rows_covered
+        and metadata.get("protocol_valid") is True
+        and metadata.get("episodes_intervention_eligible") == eligible_count
+        and metadata.get("episodes_pre_intervention_terminal")
+        == preterminal_count
+        and metadata.get("episodes_with_intervention") == intervention_count
+        and metadata.get("episodes_with_effective_intervention")
+        == effective_count
+        and metadata.get("all_episodes_intervened")
+        is all_episodes_intervened
+        and metadata.get("all_interventions_effective")
+        is all_interventions_effective
+        and metadata.get("all_eligible_interventions_effective")
+        is all_eligible_effective
+    )
 
 
 def _numeric_event_values(events: Sequence[dict[str, Any]], key: str) -> list[float]:
@@ -467,44 +1133,35 @@ def _material_protocol_note(cell: PaperCell, run: LocalRun | None) -> str:
     root_values = _numeric_event_values(events, "root_pose_l2")
     state_median = _median(state_values)
     root_median = _median(root_values)
-    state_max = max(state_values) if state_values else None
-    root_max = max(root_values) if root_values else None
-    if cell.task == "StoreBottle":
-        if state_median is None:
-            return "Material evidence unavailable; public static-workspace kidnap() reinitializes task objects."
-        return (
-            f"Material object-state change (median task-state L2 {state_median:.3f}), "
-            "but task-root motion is zero; public static-workspace kidnap() "
-            "reinitializes the task."
-        )
-    if cell.task == "HandOver":
-        state_text = "unknown" if state_median is None else f"{state_median:.3f}"
-        return (
-            f"Material episode reinitialization (median task-state L2 {state_text}; "
-            "task-root motion zero); public kidnap() can release an already-grasped "
-            "item, so this is not the paper intervention."
-        )
-    if cell.task == "SweepDust":
-        state_text = "unknown" if state_max is None else f"{state_max:.2e}"
-        root_text = "unknown" if root_max is None else f"{root_max:.2e}"
-        return (
-            f"No material candidate/root motion (maximum task-state L2 {state_text}; "
-            f"maximum root-pose L2 {root_text}); the upstream 1e-9 effectiveness "
-            "flag is only numerically true."
-        )
-    if cell.task == "LiftTray":
-        root_text = "unknown" if root_median is None else f"{root_median:.3f}"
-        metadata = _protocol_metadata(run)
-        effective = metadata.get("episodes_with_effective_intervention")
-        effective_text = "unknown" if not isinstance(effective, int) else str(effective)
-        return (
-            f"Material task-root motion (median root-pose L2 {root_text}; "
-            f"{effective_text}/{run.episodes} interventions effective)."
-        )
-    return ""
+    state_text = "unknown" if state_median is None else f"{state_median:.3f}"
+    root_text = "unknown" if root_median is None else f"{root_median:.3f}"
+    metadata = _protocol_metadata(run)
+    effective = metadata.get("episodes_with_effective_intervention")
+    effective_text = "unknown" if not isinstance(effective, int) else str(effective)
+    eligible = metadata.get("episodes_intervention_eligible")
+    eligible_text = "unknown" if not isinstance(eligible, int) else str(eligible)
+    preterminal = metadata.get("episodes_pre_intervention_terminal")
+    preterminal_text = (
+        "unknown" if not isinstance(preterminal, int) else str(preterminal)
+    )
+    motion = metadata.get("motion_protocol")
+    motion_id = motion.get("protocol_id") if isinstance(motion, dict) else "unknown"
+    return (
+        f"Task-root intervention (median root-pose L2 {root_text}; median task-state "
+        f"L2 {state_text}; {effective_text}/{eligible_text} eligible episodes "
+        f"effective; {preterminal_text} failures ended before the trigger; "
+        f"protocol {motion_id})."
+    )
 
 
-def _status(cell: PaperCell, run: LocalRun | None) -> str:
+def _status(
+    cell: PaperCell,
+    run: LocalRun | None,
+    expected_training_config: dict[str, Any] | None = EXPECTED_LOCAL_CONFIG,
+    expected_evaluation_protocol_ids: dict[str, str] | None = (
+        EXPECTED_RELEASE_EVALUATION_PROTOCOL_IDS[DEFAULT_RELEASE]
+    ),
+) -> str:
     if cell.unavailable_reason:
         return "unavailable"
     if cell.table == "IV":
@@ -513,12 +1170,27 @@ def _status(cell: PaperCell, run: LocalRun | None) -> str:
         if cell.stopped_reason:
             return "stopped after 0% preliminary run"
         return "pending"
-    identity_rank = _model_identity_rank(run)
+    identity_rank = _model_identity_rank(
+        run,
+        expected_training_config,
+        expected_evaluation_protocol_ids,
+    )
     if identity_rank == 2:
         return "historical pre-fix result"
     if identity_rank == 1:
         return "configuration-mismatch diagnostic"
     metadata = _protocol_metadata(run)
+    uses_v2_config = expected_training_config == EXPECTED_RELEASE_CONFIGS["v2"]
+    root_motion_cell = (
+        (cell.table == "I" and cell.condition != "Static")
+        or (cell.table == "III" and cell.condition == "Dynamic environment")
+    )
+    if uses_v2_config and cell.table == "I":
+        if not _valid_v2_unimanual_scene_launch(run):
+            return "invalid diagnostic"
+    if uses_v2_config and root_motion_cell:
+        if not _valid_v2_root_motion_protocol(run):
+            return "invalid diagnostic"
     if metadata.get("protocol_valid") is False:
         return "invalid diagnostic"
     # Static Table I has the same interpretation boundary as static Table II:
@@ -553,6 +1225,8 @@ def build_records(
     else:
         discovery_root = results_dir
     runs, warnings = discover_runs(discovery_root)
+    expected_training_config = _expected_training_config(release)
+    expected_protocol_ids = _expected_evaluation_protocol_ids(release)
     records: list[dict[str, Any]] = []
     for cell in PAPER_CELLS:
         run = _select_run(
@@ -562,6 +1236,8 @@ def build_records(
             seed=seed,
             episodes=episodes,
             horizon=horizon,
+            expected_training_config=expected_training_config,
+            expected_evaluation_protocol_ids=expected_protocol_ids,
         )
         source = None
         if run is not None:
@@ -579,7 +1255,12 @@ def build_records(
                 "difference": run.success_rate - cell.paper_rate if run is not None else None,
                 "local_successes": run.successes if run is not None else None,
                 "local_episodes": run.episodes if run is not None else None,
-                "status": _status(cell, run),
+                "status": _status(
+                    cell,
+                    run,
+                    expected_training_config,
+                    expected_protocol_ids,
+                ),
                 "source_file": source,
                 "notes": (
                     cell.unavailable_reason
@@ -632,8 +1313,10 @@ def build_document(
     horizon: int,
     release: str | None = None,
 ) -> dict[str, Any]:
+    expected_training_config = _expected_training_config(release)
+    expected_protocol_ids = _expected_evaluation_protocol_ids(release)
     return {
-        "schema": "dynamac-paper-comparison-v1",
+        "schema": "dynamac-paper-comparison-v2",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "paper_reference": PAPER_REFERENCE,
         "selection": {
@@ -641,6 +1324,13 @@ def build_document(
             "seed": seed,
             "episodes": episodes,
             "horizon": horizon,
+            "expected_model_identity": {
+                "model_schema_version": EXPECTED_MODEL_SCHEMA_VERSION,
+                "selection_semantics_id": EXPECTED_SELECTION_SEMANTICS_ID,
+                "tapas_reference_commit": EXPECTED_TAPAS_COMMIT,
+                "training_config": expected_training_config,
+                "evaluation_protocol_ids": expected_protocol_ids,
+            },
         },
         "status_definitions": {
             "local reproduction": "Same paper cell, independent local demonstrations/configuration.",
@@ -788,7 +1478,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--release",
         default=DEFAULT_RELEASE,
-        help="Version directory below results-dir to select (default: v1).",
+        help=f"Version directory below results-dir to select (default: {DEFAULT_RELEASE}).",
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--episodes", type=int, default=200)
@@ -796,17 +1486,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--markdown-output",
         type=Path,
-        default=DEFAULT_RESULTS_DIR / "paper_comparison.md",
+        default=DEFAULT_OUTPUT_DIR / "paper_comparison.md",
     )
     parser.add_argument(
         "--csv-output",
         type=Path,
-        default=DEFAULT_RESULTS_DIR / "paper_comparison.csv",
+        default=DEFAULT_OUTPUT_DIR / "paper_comparison.csv",
     )
     parser.add_argument(
         "--json-output",
         type=Path,
-        default=DEFAULT_RESULTS_DIR / "paper_comparison.json",
+        default=DEFAULT_OUTPUT_DIR / "paper_comparison.json",
     )
     return parser
 

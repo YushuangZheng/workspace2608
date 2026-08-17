@@ -17,6 +17,7 @@ import shutil
 import sys
 import tempfile
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -44,12 +45,15 @@ DEFAULT_DATA_ROOT = (
     / "dynamac_table_ii_g5_a51b4e_128x128_seed0_20260811"
     / "stage_5_demos"
 )
-# The literal paper configuration fails when strict Eq. (6) thresholding leaves
-# no selected frame.  The executable local protocol keeps the tied numerical
-# argmax only in that otherwise undefined case; every checkpoint records this
-# choice in its serialized configuration.
+# The executable v2 protocol keeps the tied numerical argmax when strict Eq. (6)
+# thresholding leaves no frame and evaluates Eq. (6) in the same weighted
+# subspace as Eq. (5). Every checkpoint records both choices in its serialized
+# configuration; the archived v1 configuration remains a separate file.
 DEFAULT_CONFIG = INTEGRATION_ROOT / "configs" / "dynamac_rlbench_local.json"
-DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v1"
+DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v2"
+POLICY_CLOCK_SEMANTICS_ID = (
+    "policy-tick-transaction-commit-on-primary-action-success-v1"
+)
 
 
 def _episode_number(path: Path) -> tuple[int, str]:
@@ -316,6 +320,49 @@ class PolicyServer:
                 "training_config": manifest.get("config") if manifest_authenticated else None,
             }
         )
+        self._pending_transaction: dict[str, Any] | None = None
+        self._next_transaction_id = 1
+
+    def _capture_runtime(self) -> Any:
+        """Capture all mutable policy state before one tentative prediction."""
+
+        if not self.bimanual:
+            return self.policy._capture_runtime_state()
+        return {
+            "left": self.policy.left._capture_runtime_state(),
+            "right": self.policy.right._capture_runtime_state(),
+            "last_left_action": deepcopy(self.policy._last_left_action),
+            "last_right_action": deepcopy(self.policy._last_right_action),
+        }
+
+    def _restore_runtime(self, state: Any) -> None:
+        if not self.bimanual:
+            self.policy._restore_runtime_state(state)
+            return
+        self.policy.left._restore_runtime_state(state["left"])
+        self.policy.right._restore_runtime_state(state["right"])
+        self.policy._last_left_action = deepcopy(state["last_left_action"])
+        self.policy._last_right_action = deepcopy(state["last_right_action"])
+
+    def _resolve_transaction(self, request: dict[str, Any], *, commit: bool) -> dict[str, Any]:
+        pending = self._pending_transaction
+        if pending is None:
+            raise RuntimeError("no policy action is awaiting commit or abort")
+        transaction_id = request.get("transaction_id")
+        if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
+            raise RuntimeError("policy transaction id must be an integer")
+        if transaction_id != pending["transaction_id"]:
+            raise RuntimeError("policy transaction id does not match the pending action")
+        if not commit:
+            self._restore_runtime(pending["runtime"])
+        self._pending_transaction = None
+        return {
+            "ok": True,
+            "transaction_id": transaction_id,
+            "committed": bool(commit),
+            "aborted": bool(not commit),
+            "complete": self.policy.complete,
+        }
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
         command = request.get("command")
@@ -334,34 +381,70 @@ class PolicyServer:
                 "bimanual": self.bimanual,
                 "policy_steps": policy_steps,
                 "model_identity": self.model_identity,
+                "policy_clock_semantics_id": POLICY_CLOCK_SEMANTICS_ID,
             }
         if command == "close":
+            if self._pending_transaction is not None:
+                self._restore_runtime(self._pending_transaction["runtime"])
+                self._pending_transaction = None
             return {"ok": True, "closed": True}
+        if command == "commit":
+            return self._resolve_transaction(request, commit=True)
+        if command == "abort":
+            return self._resolve_transaction(request, commit=False)
         if command not in {"reset", "act"}:
-            raise ValueError("command must be ping, reset, act, or close")
+            raise ValueError("command must be ping, reset, act, commit, abort, or close")
         observation = _WireObservation(request["observation"])
         if self.bimanual:
             left, right = bimanual_observations_from_rlbench(observation, self.task)
             if command == "reset":
+                if self._pending_transaction is not None:
+                    self._restore_runtime(self._pending_transaction["runtime"])
+                    self._pending_transaction = None
                 self.policy.reset(left, right, mode_strategy="map")
                 return {"ok": True, "complete": self.policy.complete}
+            if self._pending_transaction is not None:
+                raise RuntimeError("the previous policy action still awaits commit or abort")
             if self.policy.complete:
                 return {"ok": True, "complete": True, "action": None}
-            action = self.policy.act(left, right)
+            runtime = self._capture_runtime()
+            try:
+                action = self.policy.act(left, right)
+            except Exception:
+                self._restore_runtime(runtime)
+                raise
             wire_action = bimanual_action_to_rlbench(action).tolist()
         else:
             current = unimanual_observation_from_rlbench(observation, self.task)
             if command == "reset":
+                if self._pending_transaction is not None:
+                    self._restore_runtime(self._pending_transaction["runtime"])
+                    self._pending_transaction = None
                 self.policy.reset(current, mode_strategy="map")
                 return {"ok": True, "complete": self.policy.complete}
+            if self._pending_transaction is not None:
+                raise RuntimeError("the previous policy action still awaits commit or abort")
             if self.policy.complete:
                 return {"ok": True, "complete": True, "action": None}
-            action = self.policy.act(current)
+            runtime = self._capture_runtime()
+            try:
+                action = self.policy.act(current)
+            except Exception:
+                self._restore_runtime(runtime)
+                raise
             wire_action = unimanual_action_to_rlbench(action).tolist()
+        transaction_id = self._next_transaction_id
+        self._next_transaction_id += 1
+        self._pending_transaction = {
+            "transaction_id": transaction_id,
+            "runtime": runtime,
+        }
         return {
             "ok": True,
             "complete": self.policy.complete,
+            "complete_after_commit": self.policy.complete,
             "action": wire_action,
+            "transaction_id": transaction_id,
         }
 
 

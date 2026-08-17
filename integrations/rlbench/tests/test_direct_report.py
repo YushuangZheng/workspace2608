@@ -5,6 +5,12 @@ import json
 import pytest
 
 from integrations.rlbench.rlbench_dynamac.direct_report import TASKS, load_rows, markdown
+from integrations.rlbench.rlbench_dynamac.paper_comparison import (
+    EXPECTED_LOCAL_CONFIG,
+    EXPECTED_SELECTION_SEMANTICS_ID,
+    EXPECTED_TAPAS_COMMIT,
+    expected_evaluation_protocol_id,
+)
 
 
 def _write_results(tmp_path, *, seed: int = 0) -> None:
@@ -17,6 +23,16 @@ def _write_results(tmp_path, *, seed: int = 0) -> None:
             "horizon": 1000,
             "successes": 1,
             "success_rate": 0.5,
+            "evaluation_protocol_id": expected_evaluation_protocol_id(task),
+            "model_identity": {
+                "manifest_authenticated": True,
+                "training_config": EXPECTED_LOCAL_CONFIG,
+                "model_schema_version": 13,
+                "selection_semantics_id": EXPECTED_SELECTION_SEMANTICS_ID,
+                "tapas_reference_commit": EXPECTED_TAPAS_COMMIT,
+                "left_fingerprint": f"{task}-left",
+                "right_fingerprint": f"{task}-right",
+            },
             "results": [
                 {
                     "episode": 0,
