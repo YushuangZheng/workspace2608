@@ -48,6 +48,11 @@ LOCAL_MODEL_CONFIG = (
     / "configs"
     / "dynamac_rlbench_local.json"
 )
+V1_MODEL_CONFIG = (
+    Path(__file__).resolve().parents[1]
+    / "configs"
+    / "dynamac_rlbench_v1.json"
+)
 TABLE_I_DATA_ROOT = (
     Path(__file__).resolve().parents[1]
     / "data"
@@ -179,16 +184,30 @@ def test_author_aligned_model_config_loads_in_the_current_core() -> None:
     assert config.covariance_estimation_method == "diagonal_empirical_ridge"
 
 
-def test_local_experiment_config_only_completes_empty_eq6_selection() -> None:
+def test_v1_experiment_config_only_completed_empty_eq6_selection() -> None:
     paper = json.loads(AUTHOR_MODEL_CONFIG.read_text(encoding="utf-8"))
-    local = json.loads(LOCAL_MODEL_CONFIG.read_text(encoding="utf-8"))
+    v1 = json.loads(V1_MODEL_CONFIG.read_text(encoding="utf-8"))
 
     assert paper["eq6_empty_selection"] == "error"
-    assert local["eq6_empty_selection"] == "keep_argmax"
+    assert v1["eq6_empty_selection"] == "keep_argmax"
     assert {
         key: value for key, value in paper.items() if key != "eq6_empty_selection"
     } == {
-        key: value for key, value in local.items() if key != "eq6_empty_selection"
+        key: value for key, value in v1.items() if key != "eq6_empty_selection"
+    }
+
+
+def test_v2_experiment_config_uses_eq5_weighted_position_scope_for_eq6() -> None:
+    v1 = json.loads(V1_MODEL_CONFIG.read_text(encoding="utf-8"))
+    v2 = json.loads(LOCAL_MODEL_CONFIG.read_text(encoding="utf-8"))
+
+    assert v1["eq6_covariance_scope"] == "full_pose"
+    assert v2["eq6_covariance_scope"] == "eq5_weighted_subspace"
+    assert (v2["eq5_position_weight"], v2["eq5_rotation_weight"]) == (1.0, 0.0)
+    assert {
+        key: value for key, value in v1.items() if key != "eq6_covariance_scope"
+    } == {
+        key: value for key, value in v2.items() if key != "eq6_covariance_scope"
     }
 
 

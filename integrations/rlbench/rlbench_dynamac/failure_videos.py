@@ -26,14 +26,12 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from . import direct_evaluate, unimanual_evaluate
+from . import direct_evaluate, table_iii_coordination, unimanual_evaluate
 from .records import atomic_json
 
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v1"
-DEFAULT_OUTPUT_ROOT = (
-    INTEGRATION_ROOT / "results" / "failure_videos" / "v1"
-)
+DEFAULT_OUTPUT_ROOT = INTEGRATION_ROOT / "results" / "failure_videos" / "v1"
 DEFAULT_SOURCE_RESULTS = {
     "bimanual_handover_item": (
         INTEGRATION_ROOT
@@ -49,6 +47,13 @@ DEFAULT_SOURCE_RESULTS = {
         / "table_ii"
         / "bimanual_sweep_to_dustpan_static_seed0_n200_h1000.json"
     ),
+    "bimanual_lift_tray": (
+        INTEGRATION_ROOT
+        / "results"
+        / "v1"
+        / "table_ii"
+        / "bimanual_lift_tray_static_seed0_n200_h1000.json"
+    ),
     "wipe_desk": (
         INTEGRATION_ROOT
         / "results"
@@ -57,10 +62,13 @@ DEFAULT_SOURCE_RESULTS = {
         / "wipe_desk_static_variation0_seed0_n200_h1000.json"
     ),
 }
-BIMANUAL_TASKS = {
-    "bimanual_handover_item",
-    "bimanual_sweep_to_dustpan",
+BIMANUAL_TASKS = set(direct_evaluate.TASKS)
+SUPPORTED_TASKS = set(unimanual_evaluate.TASKS) | BIMANUAL_TASKS
+COORDINATION_SCHEMAS = {
+    "dynamac-table-iii-coordination-local-v1",
+    "dynamac-table-iii-coordination-local-v2",
 }
+SCENARIOS = {"static", "smooth", "teleport"}
 DEFAULT_CAMERAS = ("front", "overhead")
 SCHEMA = "dynamac-confirmed-failure-videos-v1"
 
@@ -92,24 +100,63 @@ def _normalize_episode_indices(values):
     return tuple(result)
 
 
+def _source_family(payload, task):
+    if payload.get("schema") in COORDINATION_SCHEMAS:
+        return "coordination"
+    if task in BIMANUAL_TASKS:
+        return "bimanual"
+    if task in unimanual_evaluate.TASKS:
+        return "unimanual"
+    raise ValueError(f"unsupported replay task: {task!r}")
+
+
+def _require_current_evaluator_protocol(payload, task):
+    """Fail closed instead of replaying an archived run with new semantics."""
+
+    family = _source_family(payload, task)
+    expected = (
+        unimanual_evaluate.EVALUATION_PROTOCOL_ID
+        if family == "unimanual"
+        else direct_evaluate.EVALUATION_PROTOCOL_ID
+    )
+    actual = payload.get("evaluation_protocol_id")
+    if actual != expected:
+        raise RuntimeError(
+            "source evaluation protocol does not match the current replay evaluator: "
+            f"source={actual!r}, current={expected!r}. Use a protocol-matched "
+            "archived runner or regenerate the evaluation before recording."
+        )
+    return expected
+
+
+def _source_policy_task(payload):
+    return payload.get("policy_task_alias") or payload.get("task")
+
+
 def _load_source(path, task, episode_indices):
     source_path = Path(path).resolve()
     raw = source_path.read_bytes()
     payload = json.loads(raw.decode("utf-8"))
-    if payload.get("task") != task:
+    if _source_policy_task(payload) != task:
         raise ValueError(
-            f"source task {payload.get('task')!r} does not match requested {task!r}"
+            f"source policy task {_source_policy_task(payload)!r} does not match requested {task!r}"
         )
-    if payload.get("scenario") != "static":
-        raise ValueError("failure-video replay currently accepts static results only")
+    family = _source_family(payload, task)
+    scenario = payload.get("scenario")
+    if family == "coordination":
+        if scenario not in {"coordination_hand_left", "coordination_hand_right"}:
+            raise ValueError("coordination source has an unsupported scenario")
+        protocol = payload.get("coordination_protocol")
+        if not isinstance(protocol, dict) or not protocol.get("protocol_valid"):
+            raise ValueError("coordination source has no valid protocol")
+    elif scenario not in SCENARIOS:
+        raise ValueError(f"source evaluation has an unsupported scenario: {scenario!r}")
     if not isinstance(payload.get("seed"), int) or payload["seed"] < 0:
         raise ValueError("source evaluation has an invalid seed")
     if not isinstance(payload.get("horizon"), int) or payload["horizon"] < 1:
         raise ValueError("source evaluation has an invalid horizon")
     model_identity = payload.get("model_identity")
-    if not isinstance(model_identity, dict) or not model_identity.get(
-        "manifest_authenticated"
-    ):
+    if not isinstance(model_identity, dict) or not model_identity.get("manifest_authenticated"):
         raise ValueError("source evaluation is not bound to an authenticated model")
     rows = payload.get("results")
     if not isinstance(rows, list):
@@ -226,8 +273,7 @@ class _FFmpegWriter:
         return_code = self._process.wait()
         if return_code != 0:
             raise RuntimeError(
-                f"ffmpeg exited with code {return_code}: "
-                f"{error.decode(errors='replace')}"
+                f"ffmpeg exited with code {return_code}: {error.decode(errors='replace')}"
             )
         if self.frames < 1 or not self.path.is_file():
             raise RuntimeError("ffmpeg did not produce a video")
@@ -312,7 +358,42 @@ class RecordingTaskEnvironment:
         return observation, reward, terminate
 
 
-def _validate_replay(original, replay, source_identity, loaded_identity):
+def _protocol_effective(source, replay):
+    family = _source_family(source, _source_policy_task(source))
+    if family == "coordination":
+        return int(replay.get("perturbed_steps", 0)) > 0
+    if source.get("scenario") == "static":
+        return True
+    events = (
+        replay.get("scenario_events", [])
+        if family == "bimanual"
+        else replay.get("interventions", [])
+    )
+    effective = [
+        event
+        for event in events
+        if event.get("applied") and event.get("protocol_effective") is True
+    ]
+    if source.get("scenario") != "smooth":
+        return bool(effective)
+
+    protocol = (
+        source.get("scenario_protocol", {}) if family == "bimanual" else source.get("protocol", {})
+    )
+    expected_calls = protocol.get(
+        "smooth_interpolation_calls",
+        protocol.get("smooth_motion_calls", 10),
+    )
+    expected_calls = 10 if expected_calls is None else int(expected_calls)
+    return (
+        len(events) == expected_calls
+        and len(effective) == expected_calls
+        and events[-1].get("complete") is True
+        and events[-1].get("endpoint_applied") is True
+    )
+
+
+def _validate_replay(original, replay, source_identity, loaded_identity, source=None):
     if loaded_identity != source_identity:
         raise RuntimeError("loaded model identity differs from the source evaluation")
     if bool(original.get("success")):
@@ -324,11 +405,25 @@ def _validate_replay(original, replay, source_identity, loaded_identity):
         )
     if replay.get("episode") != original.get("episode"):
         raise RuntimeError("replay episode identity differs from the source row")
-    return {
+    if int(replay.get("invalid_actions", 0)) != int(original.get("invalid_actions", 0)):
+        raise RuntimeError(
+            f"episode {original.get('episode')} changed its invalid-action count; "
+            "no failure video will be published"
+        )
+    if source is not None and not _protocol_effective(source, replay):
+        raise RuntimeError(
+            f"episode {original.get('episode')} did not reproduce the source "
+            "condition; no failure video will be published"
+        )
+    confirmation = {
         "replay_confirmed_failure": True,
         "same_reason": replay.get("reason") == original.get("reason"),
         "same_steps": replay.get("steps") == original.get("steps"),
+        "same_invalid_actions": True,
     }
+    if source is not None:
+        confirmation["source_condition_reproduced"] = _protocol_effective(source, replay)
+    return confirmation
 
 
 def _observation_config(cameras, resolution):
@@ -353,34 +448,73 @@ def _observation_config(cameras, resolution):
 
 
 def _run_selected_episode(task_environment, worker, task, source, episode):
-    if task in BIMANUAL_TASKS:
+    family = _source_family(source, task)
+    if family == "coordination":
+        protocol = source["coordination_protocol"]
+        trigger = protocol.get("trigger_evaluator_control_step")
+        if trigger is None:
+            trigger = protocol["trigger_policy_step"]
+        return table_iii_coordination._run_episode(
+            task_environment,
+            worker,
+            episode=episode,
+            seed=source["seed"],
+            horizon=source["horizon"],
+            arm=protocol["perturbed_arm"],
+            trigger=int(trigger),
+        )
+    if family == "bimanual":
+        protocol = source.get("scenario_protocol", {})
+        scenario_steps = protocol.get("smooth_interpolation_calls")
         return direct_evaluate._run_episode(
             task_environment,
             worker,
             episode,
             source["seed"],
             source["horizon"],
-            scenario="static",
-            scenario_reference_steps=worker.policy_steps,
+            scenario=source["scenario"],
+            scenario_trigger_fraction=protocol.get(
+                "trigger_fraction_of_nominal_policy_length",
+                protocol.get("trigger_fraction", 1.0 / 3.0),
+            ),
+            scenario_reference_steps=protocol.get("trigger_reference_steps", worker.policy_steps),
+            scenario_steps=10 if scenario_steps is None else int(scenario_steps),
+            scenario_max_attempts=protocol.get("max_sampling_attempts", 20),
         )
+    protocol = source.get("protocol", {})
     run_args = SimpleNamespace(
         seed=source["seed"],
         variation=source.get("variation", 0),
         horizon=source["horizon"],
-        scenario="static",
-        trigger_fraction=1.0 / 3.0,
-        smooth_steps=10,
-        intervention_attempts=20,
+        scenario=source["scenario"],
+        trigger_fraction=protocol.get(
+            "trigger_fraction_of_nominal_policy_length",
+            protocol.get("trigger_fraction_of_fitted_policy", 1.0 / 3.0),
+        ),
+        smooth_steps=protocol.get("smooth_motion_calls", 10),
+        intervention_attempts=protocol.get("intervention_max_attempts", 20),
     )
-    return unimanual_evaluate._run_episode(
-        task_environment, worker, run_args, episode
-    )
+    return unimanual_evaluate._run_episode(task_environment, worker, run_args, episode)
 
 
-def _runtime_components(args):
+def _runtime_components(args, source):
     from rlbench.environment import Environment
 
-    if args.task in BIMANUAL_TASKS:
+    family = _source_family(source, args.task)
+    if family == "coordination":
+        module_name = table_iii_coordination.TASK_MODULE
+        class_name = table_iii_coordination.TASK_CLASS
+        action_mode = direct_evaluate._make_action_mode()
+        environment = Environment(
+            action_mode=action_mode,
+            obs_config=_observation_config(args.cameras, args.resolution),
+            headless=args.headless,
+            robot_setup="dual_panda",
+        )
+        worker_class = direct_evaluate.PolicyProcess
+        default_python = table_iii_coordination.DEFAULT_POLICY_PYTHON
+        default_models_dir = table_iii_coordination.DEFAULT_MODELS_DIR
+    elif family == "bimanual":
         module_name, class_name = direct_evaluate.TASKS[args.task]
         action_mode = direct_evaluate._make_action_mode()
         environment = Environment(
@@ -391,6 +525,7 @@ def _runtime_components(args):
         )
         worker_class = direct_evaluate.PolicyProcess
         default_python = direct_evaluate.DEFAULT_POLICY_PYTHON
+        default_models_dir = DEFAULT_MODELS_DIR
     else:
         module_name, class_name = unimanual_evaluate.TASKS[args.task]
         action_mode = unimanual_evaluate._make_action_mode()
@@ -401,43 +536,54 @@ def _runtime_components(args):
         )
         worker_class = unimanual_evaluate.PolicyProcess
         default_python = unimanual_evaluate.DEFAULT_POLICY_PYTHON
+        default_models_dir = DEFAULT_MODELS_DIR
     task_class = getattr(importlib.import_module(module_name), class_name)
     policy_python = args.policy_python or default_python
+    models_dir = args.models_dir or default_models_dir
     worker = worker_class(
         policy_python,
         args.task,
-        args.models_dir,
+        models_dir,
         timeout=args.policy_timeout,
     )
     return environment, worker, task_class
 
 
+def _default_output_key(source, task):
+    scenario = source["scenario"]
+    return task if scenario == "static" else f"{task}_{scenario}"
+
+
+def _validate_output_key(value):
+    if not value or any(
+        character not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for character in value
+    ):
+        raise ValueError("--output-key must contain only lowercase letters, digits, '_' or '-'")
+    return value
+
+
 def record(args):
     episodes = _normalize_episode_indices(args.episode)
-    minimum_confirmed = (
-        len(episodes) if args.minimum_confirmed is None else args.minimum_confirmed
-    )
+    minimum_confirmed = len(episodes) if args.minimum_confirmed is None else args.minimum_confirmed
     if minimum_confirmed < 1 or minimum_confirmed > len(episodes):
-        raise ValueError(
-            "--minimum-confirmed must be between one and the number of candidates"
-        )
-    source_path = args.source_result or DEFAULT_SOURCE_RESULTS[args.task]
-    source, originals, source_sha, resolved_source = _load_source(
-        source_path, args.task, episodes
-    )
-    target = Path(args.output_root).resolve() / args.task
+        raise ValueError("--minimum-confirmed must be between one and the number of candidates")
+    source_path = args.source_result or DEFAULT_SOURCE_RESULTS.get(args.task)
+    if source_path is None:
+        raise ValueError(f"--source-result is required because {args.task!r} has no default")
+    source, originals, source_sha, resolved_source = _load_source(source_path, args.task, episodes)
+    replay_protocol_id = _require_current_evaluator_protocol(source, args.task)
+    output_key = _validate_output_key(args.output_key or _default_output_key(source, args.task))
+    target = Path(args.output_root).resolve() / output_key
     if target.exists():
         raise FileExistsError(f"refusing to overwrite failure videos: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(
-        tempfile.mkdtemp(prefix=f".{args.task}.staging-", dir=str(target.parent))
-    )
+    staging = Path(tempfile.mkdtemp(prefix=f".{output_key}.staging-", dir=str(target.parent)))
     environment = worker = None
     launched = False
     manifest_rows = []
     attempts = []
     try:
-        environment, worker, task_class = _runtime_components(args)
+        environment, worker, task_class = _runtime_components(args, source)
         if worker.model_identity != source["model_identity"]:
             raise RuntimeError("loaded model identity differs from the source evaluation")
         environment.launch()
@@ -455,9 +601,7 @@ def record(args):
             )
             proxy = RecordingTaskEnvironment(task_environment, recorder)
             try:
-                replay = _run_selected_episode(
-                    proxy, worker, args.task, source, episode
-                )
+                replay = _run_selected_episode(proxy, worker, args.task, source, episode)
                 recorder.close()
             except Exception:
                 recorder.abort()
@@ -468,12 +612,25 @@ def record(args):
                 "original_result": originals[episode],
                 "replay_result": replay,
                 "replay_confirmed_failure": not bool(replay.get("success")),
+                "source_condition_reproduced": _protocol_effective(source, replay),
+                "same_invalid_actions": int(replay.get("invalid_actions", 0))
+                == int(originals[episode].get("invalid_actions", 0)),
             }
             attempts.append(attempt)
-            if bool(replay.get("success")):
+            if (
+                bool(replay.get("success"))
+                or not attempt["source_condition_reproduced"]
+                or not attempt["same_invalid_actions"]
+            ):
                 video_path.unlink()
+                if bool(replay.get("success")):
+                    reason = "replay succeeded"
+                elif not attempt["source_condition_reproduced"]:
+                    reason = "source condition was not reproduced"
+                else:
+                    reason = "invalid-action count differed from the source row"
                 print(
-                    f"{args.task} episode {episode}: replay succeeded; "
+                    f"{args.task} episode {episode}: {reason}; "
                     "discarded from the failure-video set",
                     flush=True,
                 )
@@ -483,21 +640,29 @@ def record(args):
                 replay,
                 source["model_identity"],
                 worker.model_identity,
+                source,
             )
+            family = _source_family(source, args.task)
             sidecar = {
                 "schema": SCHEMA,
                 "task": args.task,
-                "scenario": "static",
+                "source_task": source.get("task"),
+                "scenario": source["scenario"],
                 "episode": episode,
                 "episode_seed": episode_seed,
                 "variation": (
                     episode % task_environment.variation_count()
-                    if args.task in BIMANUAL_TASKS
+                    if family in {"bimanual", "coordination"}
                     else source.get("variation", 0)
                 ),
                 "source_result": str(resolved_source),
                 "source_result_sha256": source_sha,
-                "evaluation_protocol_id": source.get("evaluation_protocol_id"),
+                "evaluation_protocol_id": replay_protocol_id,
+                "source_protocol": (
+                    source.get("coordination_protocol")
+                    or source.get("scenario_protocol")
+                    or source.get("protocol")
+                ),
                 "model_identity": worker.model_identity,
                 "original_result": originals[episode],
                 "replay_result": replay,
@@ -533,8 +698,7 @@ def record(args):
                 }
             )
             print(
-                f"{args.task} episode {episode}: confirmed failure, "
-                f"wrote {recorder.frames} frames",
+                f"{args.task} episode {episode}: confirmed failure, wrote {recorder.frames} frames",
                 flush=True,
             )
             if len(manifest_rows) == minimum_confirmed:
@@ -547,11 +711,18 @@ def record(args):
         manifest = {
             "schema": SCHEMA,
             "task": args.task,
-            "scenario": "static",
+            "source_task": source.get("task"),
+            "scenario": source["scenario"],
+            "output_key": output_key,
             "source_result": str(resolved_source),
             "source_result_sha256": source_sha,
             "model_identity": worker.model_identity,
-            "evaluation_protocol_id": source.get("evaluation_protocol_id"),
+            "evaluation_protocol_id": replay_protocol_id,
+            "source_protocol": (
+                source.get("coordination_protocol")
+                or source.get("scenario_protocol")
+                or source.get("protocol")
+            ),
             "policy_controller_semantics": "identical_to_source_evaluator",
             "policy_inputs_unchanged": True,
             "required_confirmed_failures": minimum_confirmed,
@@ -573,7 +744,7 @@ def record(args):
 
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", required=True, choices=sorted(DEFAULT_SOURCE_RESULTS))
+    parser.add_argument("--task", required=True, choices=sorted(SUPPORTED_TASKS))
     parser.add_argument(
         "--episode",
         action="append",
@@ -591,8 +762,16 @@ def build_parser():
         ),
     )
     parser.add_argument("--source-result", type=Path, default=None)
-    parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
+    parser.add_argument("--models-dir", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument(
+        "--output-key",
+        default=None,
+        help=(
+            "Destination directory name below --output-root. Dynamic and "
+            "coordination replays should use one key per paper-result cell."
+        ),
+    )
     parser.add_argument("--policy-python", type=Path, default=None)
     parser.add_argument("--policy-timeout", type=float, default=120.0)
     parser.add_argument("--ffmpeg", type=Path, default=Path("/usr/bin/ffmpeg"))

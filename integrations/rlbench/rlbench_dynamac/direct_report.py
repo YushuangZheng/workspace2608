@@ -8,14 +8,42 @@ from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
+from .paper_comparison import (
+    EXPECTED_LOCAL_CONFIG,
+    EXPECTED_MODEL_SCHEMA_VERSION,
+    EXPECTED_SELECTION_SEMANTICS_ID,
+    EXPECTED_TAPAS_COMMIT,
+    expected_evaluation_protocol_id,
+)
+
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v1" / "table_ii"
+DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v2" / "table_ii"
 TASKS = (
     ("bimanual_put_bottle_in_fridge", "StoreBottle", 0.82),
     ("bimanual_handover_item", "HandOver", 0.97),
     ("bimanual_sweep_to_dustpan", "SweepDust", 1.00),
     ("bimanual_lift_tray", "LiftTray", 1.00),
 )
+
+
+def _validate_v2_identity(payload: dict[str, object], task: str, path: Path) -> None:
+    identity = payload.get("model_identity")
+    if not isinstance(identity, dict):
+        raise ValueError(f"result model identity is missing: {path}")
+    valid = (
+        identity.get("manifest_authenticated") is True
+        and identity.get("training_config") == EXPECTED_LOCAL_CONFIG
+        and identity.get("model_schema_version") == EXPECTED_MODEL_SCHEMA_VERSION
+        and identity.get("selection_semantics_id")
+        == EXPECTED_SELECTION_SEMANTICS_ID
+        and identity.get("tapas_reference_commit") == EXPECTED_TAPAS_COMMIT
+        and bool(identity.get("left_fingerprint"))
+        and bool(identity.get("right_fingerprint"))
+        and payload.get("evaluation_protocol_id")
+        == expected_evaluation_protocol_id(task)
+    )
+    if not valid:
+        raise ValueError(f"result v2 protocol/model identity mismatch: {path}")
 
 
 def result_path(
@@ -56,6 +84,7 @@ def load_rows(
         actual_identity = {key: payload.get(key) for key in expected_identity}
         if actual_identity != expected_identity:
             raise ValueError(f"result identity mismatch: {path}")
+        _validate_v2_identity(payload, task, path)
         episode_results = payload.get("results")
         if not isinstance(episode_results, list) or len(episode_results) != episodes:
             raise ValueError(f"result episode count mismatch: {path}")

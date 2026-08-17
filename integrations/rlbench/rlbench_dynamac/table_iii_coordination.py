@@ -29,33 +29,40 @@ from pathlib import Path
 import numpy as np
 
 from .direct_evaluate import (
-    EVALUATION_PROTOCOL_ID,
+    GRIPPER_PROTOCOL,
     PolicyProcess,
     _make_action_mode,
     _noop_action,
+    evaluation_protocol_id,
 )
-from .direct_policy import _validate_published_model
 from .records import atomic_json, reserve_output
+from .runtime import (
+    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+    PrimaryActionRetryBudget,
+)
 
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
 POLICY_TASK = "bimanual_handover_item"
 TASK_MODULE = "rlbench.bimanual_tasks.bimanual_handover_item_dynamic"
 TASK_CLASS = "BimanualHandoverItemDynamic"
-DEFAULT_DATA_ROOT = (
-    INTEGRATION_ROOT / "data" / "table_iii_coordination" / "g5_seed0"
-)
-DEFAULT_MODELS_DIR = (
-    INTEGRATION_ROOT / "models" / "v1" / "table_iii"
-)
-DEFAULT_RESULTS_DIR = (
-    INTEGRATION_ROOT / "results" / "v1" / "table_iii_coordination"
-)
+DEFAULT_DATA_ROOT = INTEGRATION_ROOT / "data" / "table_iii_coordination" / "g5_seed0"
+DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v2" / "table_iii"
+DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v2" / "table_iii_coordination"
 DEFAULT_POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", "python3.10"))
-LOCAL_PROTOCOL_CONFIG = (
-    INTEGRATION_ROOT / "configs" / "table_iii_coordination_local.json"
-)
+LOCAL_PROTOCOL_CONFIG = INTEGRATION_ROOT / "configs" / "table_iii_coordination_local.json"
 PERTURBATION_METERS = (0.0, 0.0, 0.03)
 TRIGGER_FRACTION = 1.0 / 3.0
+EVALUATION_PROTOCOL_ID = evaluation_protocol_id(
+    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
+)
+
+
+def _validate_published_model(*args, **kwargs):
+    """Import policy-only validation lazily so Python 3.8 can run evaluation."""
+
+    from .direct_policy import _validate_published_model as validate
+
+    return validate(*args, **kwargs)
 
 
 def _task_class():
@@ -85,13 +92,7 @@ def _collection_action_mode():
 
 
 def _episode_dir(data_root, episode):
-    return (
-        Path(data_root)
-        / POLICY_TASK
-        / "all_variations"
-        / "episodes"
-        / f"episode{episode}"
-    )
+    return Path(data_root) / POLICY_TASK / "all_variations" / "episodes" / f"episode{episode}"
 
 
 def collect(args):
@@ -101,9 +102,7 @@ def collect(args):
 
     manifest_path = Path(args.data_root) / "collection_manifest.json"
     if manifest_path.exists():
-        raise FileExistsError(
-            f"refusing to overwrite existing collection: {manifest_path}"
-        )
+        raise FileExistsError(f"refusing to overwrite existing collection: {manifest_path}")
     environment = Environment(
         action_mode=_collection_action_mode(),
         obs_config=_observation_config(),
@@ -120,15 +119,13 @@ def collect(args):
         for episode in range(args.demonstrations):
             target = _episode_dir(args.data_root, episode)
             if target.exists():
-                raise FileExistsError(
-                    f"refusing to overwrite existing episode: {target}"
-                )
+                raise FileExistsError(f"refusing to overwrite existing episode: {target}")
             episode_seed = args.seed + episode
             variation = episode % variations
             random.seed(episode_seed)
             np.random.seed(episode_seed)
             task_environment.set_variation(variation)
-            demo, = task_environment.get_demos(amount=1, live_demos=True)
+            (demo,) = task_environment.get_demos(amount=1, live_demos=True)
             target.mkdir(parents=True, exist_ok=False)
             for observation in demo:
                 perception = getattr(observation, "perception_data", None)
@@ -172,9 +169,7 @@ def collect(args):
         "episodes": records,
     }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {manifest_path}")
     return manifest
 
@@ -232,9 +227,7 @@ def _train_into(args, output):
             "coordination_local_protocol": segment_protocol,
         },
     )
-    paths = demonstration_paths(
-        Path(args.data_root), POLICY_TASK, args.demonstrations
-    )
+    paths = demonstration_paths(Path(args.data_root), POLICY_TASK, args.demonstrations)
     names = [path.parent.name for path in paths]
     episodes = load_low_dim_obs_pickles(paths)
     output = Path(output)
@@ -309,7 +302,17 @@ def _perturb_action(action, arm, enabled):
     return result
 
 
-def _run_episode(task_environment, worker, *, episode, seed, horizon, arm, trigger):
+def _run_episode(
+    task_environment,
+    worker,
+    *,
+    episode,
+    seed,
+    horizon,
+    arm,
+    trigger,
+    max_primary_action_attempts=DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+):
     from rlbench.backend.exceptions import InvalidActionError
 
     episode_seed = seed + episode
@@ -319,6 +322,7 @@ def _run_episode(task_environment, worker, *, episode, seed, horizon, arm, trigg
     _, observation = task_environment.reset()
     worker.request("reset", observation)
     invalid_actions = 0
+    retry_budget = PrimaryActionRetryBudget(max_primary_action_attempts)
     perturbed_steps = 0
     for step in range(horizon):
         response = worker.request("act", observation)
@@ -333,17 +337,23 @@ def _run_episode(task_environment, worker, *, episode, seed, horizon, arm, trigg
                 "invalid_actions": invalid_actions,
                 "perturbed_steps": perturbed_steps,
             }
+        transaction_id = response.get("transaction_id")
+        if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
+            raise RuntimeError("policy worker did not return an action transaction id")
         enabled = arm != "none" and step >= trigger
-        command = _perturb_action(action, arm, enabled)
-        perturbed_steps += int(enabled)
+        primary_action_succeeded = False
+        retry_exhausted = False
         try:
+            command = _perturb_action(action, arm, enabled)
+            perturbed_steps += int(enabled)
             observation, reward, terminate = task_environment.step(command)
+            primary_action_succeeded = True
         except InvalidActionError:
             invalid_actions += 1
+            retry_exhausted = retry_budget.record_failure()
+            worker.request("abort", transaction_id=transaction_id)
             try:
-                observation, reward, terminate = task_environment.step(
-                    _noop_action(observation)
-                )
+                observation, reward, terminate = task_environment.step(_noop_action(observation))
             except InvalidActionError:
                 return {
                     "episode": episode,
@@ -354,11 +364,22 @@ def _run_episode(task_environment, worker, *, episode, seed, horizon, arm, trigg
                     "invalid_actions": invalid_actions,
                     "perturbed_steps": perturbed_steps,
                 }
+        except Exception:
+            worker.request("abort", transaction_id=transaction_id)
+            raise
+        if primary_action_succeeded:
+            commit = worker.request("commit", transaction_id=transaction_id)
+            retry_budget.record_success()
+            policy_complete = bool(commit.get("complete"))
+        else:
+            policy_complete = False
         if reward > 0.0:
             reason = "success"
         elif terminate:
             reason = "terminate"
-        elif response.get("complete"):
+        elif retry_exhausted:
+            reason = "primary_action_retry_exhausted"
+        elif policy_complete:
             reason = "policy_complete"
         else:
             continue
@@ -369,6 +390,11 @@ def _run_episode(task_environment, worker, *, episode, seed, horizon, arm, trigg
             "steps": step + 1,
             "reason": reason,
             "invalid_actions": invalid_actions,
+            **(
+                {"primary_action_attempts": retry_budget.attempts}
+                if reason == "primary_action_retry_exhausted"
+                else {}
+            ),
             "perturbed_steps": perturbed_steps,
         }
     return {
@@ -395,6 +421,11 @@ def _evaluate_reserved(args, output):
 
     from rlbench.environment import Environment
 
+    max_primary_action_attempts = getattr(
+        args,
+        "max_primary_action_attempts",
+        DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+    )
     action_mode = _make_action_mode()
     environment = Environment(
         action_mode=action_mode,
@@ -428,6 +459,7 @@ def _evaluate_reserved(args, output):
                 horizon=args.horizon,
                 arm=args.arm,
                 trigger=trigger,
+                max_primary_action_attempts=max_primary_action_attempts,
             )
             episodes.append(record)
             successes = sum(int(item["success"]) for item in episodes)
@@ -443,13 +475,11 @@ def _evaluate_reserved(args, output):
 
     successes = sum(int(item["success"]) for item in episodes)
     payload = {
-        "schema": "dynamac-table-iii-coordination-local-v1",
+        "schema": "dynamac-table-iii-coordination-local-v2",
         "task": "bimanual_handover_item_dynamic",
         "policy_task_alias": POLICY_TASK,
         "result_family": "bimanual_coordination",
-        "scenario": (
-            f"coordination_hand_{args.arm}" if args.arm != "none" else "local_baseline"
-        ),
+        "scenario": (f"coordination_hand_{args.arm}" if args.arm != "none" else "local_baseline"),
         "episodes": len(episodes),
         "episodes_requested": args.episodes,
         "episodes_completed": len(episodes),
@@ -458,7 +488,9 @@ def _evaluate_reserved(args, output):
         "seed": args.seed,
         "horizon": args.horizon,
         "learned_policy_steps": policy_steps,
-        "evaluation_protocol_id": EVALUATION_PROTOCOL_ID,
+        "evaluation_protocol_id": evaluation_protocol_id(
+            max_primary_action_attempts
+        ),
         "controller": {
             "command": "absolute_world_end_effector_pose",
             "primary_ik": "jacobian",
@@ -468,18 +500,23 @@ def _evaluate_reserved(args, output):
             "sampling_max_time_ms": 10,
             "sampling_ignore_collisions": True,
             "joint_target_max_steps": 200,
-            "failed_action": "one_current_pose_current_gripper_noop",
-            "policy_clock_rollback": False,
+            "failed_action": "abort_policy_target_then_current_pose_current_gripper_noop",
+            "failed_action_next_tick": "retry_same_policy_tick_from_fresh_observation",
+            "primary_action_retry": PrimaryActionRetryBudget(
+                max_primary_action_attempts
+            ).metadata(),
+            "policy_clock_rollback": True,
+            "policy_clock_semantics_id": worker.policy_clock_semantics_id,
+            "gripper_protocol": GRIPPER_PROTOCOL.metadata(),
             "rlbench_commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
             "pyrep_commit": "b8bd1d7a3182adcd570d001649c0849047ebf197",
         },
         "model_identity": worker.model_identity,
         "ik_execution_diagnostics": action_mode.arm_action_mode.diagnostics(),
         "invalid_actions": sum(item["invalid_actions"] for item in episodes),
+        "gripper_protocol": GRIPPER_PROTOCOL.metadata(),
         "paper_comparable": False,
-        "paper_target": (
-            0.97 if args.arm in {"left", "right"} else None
-        ),
+        "paper_target": (0.97 if args.arm in {"left", "right"} else None),
         "claim_boundary": (
             "Diagnostic only: the paper does not publish the perturbation axis, "
             "magnitude, start time, duration, demonstration IDs, or evaluation seeds."
@@ -491,8 +528,11 @@ def _evaluate_reserved(args, output):
             "perturbed_arm": args.arm,
             "translation_world_m": list(PERTURBATION_METERS),
             "application": "persistent offset on every predicted EE target from trigger",
-            "trigger_fraction_of_fitted_policy_clock": TRIGGER_FRACTION,
-            "trigger_policy_step": trigger,
+            "trigger_fraction_of_nominal_policy_length": TRIGGER_FRACTION,
+            "trigger_reference_domain": (
+                "evaluator_control_ticks_including_failed_primary_actions"
+            ),
+            "trigger_evaluator_control_step": trigger,
             "randomized_handover_location": (
                 "public BimanualHandoverItemDynamic; waypoint world-z offset "
                 "sampled uniformly in [-0.02, 0.02] m per episode"
@@ -536,6 +576,12 @@ def build_parser():
     evaluator.add_argument("--horizon", type=int, default=1000)
     evaluator.add_argument("--policy-python", type=Path, default=DEFAULT_POLICY_PYTHON)
     evaluator.add_argument("--policy-timeout", type=float, default=120.0)
+    evaluator.add_argument(
+        "--max-primary-action-attempts",
+        type=int,
+        default=DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+        help="Maximum primary InvalidAction attempts for one policy clock tick.",
+    )
     evaluator.add_argument("--output", type=Path, required=True)
     display = evaluator.add_mutually_exclusive_group()
     display.add_argument("--headless", dest="headless", action="store_true")
@@ -555,7 +601,12 @@ def main(argv=None):
             raise ValueError("demonstrations must be positive")
         train(args)
     else:
-        if args.episodes < 1 or args.seed < 0 or args.horizon < 1:
+        if (
+            args.episodes < 1
+            or args.seed < 0
+            or args.horizon < 1
+            or args.max_primary_action_attempts < 1
+        ):
             raise ValueError("episodes/horizon must be positive and seed non-negative")
         evaluate(args)
     return 0

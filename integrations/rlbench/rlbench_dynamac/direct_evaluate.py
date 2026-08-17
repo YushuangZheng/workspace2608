@@ -20,11 +20,18 @@ from pathlib import Path
 import numpy as np
 
 from .records import atomic_json, reserve_output
-from .runtime import ScenarioController, execute_joint_target_control
+from .runtime import (
+    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+    DiscreteGripperProtocol,
+    PrimaryActionRetryBudget,
+    ScenarioController,
+    execute_joint_target_control,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v1"
+DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v2"
+DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v2"
 DEFAULT_POLICY_PYTHON = Path(
     os.environ.get(
         "DYNAMAC_POLICY_PYTHON",
@@ -55,9 +62,25 @@ SCENARIO_KINDS = {
     "smooth": "smooth_task_motion",
     "teleport": "teleport_task",
 }
+DYNAMIC_EPISODE_ACCOUNTING_SCHEMA = "trigger-eligibility-smooth-prefix-v1"
 
-EVALUATION_PROTOCOL_ID = (
-    "rlbench-absolute-ee-ik-jacobian-sampling5-timeout200-noop-clock-v2"
+POLICY_CLOCK_SEMANTICS_ID = (
+    "policy-tick-transaction-commit-on-primary-action-success-v1"
+)
+GRIPPER_PROTOCOL = DiscreteGripperProtocol(bimanual=True)
+
+
+def evaluation_protocol_id(max_primary_action_attempts):
+    attempts = PrimaryActionRetryBudget(max_primary_action_attempts).max_attempts
+    return GRIPPER_PROTOCOL.extend_evaluation_protocol_id(
+        "rlbench-absolute-ee-ik-jacobian-sampling5-timeout200-"
+        "noop-retry-same-policy-tick-fresh-observation-"
+        f"primary-attempt{attempts}-v4"
+    )
+
+
+EVALUATION_PROTOCOL_ID = evaluation_protocol_id(
+    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
 )
 
 
@@ -85,7 +108,6 @@ def _make_action_mode():
         assert_action_shape,
         assert_unit_quaternion,
     )
-    from rlbench.action_modes.gripper_action_modes import BimanualDiscrete
     from rlbench.backend.exceptions import InvalidActionError
 
     class BimanualAbsoluteEndEffectorIK(ArmActionMode):
@@ -179,7 +201,7 @@ def _make_action_mode():
 
     return BimanualMoveArmThenGripper(
         BimanualAbsoluteEndEffectorIK(),
-        BimanualDiscrete(),
+        GRIPPER_PROTOCOL.make_action_mode(),
     )
 
 
@@ -251,14 +273,20 @@ class PolicyProcess:
             self.model_identity = response.get("model_identity")
             if not isinstance(self.model_identity, dict):
                 raise RuntimeError("policy worker did not report model identity")
+            self.policy_clock_semantics_id = response.get(
+                "policy_clock_semantics_id"
+            )
+            if self.policy_clock_semantics_id != POLICY_CLOCK_SEMANTICS_ID:
+                raise RuntimeError("policy worker clock semantics do not match evaluator")
         except Exception:
             if self.process.poll() is None:
                 self.process.terminate()
                 self.process.wait(timeout=5)
             raise
 
-    def request(self, command, observation=None):
+    def request(self, command, observation=None, **fields):
         request = {"command": command}
+        request.update(fields)
         if observation is not None:
             request["observation"] = _observation_payload(observation)
         self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
@@ -309,6 +337,134 @@ def _apply_scenario(controller, task_environment, observation, *, step, horizon)
     return observation, event
 
 
+def _trigger_control_step(reference_steps, trigger_fraction):
+    if reference_steps < 1:
+        raise ValueError("intervention reference steps must be positive")
+    return min(
+        reference_steps - 1,
+        int(round(trigger_fraction * (reference_steps - 1))),
+    )
+
+
+def _finalize_episode_intervention_status(
+    row,
+    *,
+    scenario,
+    trigger_step,
+    trigger_reached,
+    smooth_steps,
+):
+    """Attach authenticated trigger eligibility and smooth-prefix progress."""
+
+    events = row.get("scenario_events")
+    if not isinstance(events, list):
+        raise RuntimeError("episode scenario_events must be a list")
+    dynamic = scenario != "static"
+    if not dynamic:
+        if any(
+            isinstance(event, dict) and event.get("applied") is True
+            for event in events
+        ):
+            raise RuntimeError("static episode unexpectedly applied an intervention")
+        row.update(
+            {
+                "trigger_step": None,
+                "intervention_eligible": False,
+                "intervention_reached": False,
+                "pre_intervention_terminal": False,
+                "intervention_effective": None,
+                "intervention_complete": None,
+            }
+        )
+        return row
+
+    if not isinstance(trigger_step, int) or isinstance(trigger_step, bool):
+        raise RuntimeError("dynamic episode trigger step is invalid")
+    applied = [
+        event
+        for event in events
+        if isinstance(event, dict) and event.get("applied") is True
+    ]
+    if any(not isinstance(event, dict) for event in events):
+        raise RuntimeError("dynamic episode contains a malformed intervention event")
+
+    preterminal = not trigger_reached
+    if preterminal:
+        if applied:
+            raise RuntimeError("pre-trigger episode cannot contain an intervention")
+        if row.get("success") is True:
+            raise RuntimeError(
+                "dynamic episode succeeded before its intervention trigger"
+            )
+        row.update(
+            {
+                "trigger_step": trigger_step,
+                "intervention_eligible": False,
+                "intervention_reached": False,
+                "pre_intervention_terminal": True,
+                "intervention_effective": None,
+                "intervention_complete": None,
+            }
+        )
+        return row
+
+    if not applied or any(
+        event.get("protocol_effective") is not True for event in applied
+    ):
+        raise RuntimeError(
+            "dynamic episode reached its trigger without an effective intervention"
+        )
+    if any(
+        event.get("trigger_step") != trigger_step for event in applied
+    ):
+        raise RuntimeError("dynamic intervention trigger evidence is inconsistent")
+
+    complete = True
+    if scenario == "teleport":
+        valid = (
+            len(applied) == 1
+            and applied[0].get("kind") == "teleport_task"
+            and applied[0].get("step") == trigger_step
+        )
+        if not valid:
+            raise RuntimeError("teleport episode must contain one trigger-step event")
+    elif scenario == "smooth":
+        count = len(applied)
+        if not 1 <= count <= smooth_steps:
+            raise RuntimeError("smooth intervention event count is invalid")
+        for index, event in enumerate(applied, start=1):
+            endpoint = index == smooth_steps
+            if (
+                event.get("kind") != "smooth_task_motion"
+                or event.get("step") != trigger_step + index - 1
+                or event.get("smooth_call") != index
+                or event.get("complete") is not endpoint
+                or event.get("endpoint_applied") is not endpoint
+            ):
+                raise RuntimeError("smooth intervention is not a strict prefix")
+        complete = count == smooth_steps
+        if not complete:
+            final_event_step = trigger_step + count - 1
+            if row.get("steps") not in {final_event_step, final_event_step + 1}:
+                raise RuntimeError(
+                    "smooth intervention stopped despite reaching its next motion tick"
+                )
+    else:
+        raise RuntimeError(f"unsupported dynamic scenario: {scenario}")
+
+    row.update(
+        {
+            "trigger_step": trigger_step,
+            "intervention_eligible": True,
+            "intervention_reached": True,
+            "pre_intervention_terminal": False,
+            "intervention_effective": True,
+            "intervention_complete": complete,
+        }
+    )
+    return row
+
+
 def _run_episode(
     task_environment,
     worker,
@@ -321,6 +477,7 @@ def _run_episode(
     scenario_reference_steps=None,
     scenario_steps=10,
     scenario_max_attempts=20,
+    max_primary_action_attempts=DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
 ):
     random.seed(seed + episode)
     np.random.seed(seed + episode)
@@ -328,6 +485,7 @@ def _run_episode(
     _, observation = task_environment.reset()
     worker.request("reset", observation)
     invalid_actions = 0
+    retry_budget = PrimaryActionRetryBudget(max_primary_action_attempts)
     scenario_events = []
     controller = ScenarioController(
         kind=SCENARIO_KINDS[scenario],
@@ -337,9 +495,30 @@ def _run_episode(
     )
     if scenario_reference_steps is None:
         scenario_reference_steps = horizon
+    trigger_step = (
+        None
+        if scenario == "static"
+        else _trigger_control_step(
+            scenario_reference_steps,
+            scenario_trigger_fraction,
+        )
+    )
+    trigger_reached = False
+
+    def finish(row):
+        return _finalize_episode_intervention_status(
+            row,
+            scenario=scenario,
+            trigger_step=trigger_step,
+            trigger_reached=trigger_reached,
+            smooth_steps=scenario_steps,
+        )
+
     from rlbench.backend.exceptions import InvalidActionError
 
     for step in range(horizon):
+        if trigger_step is not None and step >= trigger_step:
+            trigger_reached = True
         observation, event = _apply_scenario(
             controller,
             task_environment,
@@ -347,62 +526,94 @@ def _run_episode(
             step=step,
             horizon=scenario_reference_steps,
         )
+        expected_controller_trigger = _trigger_control_step(
+            scenario_reference_steps,
+            scenario_trigger_fraction,
+        )
+        if event.get("trigger_step") != expected_controller_trigger:
+            raise RuntimeError("scenario controller returned an inconsistent trigger")
+        if event.get("applied") and (trigger_step is None or step < trigger_step):
+            raise RuntimeError("scenario controller applied before the trigger")
         if event["applied"] or step == event["trigger_step"]:
             scenario_events.append(event)
         response = worker.request("act", observation)
         action = response.get("action")
         if action is None:
-            return {
+            return finish({
                 "episode": episode,
                 "success": False,
                 "steps": step,
                 "reason": "policy_complete",
                 "invalid_actions": invalid_actions,
                 "scenario_events": scenario_events,
-            }
+            })
+        transaction_id = response.get("transaction_id")
+        if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
+            raise RuntimeError("policy worker did not return an action transaction id")
+        primary_action_succeeded = False
+        retry_exhausted = False
         try:
             observation, reward, terminate = task_environment.step(
                 np.asarray(action, dtype=np.float64)
             )
+            primary_action_succeeded = True
         except InvalidActionError:
             invalid_actions += 1
+            retry_exhausted = retry_budget.record_failure()
+            worker.request("abort", transaction_id=transaction_id)
             try:
                 observation, reward, terminate = task_environment.step(
                     _noop_action(observation)
                 )
             except InvalidActionError:
-                return {
+                return finish({
                     "episode": episode,
                     "success": False,
                     "steps": step + 1,
                     "reason": "noop_failed",
                     "invalid_actions": invalid_actions,
                     "scenario_events": scenario_events,
-                }
+                })
+        except Exception:
+            worker.request("abort", transaction_id=transaction_id)
+            raise
+        if primary_action_succeeded:
+            commit = worker.request("commit", transaction_id=transaction_id)
+            retry_budget.record_success()
+            policy_complete = bool(commit.get("complete"))
+        else:
+            policy_complete = False
         if reward > 0.0:
             reason = "success"
         elif terminate:
             reason = "terminate"
-        elif response.get("complete"):
+        elif retry_exhausted:
+            reason = "primary_action_retry_exhausted"
+        elif policy_complete:
             reason = "policy_complete"
         else:
             continue
-        return {
+        return finish({
             "episode": episode,
             "success": bool(reward > 0.0),
             "steps": step + 1,
             "reason": reason,
             "invalid_actions": invalid_actions,
+            **(
+                {"primary_action_attempts": retry_budget.attempts}
+                if reason == "primary_action_retry_exhausted"
+                else {}
+            ),
             "scenario_events": scenario_events,
-        }
-    return {
+        })
+    return finish({
         "episode": episode,
         "success": False,
         "steps": horizon,
         "reason": "horizon",
         "invalid_actions": invalid_actions,
         "scenario_events": scenario_events,
-    }
+    })
 
 
 def evaluate(args):
@@ -458,6 +669,7 @@ def _evaluate_reserved(args):
                 scenario_reference_steps=scenario_reference_steps,
                 scenario_steps=args.scenario_steps,
                 scenario_max_attempts=args.scenario_max_attempts,
+                max_primary_action_attempts=args.max_primary_action_attempts,
             )
             results.append(result)
             successes = sum(item["success"] for item in results)
@@ -475,14 +687,30 @@ def _evaluate_reserved(args):
     applied_by_episode = [
         any(event["applied"] for event in item["scenario_events"]) for item in results
     ]
-    effective_by_episode = [
-        any(
-            event.get("protocol_effective", False)
-            for event in item["scenario_events"]
-            if event["applied"]
+    effective_by_episode = [item["intervention_effective"] is True for item in results]
+    eligible_by_episode = [item["intervention_eligible"] is True for item in results]
+    preterminal_by_episode = [
+        item["pre_intervention_terminal"] is True for item in results
+    ]
+    eligible_effective = [
+        item["intervention_effective"] is True
+        for item in results
+        if item["intervention_eligible"] is True
+    ]
+    covered_by_episode = [
+        item["pre_intervention_terminal"] is True
+        or (
+            item["intervention_eligible"] is True
+            and item["intervention_effective"] is True
         )
         for item in results
     ]
+    motion_protocol = ScenarioController(
+        SCENARIO_KINDS[args.scenario],
+        trigger_fraction=args.scenario_trigger_fraction,
+        total_steps=args.scenario_steps,
+        max_attempts=args.scenario_max_attempts,
+    ).protocol_metadata()
     summary = {
         "task": args.task,
         "scenario": args.scenario,
@@ -492,11 +720,17 @@ def _evaluate_reserved(args):
                 if args.scenario == "static"
                 else "LOCAL_APPROXIMATION_PAPER_MOTION_TYPE_UNSPECIFIED"
             ),
-            "public_scene_method": SCENARIO_KINDS[args.scenario],
-            "trigger_fraction": args.scenario_trigger_fraction,
+            "motion_kind": SCENARIO_KINDS[args.scenario],
+            "motion_protocol": motion_protocol,
+            "trigger_fraction_of_nominal_policy_length": (
+                args.scenario_trigger_fraction
+            ),
             "trigger_reference_steps": scenario_reference_steps,
             "trigger_reference_source": scenario_reference_source,
-            "trigger_step": min(
+            "trigger_reference_domain": (
+                "evaluator_control_ticks_including_failed_primary_actions"
+            ),
+            "trigger_control_step": min(
                 scenario_reference_steps - 1,
                 int(
                     round(
@@ -510,23 +744,48 @@ def _evaluate_reserved(args):
             ),
             "max_sampling_attempts": args.scenario_max_attempts,
             "observation_refreshed_before_policy_action": True,
+            "dynamic_episode_accounting_schema": (
+                DYNAMIC_EPISODE_ACCOUNTING_SCHEMA
+            ),
+            "pre_intervention_failure_policy": (
+                "retain_failure_with_null_intervention_effectiveness"
+            ),
+            "pre_intervention_success_policy": (
+                "fail_closed_unexercised_dynamic_condition"
+            ),
+            "smooth_terminal_progress_policy": (
+                "strict_effective_prefix_until_episode_terminal"
+            ),
+            "episodes_intervention_eligible": sum(eligible_by_episode),
+            "episodes_pre_intervention_terminal": sum(preterminal_by_episode),
             "episodes_with_intervention": sum(applied_by_episode),
             "episodes_with_effective_intervention": sum(effective_by_episode),
             "all_episodes_intervened": all(applied_by_episode),
             "all_interventions_effective": (
-                all(effective_by_episode) if args.scenario != "static" else None
+                all(
+                    item["intervention_effective"] is True
+                    for item, applied in zip(results, applied_by_episode)
+                    if applied
+                )
+                if args.scenario != "static"
+                else None
+            ),
+            "all_eligible_interventions_effective": (
+                all(eligible_effective) if args.scenario != "static" else None
             ),
             "protocol_valid": (
                 True
                 if args.scenario == "static"
-                else all(applied_by_episode) and all(effective_by_episode)
+                else all(covered_by_episode)
             ),
             "paper_comparable": args.scenario == "static",
         },
         "episodes": args.episodes,
         "seed": args.seed,
         "horizon": args.horizon,
-        "evaluation_protocol_id": EVALUATION_PROTOCOL_ID,
+        "evaluation_protocol_id": evaluation_protocol_id(
+            args.max_primary_action_attempts
+        ),
         "controller": {
             "command": "absolute_world_end_effector_pose",
             "primary_ik": "jacobian",
@@ -536,8 +795,14 @@ def _evaluate_reserved(args):
             "sampling_max_time_ms": 10,
             "sampling_ignore_collisions": True,
             "joint_target_max_steps": 200,
-            "failed_action": "one_current_pose_current_gripper_noop",
-            "policy_clock_rollback": False,
+            "failed_action": "abort_policy_target_then_current_pose_current_gripper_noop",
+            "failed_action_next_tick": "retry_same_policy_tick_from_fresh_observation",
+            "primary_action_retry": PrimaryActionRetryBudget(
+                args.max_primary_action_attempts
+            ).metadata(),
+            "policy_clock_rollback": True,
+            "policy_clock_semantics_id": worker.policy_clock_semantics_id,
+            "gripper_protocol": GRIPPER_PROTOCOL.metadata(),
             "rlbench_commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
             "pyrep_commit": "b8bd1d7a3182adcd570d001649c0849047ebf197",
         },
@@ -545,6 +810,7 @@ def _evaluate_reserved(args):
         "successes": sum(item["success"] for item in results),
         "success_rate": sum(item["success"] for item in results) / float(args.episodes),
         "ik_execution_diagnostics": action_mode.arm_action_mode.diagnostics(),
+        "gripper_protocol": GRIPPER_PROTOCOL.metadata(),
         "results": results,
     }
     atomic_json(args.output, summary)
@@ -576,6 +842,12 @@ def build_parser():
     )
     parser.add_argument("--scenario-steps", type=int, default=10)
     parser.add_argument("--scenario-max-attempts", type=int, default=20)
+    parser.add_argument(
+        "--max-primary-action-attempts",
+        type=int,
+        default=DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+        help="Maximum primary InvalidAction attempts for one policy clock tick.",
+    )
     display = parser.add_mutually_exclusive_group()
     display.add_argument("--headless", dest="headless", action="store_true")
     display.add_argument("--no-headless", dest="headless", action="store_false")
@@ -594,16 +866,18 @@ def main(argv=None):
         raise ValueError("episodes and horizon must be positive")
     if not 0.0 <= args.scenario_trigger_fraction <= 1.0:
         raise ValueError("scenario trigger fraction must lie in [0, 1]")
-    if args.scenario_steps < 1 or args.scenario_max_attempts < 1:
+    if (
+        args.scenario_steps < 1
+        or args.scenario_max_attempts < 1
+        or args.max_primary_action_attempts < 1
+    ):
         raise ValueError("scenario steps and max attempts must be positive")
     if args.scenario_reference_steps is not None and args.scenario_reference_steps < 1:
         raise ValueError("scenario reference steps must be positive")
     if args.output is None:
         family = "table_ii" if args.scenario == "static" else "table_iii_environment"
         args.output = (
-            INTEGRATION_ROOT
-            / "results"
-            / "v1"
+            DEFAULT_RESULTS_DIR
             / family
             / f"{args.task}_{args.scenario}_seed{args.seed}_n{args.episodes}_h{args.horizon}.json"
         )

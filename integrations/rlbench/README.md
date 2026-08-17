@@ -40,7 +40,8 @@ Install the two environments from [requirements/](requirements/). Demonstrations
 ## Configuration
 
 - [dynamac_table_ii.json](configs/dynamac_table_ii.json): strict paper interpretation; exposes empty Eq. (6) selections in the local cohort.
-- [dynamac_rlbench_local.json](configs/dynamac_rlbench_local.json): executable local protocol used by `v1`.
+- [dynamac_rlbench_local.json](configs/dynamac_rlbench_local.json): current executable `v2` model configuration. Equation (6) uses the same weighted subspace as Equation (5), which is 3D position under the frozen `1/0` position/rotation weights, for every task and arm.
+- [dynamac_rlbench_v1.json](configs/dynamac_rlbench_v1.json): immutable copy of the executable `v1` model configuration.
 - [tapas_segmentation.json](configs/tapas_segmentation.json): segmentation profiles.
 - [tasks.json](configs/tasks.json): task frames and bimanual coordination.
 - [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md): implementation boundary.
@@ -64,39 +65,59 @@ RLBench task or protocol.
 ## Artifacts
 
 - Demonstrations: `data/` (locally, 45 low-dimensional episodes; no unused image streams).
-- Authenticated checkpoints: `models/v1/`.
-- Audited 200-episode outputs: `results/v1/`.
+- Historical authenticated checkpoints: `models/v1/`.
+- Historical audited 200-episode outputs: `results/v1/`.
+- Current retrained checkpoints: `models/v2/`. The `results/v2/` evaluation
+  matrix is being regenerated; the report validator rejects dynamic outputs
+  that do not use the current preserve-instance motion protocol.
 - Failure replays: `results/failure_videos/v1/`.
-- Generated comparison: `results/paper_comparison.md`, with CSV and JSON beside it.
+- Generated `v2` comparison: `results/v2/paper_comparison.md`, with CSV and JSON beside it.
 
 These experiment artifacts are intentionally excluded from Git. They contain generated or
 upstream-derived data and should be transferred or published separately only after checking
 the applicable data and asset licenses. The tracked `data/README.md` defines the required
 layout; the commands below regenerate models, evaluations, and reports.
 
-Release directories follow the compact `vN` convention: `models/v1`, `results/v1`, and `results/failure_videos/v1`. Future `v2` and `v3` artifacts should use parallel directories rather than overwrite an earlier release. Select a report release explicitly with `paper_comparison --release vN`.
+Release directories follow the compact `vN` convention. The current defaults are `models/v2` and `results/v2`; `models/v1` and `results/v1` remain immutable provenance. Later releases must use parallel directories rather than overwrite an earlier release. Select a report release explicitly with `paper_comparison --release vN`; the report JSON records both that release and the exact expected model/configuration identity.
 
 ## Training
 
-Existing `v1` models are immutable. Use a new output directory for a retrain.
+Existing `v1` models are immutable. The commands below retrain all tasks into `v2`; this is required because changing the Equation (6) covariance subspace can change frame selection for any skill, not only HandOver.
 
 ```bash
 # Table II bimanual tasks
 python3.10 -m integrations.rlbench.rlbench_dynamac.direct_policy train \
   --task all \
   --data-root integrations/rlbench/data/dynamac_table_ii_g5_a51b4e_128x128_seed0_20260811/stage_5_demos \
-  --models-dir integrations/rlbench/models/retrained
+  --models-dir integrations/rlbench/models/v2
 
 # Table I unimanual tasks
 python3.10 -m integrations.rlbench.rlbench_dynamac.direct_policy train \
   --task all-unimanual \
   --data-root integrations/rlbench/data/dynamac_table_i_live_g5_seed0 \
-  --models-dir integrations/rlbench/models/retrained
+  --models-dir integrations/rlbench/models/v2
 ```
 
 ## Evaluation
 
-The evaluators load `models/v1` by default. They use absolute world-frame end-effector control, Jacobian IK followed by sampling IK for the same target, and a one-step no-op only when both fail.
+The Table I and Table II evaluators load `models/v2` and write below `results/v2` by default. They use absolute world-frame end-effector control and Jacobian IK followed by sampling IK. Grippers actuate at `0.04`, matching the pinned demonstration generator rather than the vendor evaluation default `0.2`. Dynamic task motion samples and moves `boundary_root()` without calling `task.init_episode()`, so the initialized objects and success conditions remain the same episode instance. These are evaluator-wide rules, not task-specific corrections.
+
+`max_primary_action_attempts=3` is a local controller-execution tolerance, not
+a retry count from the DynaMAC paper. It is consumed only when RLBench raises
+`InvalidAction` for an IK or low-level execution failure: the tentative target
+is aborted, one current-state no-op obtains a fresh observation, and the same
+policy time index is recomputed. A command that executes but fails to establish
+a grasp is committed normally; the evaluator does not add policy samples,
+extend the configured skill schedule, or initiate a semantic/contact-based
+re-grasp. The authors' exact failed-action clock semantics and tolerance remain
+unconfirmed.
+
+DynaMAC's dynamic following is separate from that tolerance. A moving task
+frame changes the recomputed target only while the current skill has not ended
+and that skill selected the relevant frame; after the fixed skill transition,
+or when the frame was not selected, there is no such tracking. Policy inputs in
+this reproduction come from RLBench simulator-state ground-truth poses
+(`gripper_pose` and `task_low_dim_state`), not from a visual pose detector.
 
 ```bash
 # Table II static example
