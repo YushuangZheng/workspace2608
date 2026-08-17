@@ -71,7 +71,8 @@ RLBench task or protocol.
   matrix is being regenerated; the report validator rejects dynamic outputs
   that do not use the current preserve-instance motion protocol.
 - Failure replays: `results/failure_videos/v1/`.
-- Generated `v2` comparison: `results/v2/paper_comparison.md`, with CSV and JSON beside it.
+- The report command writes `results/v2/paper_comparison.md`, with CSV and JSON
+  beside it, once the selected `v2` result matrix is available.
 
 These experiment artifacts are intentionally excluded from Git. They contain generated or
 upstream-derived data and should be transferred or published separately only after checking
@@ -85,16 +86,19 @@ Release directories follow the compact `vN` convention. The current defaults are
 Existing `v1` models are immutable. The commands below retrain all tasks into `v2`; this is required because changing the Equation (6) covariance subspace can change frame selection for any skill, not only HandOver.
 
 ```bash
+export TABLE_II_DATA_ROOT=/path/to/table_ii/stage_5_demos
+export TABLE_I_DATA_ROOT=/path/to/table_i/demos
+
 # Table II bimanual tasks
 python3.10 -m integrations.rlbench.rlbench_dynamac.direct_policy train \
   --task all \
-  --data-root integrations/rlbench/data/dynamac_table_ii_g5_a51b4e_128x128_seed0_20260811/stage_5_demos \
+  --data-root "$TABLE_II_DATA_ROOT" \
   --models-dir integrations/rlbench/models/v2
 
 # Table I unimanual tasks
 python3.10 -m integrations.rlbench.rlbench_dynamac.direct_policy train \
   --task all-unimanual \
-  --data-root integrations/rlbench/data/dynamac_table_i_live_g5_seed0 \
+  --data-root "$TABLE_I_DATA_ROOT" \
   --models-dir integrations/rlbench/models/v2
 ```
 
