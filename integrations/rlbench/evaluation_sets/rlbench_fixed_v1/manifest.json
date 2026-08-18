@@ -1,0 +1,53 @@
+{
+  "schema": "dynamac-rlbench-sealed-evaluation-manifest-v1",
+  "protocol_id": "rlbench-version-neutral-fixed-eval-set-v1",
+  "evaluation_set_id": "rlbench_fixed_v1",
+  "spec": {
+    "sha256": "8937d4906809f6f42fb78eb43f22d17f7bab324b23ce5c838b6939b44cc488ca",
+    "fingerprint": "b55d7af28a7ca186b10b3ecd5a244b94c73f968944b8f3ae84ef3571902d9738"
+  },
+  "training_split_manifest": {
+    "sha256": "c355651bd2f6c76d91874a8bb582d7409ebf981088e402589fafbeba70c0caf2",
+    "fingerprint": "d2a4803a1d727bdeeecf8acf027a50eb817a76999554d830db69235e4696bb16"
+  },
+  "environment_plan_batches": {
+    "stack_wine": {
+      "sha256": "59f0233100f4453f04a64b43c7e74d5897fce8c664695e3a34eb8d8fcd660e69",
+      "batch_fingerprint": "473e1d00b0142c4e0ae4675252a0109d2433d832bd1d8f9c92704c80e447619b"
+    },
+    "place_cups": {
+      "sha256": "844f91bdb03bb23d9b72898f8ab3b984d1bfaf7597f25ca8de6aeecc6e31fc2a",
+      "batch_fingerprint": "0676cad27b48922a5c788b1ebb46ae57aa5e8b568b2a83264d53104cc9db34b0"
+    },
+    "open_microwave": {
+      "sha256": "e57a850750cf4ce2c2ff96dde0b7f92a5838fd9bdc71edb25accd51ed85a9fbc",
+      "batch_fingerprint": "f79257b21677d7d01bcdd9c1fc577cfd95a5db236e9dbf7f95193acb315fc07f"
+    },
+    "wipe_desk": {
+      "sha256": "261c07acc7499b32994cb048ef46bdd91b91e3a8b57788f67dd2182c379f455f",
+      "batch_fingerprint": "c55f0914eb98a38e8f4edf91e0d527dc01d744c0466e69c40a7af8906fd415b5"
+    },
+    "bimanual_put_bottle_in_fridge": {
+      "sha256": "680b00592ce830e57b855271f1c14a48c331f59607c2b3e3e786ae2a5703fd8b",
+      "batch_fingerprint": "4a83709c46e3fecfb0371ccef1dee6686ccd8f17deb1668397bfd435557765c6"
+    },
+    "bimanual_handover_item": {
+      "sha256": "782d2fa6b158580a0d8f14234bd24ce9068b072ab7e3edf61c1ad83369aff33b",
+      "batch_fingerprint": "b564806c58e2e7aed3bc629a7ac53aee6af40c9119d4e4113be0a0a045b0e317"
+    },
+    "bimanual_lift_tray": {
+      "sha256": "580a70f55751f669320af47af18c45bc5de0918be7a13ab053cd8404fa3e2c35",
+      "batch_fingerprint": "5f4c8cc341f45f81144520e509ff47c157ca8a78250c27707a9f32d6727e3096"
+    },
+    "bimanual_sweep_to_dustpan": {
+      "sha256": "4b1021ef63b576db4c49132fff1866a507e17b5c4f9b20b8399d0a3f2bf7d06f",
+      "batch_fingerprint": "a1c1c58f18ab8a3369145e7cc3c83cad6699c028d4b0a12364fd9bb4e05cd86f"
+    }
+  },
+  "coordination_source_batch": {
+    "sha256": "6d192b5fc881792a0363ad35ebadee19434f683f3a541f41528c7fe8cf091e8c",
+    "batch_fingerprint": "7a57f189e6b4e16559bce8d5f7c5865bfea1e9aac380bd0c83afb5c54aa69a92"
+  },
+  "sealed_without_evaluation_results": true,
+  "fingerprint": "92b98c4951bb0dcf6ce7b807e4ec3ba8cbd7d1baa44f8f929e4862bbd1e71295"
+}
