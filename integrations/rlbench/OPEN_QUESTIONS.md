@@ -25,12 +25,16 @@ are intentionally omitted.
    especially need the task-specific velocity/gripper thresholds, stop
    clustering, endpoint exclusion and event-merging settings, and whether
    LiftTray and SweepDust used independent segmentation or the shared union. Our
-   HandOver model uses the six shared boundaries shown in your plot but still
-   reaches only 8/200, so its final selected-frame mask or compact configuration
-   would also help distinguish a cohort mismatch from an implementation
-   mismatch. For WipeDesk, was the complete back-and-forth wipe retained as one
-   skill, or were direction reversals separate boundaries? For SweepDust, an
-   aligned gripper trace would also help verify the contact-stage alignment.
+   fixed V3 HandOver cohort reaches 171/200 static, 170/200 under the left-arm
+   coordination perturbation, 10/200 under the right-arm perturbation, and
+   167/200 under the environment teleport. SweepDust reaches 199/200 static but
+   39/200 under the environment teleport. Because the reported perturbation
+   protocol is unpublished, these dynamic values are non-comparable
+   diagnostics; final selected-frame masks and compact configurations would
+   help distinguish protocol/cohort differences from implementation effects.
+   For WipeDesk, was the complete back-and-forth wipe retained as one skill, or
+   were direction reversals separate boundaries? An aligned SweepDust gripper
+   trace would also help verify the contact-stage alignment.
 
 ## Important numerical details
 

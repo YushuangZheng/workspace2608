@@ -1192,6 +1192,8 @@ def _valid_v2_root_motion_protocol(run: LocalRun) -> bool:
                 )
             ):
                 return False
+        if steps < events[-1]["step"]:
+            return False
         if any(
             event.get("instance_preservation")
             != events[0].get("instance_preservation")

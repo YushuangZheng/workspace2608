@@ -41,12 +41,13 @@ Install the two environments from [requirements/](requirements/). Demonstrations
 
 - [dynamac_table_ii.json](configs/dynamac_table_ii.json): strict paper interpretation; exposes empty Eq. (6) selections in the local cohort.
 - [dynamac_rlbench_v1.json](configs/dynamac_rlbench_v1.json): immutable copy of the executable `v1` model configuration.
-- [dynamac_rlbench_v2.json](configs/dynamac_rlbench_v2.json): immutable `v2` identity; Equation (6) uses the Equation (5)-weighted 3D position subspace and Equation (5) is promoted by skill majority.
+- [dynamac_rlbench_v2.json](configs/dynamac_rlbench_v2.json): immutable `v2` identity; Equation (6) uses the Equation (5)-weighted 3D position subspace uniformly for every task and arm, with position/rotation weights `1/0`, while Equation (5) is promoted by skill majority.
 - [dynamac_rlbench_v3.json](configs/dynamac_rlbench_v3.json): current default; it retains the V2 Equation (6) subspace and uses a strict skill-majority gate to decide whether the raw Equation (5) mask remains active per time step.
 - [dynamac_rlbench_local.json](configs/dynamac_rlbench_local.json): compatibility alias for the historical V2 config, not a V3 identity source.
 - [tapas_segmentation.json](configs/tapas_segmentation.json): segmentation profiles.
 - [tasks.json](configs/tasks.json): task frames and bimanual coordination.
 - [v3_interventions.json](configs/v3_interventions.json): preregistered task/skill trigger ticks and protocol constants.
+- [v3_motion_sources.json](configs/v3_motion_sources.json): spatial roots and deterministic offline source/goal generation budgets.
 - [V3_PROTOCOL.md](V3_PROTOCOL.md): frozen V3 mechanism, trigger evidence, staging, clock, settling, and accounting contract.
 - [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md): implementation boundary.
 - [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md): details still required for an exact author-side match.
@@ -73,13 +74,17 @@ RLBench task or protocol.
 - Historical audited 200-episode outputs: `results/v1/`.
 - Immutable second-release checkpoints and outputs: `models/v2/` and `results/v2/`.
 - Current checkpoints and outputs: `models/v3/` and `results/v3/`.
+- Tracked, outcome-free fixed evaluation inputs: `evaluation_sets/rlbench_fixed_v1/`.
 - Failure replays: `results/failure_videos/v1/`.
 - Generated V3 comparison: `results/v3/paper_comparison.md`, with CSV and JSON beside it.
 
-These experiment artifacts are intentionally excluded from Git. They contain generated or
-upstream-derived data and should be transferred or published separately only after checking
-the applicable data and asset licenses. The tracked `data/README.md` defines the required
-layout; the commands below regenerate models, evaluations, and reports.
+Demonstrations, models, result JSON, and videos are intentionally excluded from
+Git. They contain generated or upstream-derived data and should be transferred
+or published separately only after checking the applicable data and asset
+licenses. The sealed fixed evaluation inputs are tracked because they contain
+no outcomes or model data and define the reusable benchmark scenes. The tracked
+`data/README.md` defines the demonstration layout; the commands below regenerate
+models, evaluations, and reports.
 
 Release directories follow the compact `vN` convention. The current defaults
 are `models/v3` and `results/v3`; V1/V2 remain immutable provenance. A release
@@ -95,22 +100,27 @@ participation and gripper training timing, so all eight main policies and the
 separate coordination HandOver policy must be retrained.
 
 ```bash
+export TABLE_II_DATA_ROOT=/path/to/table_ii/stage_5_demos
+export TABLE_I_DATA_ROOT=/path/to/table_i/demos
+export TABLE_III_DATA_ROOT=/path/to/table_iii/demos
+
 # Table II bimanual tasks
 python3.10 -m integrations.rlbench.rlbench_dynamac.direct_policy train \
   --task all \
-  --data-root integrations/rlbench/data/dynamac_table_ii_g5_a51b4e_128x128_seed0_20260811/stage_5_demos \
+  --data-root "$TABLE_II_DATA_ROOT" \
   --models-dir integrations/rlbench/models/v3 \
   --config integrations/rlbench/configs/dynamac_rlbench_v3.json
 
 # Table I unimanual tasks
 python3.10 -m integrations.rlbench.rlbench_dynamac.direct_policy train \
   --task all-unimanual \
-  --data-root integrations/rlbench/data/dynamac_table_i_live_g5_seed0 \
+  --data-root "$TABLE_I_DATA_ROOT" \
   --models-dir integrations/rlbench/models/v3 \
   --config integrations/rlbench/configs/dynamac_rlbench_v3.json
 
 # Table III coordination cohort
 python3.10 -m integrations.rlbench.rlbench_dynamac.table_iii_coordination train \
+  --data-root "$TABLE_III_DATA_ROOT" \
   --models-dir integrations/rlbench/models/v3/table_iii \
   --config integrations/rlbench/configs/dynamac_rlbench_v3.json
 ```

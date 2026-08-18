@@ -121,7 +121,6 @@ def test_coordination_training_is_staged_validated_and_never_overwritten(
 def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
     tmp_path, monkeypatch
 ):
-    pytest.skip("superseded by sealed fixed-source coordination evaluation tests")
     environment_module = ModuleType("rlbench.environment")
     rlbench_module = ModuleType("rlbench")
     rlbench_module.__path__ = []
@@ -175,6 +174,7 @@ def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
         max_primary_action_attempts,
         observation,
         fresh_task_generation,
+        staged_source_binding,
     ):
         assert worker.policy_steps == 37
         assert variation == episode
@@ -185,6 +185,7 @@ def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
         assert max_primary_action_attempts == 3
         assert observation == f"observation-{episode}"
         assert fresh_task_generation == {"episode": episode}
+        assert staged_source_binding == {"episode": episode, "bound": True}
         return {
             "episode": episode,
             "seed": seed + episode,
@@ -215,15 +216,72 @@ def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
     monkeypatch.setattr(coordination, "_task_class", lambda: dynamic_task)
     monkeypatch.setattr(coordination, "PolicyProcess", Worker)
     monkeypatch.setattr(coordination, "_run_episode", run_episode)
+    class TaskEnvironment:
+        def __init__(self, episode):
+            self.episode = episode
+
+        def get_observation(self):
+            return f"observation-{self.episode}"
+
+    def initialize_source(
+        environment,
+        task_class,
+        *,
+        episode_seed,
+        variation,
+        verify_instance,
+    ):
+        episode = episode_seed - 105
+        assert verify_instance is False
+        assert variation == episode
+        return (
+            TaskEnvironment(episode),
+            [f"description-{episode}"],
+            f"observation-{episode}",
+            {"episode": episode},
+        )
+
     monkeypatch.setattr(
         coordination,
         "initialize_fresh_task_generation",
-        lambda environment, task_class, *, episode_seed, variation: (
-            object(),
-            [],
-            f"observation-{episode_seed - 5}",
-            {"episode": episode_seed - 5},
+        initialize_source,
+    )
+    monkeypatch.setattr(
+        coordination,
+        "bind_staged_source_plan",
+        lambda task_environment, plan, *, descriptions, fresh_task_generation: {
+            "episode": task_environment.episode,
+            "bound": True,
+        },
+    )
+    source_plans = [
+        SimpleNamespace(validation={"source_seed": 105 + episode})
+        for episode in range(2)
+    ]
+    monkeypatch.setattr(
+        coordination,
+        "fixed_coordination_sources",
+        lambda eval_set_id: (
+            {
+                "manifest_sha256": "manifest-sha",
+                "payload": {
+                    "evaluation_set_id": eval_set_id,
+                    "spec": {"sha256": "spec-sha"},
+                },
+            },
+            {
+                "plans": source_plans,
+                "sha256": "batch-sha",
+                "batch_fingerprint": "batch-fingerprint",
+            },
         ),
+    )
+    monkeypatch.setattr(coordination, "FIXED_EVAL_EPISODES", 2)
+    monkeypatch.setattr(coordination, "GLOBAL_EVAL_SEED_START", 5)
+    monkeypatch.setattr(
+        coordination,
+        "validate_formal_artifact_paths",
+        lambda **kwargs: None,
     )
     trigger_authentication = {
         "trigger_step": 12,
@@ -249,6 +307,7 @@ def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
         headless=True,
         episodes=2,
         seed=5,
+        eval_set_id="test-fixed-eval",
         horizon=1000,
     )
 
@@ -274,6 +333,14 @@ def test_coordination_evaluation_is_reserved_atomic_and_identity_tagged(
     assert payload["variation_count"] == 5
     assert payload["variation_schedule"] == [0, 1]
     assert [row["variation"] for row in payload["results"]] == [0, 1]
+    assert payload["fixed_eval_set"] == {
+        "evaluation_set_id": "test-fixed-eval",
+        "manifest_sha256": "manifest-sha",
+        "spec_sha256": "spec-sha",
+        "selected_batch_sha256": "batch-sha",
+        "selected_batch_fingerprint": "batch-fingerprint",
+        "formal_access": "canonical_id_read_only_no_generation",
+    }
     assert not output.with_name(output.name + ".lock").exists()
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         coordination.evaluate(args)

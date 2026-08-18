@@ -690,6 +690,37 @@ def test_v2_dynamic_report_accepts_terminal_smooth_prefix(tmp_path):
     assert stack["status"] == "non-comparable diagnostic"
 
 
+@pytest.mark.parametrize("scenario", ("teleport", "smooth"))
+def test_v2_dynamic_report_rejects_event_after_terminal_step(
+    tmp_path,
+    scenario,
+):
+    path = tmp_path / "table_i_dynamic" / f"stack_wine_{scenario}_seed0_n200.json"
+    _write_run(
+        path,
+        task="stack_wine",
+        scenario=scenario,
+        rate=0.9,
+        family="table_i",
+        paper_comparable=False,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    row = payload["results"][199]
+    row["steps"] = row["interventions"][-1]["step"] - 1
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    records, _ = build_records(tmp_path, seed=0, episodes=200, horizon=1000)
+    stack = next(
+        row
+        for row in records
+        if row["table"] == "I"
+        and row["condition"]
+        == ("Teleportation" if scenario == "teleport" else "Smooth dynamics")
+        and row["task"] == "StackWine"
+    )
+    assert stack["status"] == "invalid diagnostic"
+
+
 @pytest.mark.parametrize(
     "mutation",
     (

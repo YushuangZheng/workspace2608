@@ -27,39 +27,49 @@ from types import SimpleNamespace
 import numpy as np
 
 from . import direct_evaluate, table_iii_coordination, unimanual_evaluate
+from .eval_set import fixed_coordination_sources, fixed_environment_plans
 from .records import atomic_json
+from .runtime import (
+    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+    bind_staged_source_plan,
+    initialize_fresh_task_generation,
+)
+from .v3_protocol import (
+    load_v3_intervention_protocol,
+    load_v3_motion_source_protocol,
+)
 
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v1"
-DEFAULT_OUTPUT_ROOT = INTEGRATION_ROOT / "results" / "failure_videos" / "v1"
+DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
+DEFAULT_OUTPUT_ROOT = INTEGRATION_ROOT / "results" / "failure_videos" / "v3"
 DEFAULT_SOURCE_RESULTS = {
     "bimanual_handover_item": (
         INTEGRATION_ROOT
         / "results"
-        / "v1"
+        / "v3"
         / "table_ii"
-        / "bimanual_handover_item_static_seed0_n200_h1000.json"
+        / "bimanual_handover_item_static_seed2608000000_n200_h1000.json"
     ),
     "bimanual_sweep_to_dustpan": (
         INTEGRATION_ROOT
         / "results"
-        / "v1"
+        / "v3"
         / "table_ii"
-        / "bimanual_sweep_to_dustpan_static_seed0_n200_h1000.json"
+        / "bimanual_sweep_to_dustpan_static_seed2608000000_n200_h1000.json"
     ),
     "bimanual_lift_tray": (
         INTEGRATION_ROOT
         / "results"
-        / "v1"
+        / "v3"
         / "table_ii"
-        / "bimanual_lift_tray_static_seed0_n200_h1000.json"
+        / "bimanual_lift_tray_static_seed2608000000_n200_h1000.json"
     ),
     "wipe_desk": (
         INTEGRATION_ROOT
         / "results"
-        / "v1"
+        / "v3"
         / "table_i"
-        / "wipe_desk_static_variation0_seed0_n200_h1000.json"
+        / "wipe_desk_static_variation0_seed2608000000_n200_h1000.json"
     ),
 }
 BIMANUAL_TASKS = set(direct_evaluate.TASKS)
@@ -67,6 +77,7 @@ SUPPORTED_TASKS = set(unimanual_evaluate.TASKS) | BIMANUAL_TASKS
 COORDINATION_SCHEMAS = {
     "dynamac-table-iii-coordination-local-v1",
     "dynamac-table-iii-coordination-local-v2",
+    "dynamac-table-iii-coordination-local-v3",
 }
 SCENARIOS = {"static", "smooth", "teleport"}
 DEFAULT_CAMERAS = ("front", "overhead")
@@ -115,9 +126,13 @@ def _require_current_evaluator_protocol(payload, task):
 
     family = _source_family(payload, task)
     expected = (
-        unimanual_evaluate.EVALUATION_PROTOCOL_ID
-        if family == "unimanual"
-        else direct_evaluate.EVALUATION_PROTOCOL_ID
+        table_iii_coordination.EVALUATION_PROTOCOL_ID
+        if family == "coordination"
+        else (
+            unimanual_evaluate.EVALUATION_PROTOCOL_ID
+            if family == "unimanual"
+            else direct_evaluate.EVALUATION_PROTOCOL_ID
+        )
     )
     actual = payload.get("evaluation_protocol_id")
     if actual != expected:
@@ -177,6 +192,121 @@ def _load_source(path, task, episode_indices):
             raise ValueError(f"episode {episode} was successful in the source evaluation")
         selected[episode] = row
     return payload, selected, hashlib.sha256(raw).hexdigest(), source_path
+
+
+def _load_sealed_replay_batch(source, task):
+    """Reload and authenticate the canonical V3 plan batch used by a result."""
+
+    fixed = source.get("fixed_eval_set")
+    if not isinstance(fixed, dict):
+        raise ValueError("V3 failure replay requires fixed-eval-set evidence")
+    eval_set_id = fixed.get("evaluation_set_id")
+    if not isinstance(eval_set_id, str) or not eval_set_id:
+        raise ValueError("source evaluation has an invalid fixed eval-set ID")
+
+    family = _source_family(source, task)
+    if family == "coordination":
+        manifest, batch = fixed_coordination_sources(eval_set_id)
+        selected_sha256 = batch["sha256"]
+        selected_fingerprint = batch["batch_fingerprint"]
+    else:
+        manifest, batch = fixed_environment_plans(eval_set_id, task)
+        reference = manifest["payload"]["environment_plan_batches"][task]
+        selected_sha256 = reference["sha256"]
+        selected_fingerprint = batch["payload"]["batch_fingerprint"]
+
+    expected_fixed = {
+        "manifest_sha256": manifest["manifest_sha256"],
+        "spec_sha256": manifest["payload"]["spec"]["sha256"],
+        "selected_batch_sha256": selected_sha256,
+        "selected_batch_fingerprint": selected_fingerprint,
+    }
+    if any(fixed.get(key) != value for key, value in expected_fixed.items()):
+        raise RuntimeError("source result does not match its sealed fixed eval set")
+
+    payload = batch.get("payload")
+    plans = batch.get("plans")
+    if not isinstance(payload, dict) or not isinstance(plans, list):
+        raise RuntimeError("sealed replay batch did not load completely")
+    if (
+        source.get("seed") != payload.get("base_seed")
+        or source.get("episodes") != payload.get("episodes")
+        or source.get("variation_schedule") != payload.get("variation_schedule")
+        or len(plans) != payload.get("episodes")
+    ):
+        raise RuntimeError("source result identity differs from its sealed plan batch")
+    return {
+        "family": family,
+        "evaluation_set_id": eval_set_id,
+        "manifest": manifest,
+        "batch": batch,
+        "plans": plans,
+        "variation_schedule": payload["variation_schedule"],
+    }
+
+
+def _sealed_episode_plan(replay_batch, original, episode):
+    """Bind one source row to its exact sealed A/B or coordination-A plan."""
+
+    plans = replay_batch["plans"]
+    variations = replay_batch["variation_schedule"]
+    if (
+        isinstance(episode, bool)
+        or not isinstance(episode, int)
+        or episode < 0
+        or episode >= len(plans)
+        or episode >= len(variations)
+    ):
+        raise ValueError("replay episode lies outside the sealed plan batch")
+    plan = plans[episode]
+    variation = variations[episode]
+    if plan.variation != variation:
+        raise RuntimeError("sealed replay plan variation is inconsistent")
+
+    plan_fingerprint = plan.fingerprint()
+    if replay_batch["family"] == "coordination":
+        binding = original.get("staged_source_binding")
+        row_fingerprint = (
+            binding.get("plan_fingerprint") if isinstance(binding, dict) else None
+        )
+    else:
+        row_fingerprint = original.get("motion_plan_fingerprint")
+        binding = original.get("staged_source_binding")
+        if (
+            isinstance(binding, dict)
+            and binding.get("motion_plan_fingerprint") != plan_fingerprint
+        ):
+            raise RuntimeError("source row has inconsistent staged-plan binding")
+    if row_fingerprint != plan_fingerprint:
+        raise RuntimeError("source row does not match its sealed replay plan")
+
+    fresh = original.get("fresh_task_generation")
+    source_seed = plan.validation.get("source_seed")
+    if (
+        not isinstance(fresh, dict)
+        or fresh.get("episode_seed") != source_seed
+        or fresh.get("variation") != variation
+    ):
+        raise RuntimeError("source row has inconsistent formal reset evidence")
+    return plan, int(variation), int(source_seed)
+
+
+def _validate_replay_plan(replay_batch, replay, plan):
+    if replay_batch["family"] == "coordination":
+        binding = replay.get("staged_source_binding")
+        replay_fingerprint = (
+            binding.get("plan_fingerprint") if isinstance(binding, dict) else None
+        )
+    else:
+        replay_fingerprint = replay.get("motion_plan_fingerprint")
+    fresh = replay.get("fresh_task_generation")
+    if (
+        replay_fingerprint != plan.fingerprint()
+        or not isinstance(fresh, dict)
+        or fresh.get("episode_seed") != plan.validation.get("source_seed")
+        or fresh.get("variation") != plan.variation
+    ):
+        raise RuntimeError("replay did not retain its sealed plan/reset binding")
 
 
 def _rgb_from_observation(observation, camera):
@@ -447,38 +577,162 @@ def _observation_config(cameras, resolution):
     return config
 
 
-def _run_selected_episode(task_environment, worker, task, source, episode):
+def _source_protocol_budgets(source):
+    intervention = load_v3_intervention_protocol()
+    motion = load_v3_motion_source_protocol()
+    family = _source_family(source, _source_policy_task(source))
+    settling = source.get("final_settling_protocol")
+    controller = source.get("controller")
+    retry = (
+        controller.get("primary_action_retry")
+        if isinstance(controller, dict)
+        else None
+    )
+    if (
+        not isinstance(settling, dict)
+        or settling.get("maximum_physics_steps")
+        != intervention["final_settling_physics_steps"]
+        or not isinstance(retry, dict)
+        or retry.get("max_primary_action_attempts_per_policy_tick")
+        != DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
+    ):
+        raise RuntimeError("source result has noncanonical V3 execution budgets")
+    protocol = (
+        source.get("scenario_protocol", {})
+        if family == "bimanual"
+        else source.get("protocol", {}) if family == "unimanual" else {}
+    )
+    if family == "bimanual" and (
+        protocol.get("max_sampling_attempts")
+        != motion["goal_sampling_max_attempts"]
+        or protocol.get("smooth_interpolation_calls")
+        != (
+            intervention["smooth_steps"]
+            if source.get("scenario") == "smooth"
+            else None
+        )
+    ):
+        raise RuntimeError("source bimanual intervention budgets are invalid")
+    if family == "unimanual" and (
+        protocol.get("intervention_max_attempts")
+        != motion["goal_sampling_max_attempts"]
+        or protocol.get("smooth_motion_calls") != intervention["smooth_steps"]
+    ):
+        raise RuntimeError("source unimanual intervention budgets are invalid")
+    return {
+        "smooth_steps": intervention["smooth_steps"],
+        "motion_attempts": motion["goal_sampling_max_attempts"],
+        "final_settling_steps": intervention["final_settling_physics_steps"],
+        "primary_action_attempts": DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+    }
+
+
+def _authenticated_replay_trigger(source, task, worker, budgets):
+    """Re-resolve the recorded trigger from the loaded checkpoint identity."""
+
     family = _source_family(source, task)
     if family == "coordination":
         protocol = source["coordination_protocol"]
-        trigger = protocol.get("trigger_evaluator_control_step")
-        if trigger is None:
-            trigger = protocol["trigger_policy_step"]
-        variation_schedule = source.get("variation_schedule")
-        if (
-            isinstance(variation_schedule, list)
-            and 0 <= episode < len(variation_schedule)
-        ):
-            variation = variation_schedule[episode]
-        else:
-            variation_count = source.get(
-                "variation_count",
-                table_iii_coordination.EXPECTED_VARIATION_COUNT,
+        args = SimpleNamespace(
+            arm=protocol["perturbed_arm"],
+            trigger_step=protocol.get("trigger_policy_step"),
+            final_settling_steps=budgets["final_settling_steps"],
+        )
+        registry, authentication, trigger = (
+            table_iii_coordination._authenticated_v3_coordination_trigger(
+                args,
+                worker,
             )
-            variation = episode % int(variation_count)
+        )
+    else:
+        protocol = (
+            source.get("scenario_protocol", {})
+            if family == "bimanual"
+            else source.get("protocol", {})
+        )
+        requested_trigger = (
+            None
+            if source.get("scenario") == "static"
+            else protocol.get("trigger_policy_step")
+        )
+        if family == "bimanual":
+            args = SimpleNamespace(
+                task=task,
+                scenario_steps=budgets["smooth_steps"],
+                scenario_max_attempts=budgets["motion_attempts"],
+                final_settling_steps=budgets["final_settling_steps"],
+                scenario_trigger_step=requested_trigger,
+                scenario_reference_steps=protocol.get("trigger_reference_steps"),
+            )
+            registry, authentication = (
+                direct_evaluate._authenticated_v3_dynamic_trigger(args, worker)
+            )
+        else:
+            args = SimpleNamespace(
+                task=task,
+                smooth_steps=budgets["smooth_steps"],
+                intervention_attempts=budgets["motion_attempts"],
+                final_settling_steps=budgets["final_settling_steps"],
+                trigger_step=requested_trigger,
+            )
+            registry, authentication = (
+                unimanual_evaluate._authenticated_v3_dynamic_trigger(args, worker)
+            )
+        trigger = (
+            None
+            if source.get("scenario") == "static"
+            else authentication["trigger_step"]
+        )
+
+    if (
+        protocol.get("trigger_authentication") != authentication
+        or protocol.get("trigger_policy_step") != trigger
+        or protocol.get("intervention_registry_schema") != registry["schema"]
+        or protocol.get("intervention_registry_fingerprint")
+        != registry["fingerprint"]
+    ):
+        raise RuntimeError(
+            "source trigger is not authenticated by the loaded checkpoint"
+        )
+    return trigger
+
+
+def _run_selected_episode(
+    task_environment,
+    worker,
+    task,
+    source,
+    episode,
+    *,
+    motion_plan,
+    trigger_step,
+    descriptions,
+    observation,
+    fresh_task_generation,
+    staged_source_binding=None,
+    budgets,
+):
+    family = _source_family(source, task)
+    if family == "coordination":
+        protocol = source["coordination_protocol"]
         return table_iii_coordination._run_episode(
             task_environment,
             worker,
             episode=episode,
-            variation=variation,
+            variation=motion_plan.variation,
             seed=source["seed"],
             horizon=source["horizon"],
             arm=protocol["perturbed_arm"],
-            trigger=int(trigger),
+            trigger=int(trigger_step),
+            max_primary_action_attempts=budgets["primary_action_attempts"],
+            final_settling_steps=budgets["final_settling_steps"],
+            descriptions=descriptions,
+            observation=observation,
+            fresh_task_generation=fresh_task_generation,
+            staged_source_binding=staged_source_binding,
         )
     if family == "bimanual":
         protocol = source.get("scenario_protocol", {})
-        scenario_steps = protocol.get("smooth_interpolation_calls")
         return direct_evaluate._run_episode(
             task_environment,
             worker,
@@ -490,24 +744,43 @@ def _run_selected_episode(task_environment, worker, task, source, episode):
                 "trigger_fraction_of_nominal_policy_length",
                 protocol.get("trigger_fraction", 1.0 / 3.0),
             ),
-            scenario_reference_steps=protocol.get("trigger_reference_steps", worker.policy_steps),
-            scenario_steps=10 if scenario_steps is None else int(scenario_steps),
-            scenario_max_attempts=protocol.get("max_sampling_attempts", 20),
+            scenario_trigger_step=trigger_step,
+            scenario_reference_steps=worker.policy_steps,
+            scenario_steps=budgets["smooth_steps"],
+            scenario_max_attempts=budgets["motion_attempts"],
+            max_primary_action_attempts=budgets["primary_action_attempts"],
+            motion_plan=motion_plan,
+            final_settling_steps=budgets["final_settling_steps"],
+            descriptions=descriptions,
+            observation=observation,
+            fresh_task_generation=fresh_task_generation,
         )
     protocol = source.get("protocol", {})
     run_args = SimpleNamespace(
         seed=source["seed"],
-        variation=source.get("variation", 0),
+        variation=motion_plan.variation,
         horizon=source["horizon"],
         scenario=source["scenario"],
         trigger_fraction=protocol.get(
             "trigger_fraction_of_nominal_policy_length",
             protocol.get("trigger_fraction_of_fitted_policy", 1.0 / 3.0),
         ),
-        smooth_steps=protocol.get("smooth_motion_calls", 10),
-        intervention_attempts=protocol.get("intervention_max_attempts", 20),
+        trigger_step=trigger_step,
+        smooth_steps=budgets["smooth_steps"],
+        intervention_attempts=budgets["motion_attempts"],
+        max_primary_action_attempts=budgets["primary_action_attempts"],
+        final_settling_steps=budgets["final_settling_steps"],
     )
-    return unimanual_evaluate._run_episode(task_environment, worker, run_args, episode)
+    return unimanual_evaluate._run_episode(
+        task_environment,
+        worker,
+        run_args,
+        episode,
+        motion_plan=motion_plan,
+        descriptions=descriptions,
+        observation=observation,
+        fresh_task_generation=fresh_task_generation,
+    )
 
 
 def _runtime_components(args, source):
@@ -538,7 +811,7 @@ def _runtime_components(args, source):
         )
         worker_class = direct_evaluate.PolicyProcess
         default_python = direct_evaluate.DEFAULT_POLICY_PYTHON
-        default_models_dir = DEFAULT_MODELS_DIR
+        default_models_dir = direct_evaluate.DEFAULT_MODELS_DIR
     else:
         module_name, class_name = unimanual_evaluate.TASKS[args.task]
         action_mode = unimanual_evaluate._make_action_mode()
@@ -549,7 +822,7 @@ def _runtime_components(args, source):
         )
         worker_class = unimanual_evaluate.PolicyProcess
         default_python = unimanual_evaluate.DEFAULT_POLICY_PYTHON
-        default_models_dir = DEFAULT_MODELS_DIR
+        default_models_dir = unimanual_evaluate.DEFAULT_MODELS_DIR
     task_class = getattr(importlib.import_module(module_name), class_name)
     policy_python = args.policy_python or default_python
     models_dir = args.models_dir or default_models_dir
@@ -583,8 +856,14 @@ def record(args):
     source_path = args.source_result or DEFAULT_SOURCE_RESULTS.get(args.task)
     if source_path is None:
         raise ValueError(f"--source-result is required because {args.task!r} has no default")
-    source, originals, source_sha, resolved_source = _load_source(source_path, args.task, episodes)
+    source, originals, source_sha, resolved_source = _load_source(
+        source_path,
+        args.task,
+        episodes,
+    )
     replay_protocol_id = _require_current_evaluator_protocol(source, args.task)
+    replay_batch = _load_sealed_replay_batch(source, args.task)
+    budgets = _source_protocol_budgets(source)
     output_key = _validate_output_key(args.output_key or _default_output_key(source, args.task))
     target = Path(args.output_root).resolve() / output_key
     if target.exists():
@@ -599,11 +878,33 @@ def record(args):
         environment, worker, task_class = _runtime_components(args, source)
         if worker.model_identity != source["model_identity"]:
             raise RuntimeError("loaded model identity differs from the source evaluation")
+        trigger_step = _authenticated_replay_trigger(
+            source,
+            args.task,
+            worker,
+            budgets,
+        )
         environment.launch()
         launched = True
-        task_environment = environment.get_task(task_class)
         for episode in episodes:
             episode_seed = source["seed"] + episode
+            motion_plan, variation, formal_reset_seed = _sealed_episode_plan(
+                replay_batch,
+                originals[episode],
+                episode,
+            )
+            (
+                task_environment,
+                descriptions,
+                observation,
+                fresh_task_generation,
+            ) = initialize_fresh_task_generation(
+                environment,
+                task_class,
+                episode_seed=formal_reset_seed,
+                variation=variation,
+                verify_instance=False,
+            )
             stem = f"episode_{episode:03d}_seed_{episode_seed:03d}"
             video_path = staging / f"{stem}.mp4"
             recorder = ObservationRecorder(
@@ -614,7 +915,31 @@ def record(args):
             )
             proxy = RecordingTaskEnvironment(task_environment, recorder)
             try:
-                replay = _run_selected_episode(proxy, worker, args.task, source, episode)
+                recorder.capture(observation)
+                staged_source_binding = None
+                if replay_batch["family"] == "coordination":
+                    staged_source_binding = bind_staged_source_plan(
+                        proxy,
+                        motion_plan,
+                        descriptions=descriptions,
+                        fresh_task_generation=fresh_task_generation,
+                    )
+                    observation = proxy.get_observation()
+                replay = _run_selected_episode(
+                    proxy,
+                    worker,
+                    args.task,
+                    source,
+                    episode,
+                    motion_plan=motion_plan,
+                    trigger_step=trigger_step,
+                    descriptions=descriptions,
+                    observation=observation,
+                    fresh_task_generation=fresh_task_generation,
+                    staged_source_binding=staged_source_binding,
+                    budgets=budgets,
+                )
+                _validate_replay_plan(replay_batch, replay, motion_plan)
                 recorder.close()
             except Exception:
                 recorder.abort()
@@ -622,6 +947,9 @@ def record(args):
             attempt = {
                 "episode": episode,
                 "episode_seed": episode_seed,
+                "formal_reset_seed": formal_reset_seed,
+                "variation": variation,
+                "sealed_plan_fingerprint": motion_plan.fingerprint(),
                 "original_result": originals[episode],
                 "replay_result": replay,
                 "replay_confirmed_failure": not bool(replay.get("success")),
@@ -655,7 +983,6 @@ def record(args):
                 worker.model_identity,
                 source,
             )
-            family = _source_family(source, args.task)
             sidecar = {
                 "schema": SCHEMA,
                 "task": args.task,
@@ -663,11 +990,10 @@ def record(args):
                 "scenario": source["scenario"],
                 "episode": episode,
                 "episode_seed": episode_seed,
-                "variation": (
-                    episode % task_environment.variation_count()
-                    if family in {"bimanual", "coordination"}
-                    else source.get("variation", 0)
-                ),
+                "formal_reset_seed": formal_reset_seed,
+                "variation": variation,
+                "sealed_plan_fingerprint": motion_plan.fingerprint(),
+                "fixed_eval_set": source["fixed_eval_set"],
                 "source_result": str(resolved_source),
                 "source_result_sha256": source_sha,
                 "evaluation_protocol_id": replay_protocol_id,
@@ -704,6 +1030,9 @@ def record(args):
                 {
                     "episode": episode,
                     "episode_seed": episode_seed,
+                    "formal_reset_seed": formal_reset_seed,
+                    "variation": variation,
+                    "sealed_plan_fingerprint": motion_plan.fingerprint(),
                     "video": video_path.name,
                     "video_sha256": sidecar["video"]["sha256"],
                     "metadata": sidecar_path.name,
@@ -729,6 +1058,7 @@ def record(args):
             "output_key": output_key,
             "source_result": str(resolved_source),
             "source_result_sha256": source_sha,
+            "fixed_eval_set": source["fixed_eval_set"],
             "model_identity": worker.model_identity,
             "evaluation_protocol_id": replay_protocol_id,
             "source_protocol": (

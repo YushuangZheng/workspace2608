@@ -11,6 +11,11 @@ the reproduced policy, RLBench adaptation, and local evaluation safeguards.
 - The shared core TAPAS NumPy port segments demonstrations from end-effector
   velocity and gripper-state transitions, merges and aligns candidates, and
   resamples each corresponding skill to its mean duration.
+- StoreBottle uses independent arm segmentation. HandOver uses a shared union
+  with six boundaries; LiftTray and SweepDust use local shared-union profiles
+  with two and four boundaries. These task-specific segmentation choices remain
+  pending author confirmation, while the resulting arm policies execute on
+  independent clocks.
 - Both learned pose and signed gripper state use the same current sample
   `obs[t]`. The first observation showing a new gripper state belongs to the new
   state; V3 does not shift gripper targets to `obs[t+1]`.
@@ -112,8 +117,10 @@ paper.
 ## Release identity
 
 - `dynamac_rlbench_v1.json`: full-pose Equation (6), skill-majority constant
-  mask, next-observation gripper target.
+  mask, next-observation gripper target, and the local `keep_argmax` completion
+  when strict Equation (6) selection is empty.
 - `dynamac_rlbench_v2.json`: Equation (5)-weighted positional Equation (6),
+  uniformly across every task and arm with no HandOver-specific override;
   otherwise V1 mask/timing semantics.
 - `dynamac_rlbench_v3.json`: majority-gated raw per-time-step Equation (5),
   current-observation gripper target, and the V3 protocol in this document.

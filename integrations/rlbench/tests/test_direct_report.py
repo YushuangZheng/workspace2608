@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from integrations.rlbench.rlbench_dynamac import direct_report
 from integrations.rlbench.rlbench_dynamac.direct_policy import (
     TRAINING_MANIFEST_SCHEMA_V3,
     V3_ADAPTER_PROTOCOL,
@@ -14,6 +15,8 @@ from integrations.rlbench.rlbench_dynamac.paper_comparison import (
     EXPECTED_LOCAL_CONFIG,
     EXPECTED_SELECTION_SEMANTICS_ID,
     EXPECTED_TAPAS_COMMIT,
+    LocalRun,
+    _valid_v3_final_settling,
     expected_evaluation_protocol_id,
 )
 from integrations.rlbench.rlbench_dynamac.runtime import (
@@ -238,9 +241,9 @@ def _write_results(tmp_path, *, seed: int = 0) -> None:
         path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_direct_report_validates_and_summarizes_runs(tmp_path) -> None:
-    pytest.skip("superseded by sealed fixed-eval static report fixtures")
+def test_direct_report_validates_and_summarizes_runs(tmp_path, monkeypatch) -> None:
     _write_results(tmp_path)
+    monkeypatch.setattr(direct_report, "_valid_v3_static_protocol", lambda run: True)
 
     rows = load_rows(tmp_path, seed=0, episodes=2, horizon=1000)
     report = markdown(rows, seed=0)
@@ -283,9 +286,10 @@ def test_direct_report_rejects_non_v3_manifest(tmp_path) -> None:
 
 def test_direct_report_accepts_rlbench_success_terminate_settling_pair(
     tmp_path,
+    monkeypatch,
 ) -> None:
-    pytest.skip("superseded by sealed fixed-eval static report fixtures")
     _write_results(tmp_path)
+    monkeypatch.setattr(direct_report, "_valid_v3_static_protocol", lambda run: True)
     for task, _label, _paper_rate in TASKS:
         path = tmp_path / f"{task}_static_seed0_n2_h1000.json"
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -302,6 +306,19 @@ def test_direct_report_accepts_rlbench_success_terminate_settling_pair(
         )
         payload["results"][0]["reason"] = "success_after_final_settling"
         path.write_text(json.dumps(payload), encoding="utf-8")
+        run = LocalRun(
+            path=path,
+            task=task,
+            scenario="static",
+            seed=0,
+            episodes=2,
+            horizon=1000,
+            variation=0,
+            successes=1,
+            success_rate=0.5,
+            payload=payload,
+        )
+        assert _valid_v3_final_settling(run) is True
 
     rows = load_rows(tmp_path, seed=0, episodes=2, horizon=1000)
     assert len(rows) == len(TASKS)
