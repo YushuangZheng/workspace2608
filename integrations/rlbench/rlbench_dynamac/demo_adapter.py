@@ -5,8 +5,9 @@ current local ``DynaMACDemonstration`` type is loaded lazily only when
 constructing demonstrations, so offline data conversion stays simulator-free.
 Pose/frame schemas come from the pinned public RLBench fork, while skill labels
 come from the independent TAPAS-code-aligned NumPy port plus the author's
-2026-08-14 semantic clarification.  Pose targets use the clarified time-state
-stream; the legacy next-observation helpers remain public compatibility APIs.
+2026-08-14 semantic clarification.  Pose and gripper targets use the clarified
+current-observation time-state stream; the legacy next-observation helpers
+remain public compatibility APIs.
 
 RLBench's ``low_dim_obs.pkl`` is a Python pickle and therefore is not a safe
 interchange format.  :func:`load_low_dim_obs_pickle` uses a narrow allowlist,
@@ -35,8 +36,8 @@ from essay2608.policy.tapas_segmentation import (
 )
 
 from .tapas_segmentation import (
-    TAPAS_ACTION_TIMING,
-    forward_gripper_action,
+    DYNAMAC_CURRENT_STATE_TIMING,
+    current_gripper_state,
     load_rlbench_segmentation_config,
     save_bimanual_segmentation_debug_plot,
 )
@@ -58,6 +59,7 @@ ADAPTER_CLAIM_BOUNDARY = (
     "2026-08-14 clarification; implementation remains an independent adapter."
 )
 DYNAMAC_POSE_TARGET_TIMING = "time-state current EE pose from obs[t]"
+DYNAMAC_GRIPPER_TARGET_TIMING = "time-state current gripper state from obs[t]"
 
 
 class UnsafeLowDimPickleError(ValueError):
@@ -497,7 +499,7 @@ def make_unimanual_demonstrations(
     Demonstration = _resolve_demonstration_type(demonstration_type)
     demonstrations: list[Any] = []
     for name, episode, labels in zip(demo_names, arrays, segmentation.skill_labels, strict=True):
-        gripper_action = forward_gripper_action(episode.gripper_state, signed=signed_gripper)[
+        gripper_action = current_gripper_state(episode.gripper_state, signed=signed_gripper)[
             :, None
         ]
         demonstrations.append(
@@ -511,7 +513,7 @@ def make_unimanual_demonstrations(
             )
         )
     audit = {
-        "schema": "rlbench-dynamac-demo-adapter-v2",
+        "schema": "rlbench-dynamac-demo-adapter-v3",
         "task": spec.task_name,
         "bimanual": False,
         "demonstration_names": demo_names,
@@ -523,9 +525,9 @@ def make_unimanual_demonstrations(
         "rlbench_reference_commit": RLBENCH_REFERENCE_COMMIT,
         "pose_conversion": "RLBench world xyzw -> core world wxyz",
         "pose_target_timing": DYNAMAC_POSE_TARGET_TIMING,
-        "gripper_action_timing": TAPAS_ACTION_TIMING,
-        "action_timing": TAPAS_ACTION_TIMING,
-        "legacy_action_timing_field_scope": "gripper_only",
+        "gripper_action_timing": DYNAMAC_GRIPPER_TARGET_TIMING,
+        "action_timing": DYNAMAC_CURRENT_STATE_TIMING,
+        "pose_and_gripper_sample_aligned": True,
         "gripper_encoding": "2 * gripper_open - 1" if signed_gripper else "native [0, 1]",
         "segmentation": segmentation.audit,
         "adapter_claim_boundary": ADAPTER_CLAIM_BOUNDARY,
@@ -598,7 +600,7 @@ def make_bimanual_demonstrations(
             Demonstration(
                 ee_pose=episode.left.ee_pose,
                 action_pose=episode.left.ee_pose.copy(),
-                gripper=forward_gripper_action(episode.left.gripper_state, signed=signed_gripper)[
+                gripper=current_gripper_state(episode.left.gripper_state, signed=signed_gripper)[
                     :, None
                 ],
                 frames=episode.left.frames,
@@ -610,7 +612,7 @@ def make_bimanual_demonstrations(
             Demonstration(
                 ee_pose=episode.right.ee_pose,
                 action_pose=episode.right.ee_pose.copy(),
-                gripper=forward_gripper_action(episode.right.gripper_state, signed=signed_gripper)[
+                gripper=current_gripper_state(episode.right.gripper_state, signed=signed_gripper)[
                     :, None
                 ],
                 frames=episode.right.frames,
@@ -619,7 +621,7 @@ def make_bimanual_demonstrations(
             )
         )
     audit = {
-        "schema": "rlbench-dynamac-demo-adapter-v2",
+        "schema": "rlbench-dynamac-demo-adapter-v3",
         "task": spec.task_name,
         "bimanual": True,
         "demonstration_names": demo_names,
@@ -631,9 +633,9 @@ def make_bimanual_demonstrations(
         "rlbench_reference_commit": RLBENCH_REFERENCE_COMMIT,
         "pose_conversion": "RLBench world xyzw -> core world wxyz",
         "pose_target_timing": DYNAMAC_POSE_TARGET_TIMING,
-        "gripper_action_timing": TAPAS_ACTION_TIMING,
-        "action_timing": TAPAS_ACTION_TIMING,
-        "legacy_action_timing_field_scope": "gripper_only",
+        "gripper_action_timing": DYNAMAC_GRIPPER_TARGET_TIMING,
+        "action_timing": DYNAMAC_CURRENT_STATE_TIMING,
+        "pose_and_gripper_sample_aligned": True,
         "gripper_encoding": "2 * gripper_open - 1" if signed_gripper else "native [0, 1]",
         "segmentation_source_status": TAPAS_NUMPY_PORT_SOURCE_STATUS,
         "bimanual_segmentation_source_status": segmentation.coordination_source_status,
@@ -667,6 +669,8 @@ __all__ = [
     "DEFAULT_MAX_ARRAY_BYTES",
     "DEFAULT_MAX_GRAPH_OBJECTS",
     "DEFAULT_MAX_PICKLE_BYTES",
+    "DYNAMAC_GRIPPER_TARGET_TIMING",
+    "DYNAMAC_POSE_TARGET_TIMING",
     "PICKLE_LOADER_STATUS",
     "UnimanualDemonstrationResult",
     "UnsafeLowDimPickleError",

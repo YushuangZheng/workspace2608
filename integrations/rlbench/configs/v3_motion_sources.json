@@ -1,0 +1,19 @@
+{
+  "schema": "rlbench-dynamac-v3-motion-sources-v1",
+  "release": "v3",
+  "source_selection_max_attempts": 20,
+  "goal_sampling_max_attempts": 100,
+  "selection_policy": "manual_spatial_task_semantics_before_formal_results",
+  "sampling_scope": "workspace_boundary_root_rigid_transform",
+  "result_based_retuning_forbidden": true,
+  "tasks": {
+    "stack_wine": {"spatial_root_name": "stack_wine", "spatial_root_type": "DUMMY", "moved_entity_scope": "complete_boundary_root_subtree", "spatial_selection_reason": "task workspace placement root"},
+    "place_cups": {"spatial_root_name": "place_cups", "spatial_root_type": "DUMMY", "moved_entity_scope": "complete_boundary_root_subtree", "spatial_selection_reason": "task workspace placement root"},
+    "open_microwave": {"spatial_root_name": "boundary_root", "spatial_root_type": "SHAPE", "moved_entity_scope": "complete_boundary_root_subtree", "spatial_selection_reason": "microwave workspace placement root"},
+    "wipe_desk": {"spatial_root_name": "wipe_desk", "spatial_root_type": "DUMMY", "moved_entity_scope": "complete_boundary_root_subtree", "spatial_selection_reason": "task workspace placement root"},
+    "bimanual_put_bottle_in_fridge": {"spatial_root_name": "fridge_root", "spatial_root_type": "SHAPE", "moved_entity_scope": "bottle_and_visual_and_waypoint4_through_waypoint6_subtree", "spatial_selection_reason": "public task boundary_root moves the bottle interaction subtree rather than the fridge body"},
+    "bimanual_handover_item": {"spatial_root_name": "bimanual_handover_item", "spatial_root_type": "DUMMY", "moved_entity_scope": "complete_boundary_root_subtree_including_items0_through4", "spatial_selection_reason": "public task workspace placement root"},
+    "bimanual_lift_tray": {"spatial_root_name": "bimanual_lift_tray", "spatial_root_type": "DUMMY", "moved_entity_scope": "complete_boundary_root_subtree", "spatial_selection_reason": "public task workspace placement root"},
+    "bimanual_sweep_to_dustpan": {"spatial_root_name": "bimanual_sweep_to_dustpan", "spatial_root_type": "DUMMY", "moved_entity_scope": "complete_boundary_root_subtree", "spatial_selection_reason": "public task workspace placement root"}
+  }
+}

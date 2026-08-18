@@ -17,6 +17,7 @@ import shutil
 import sys
 import tempfile
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ from typing import Any
 import numpy as np
 
 from .demo_adapter import (
+    DYNAMAC_GRIPPER_TARGET_TIMING,
+    DYNAMAC_POSE_TARGET_TIMING,
     load_low_dim_obs_pickles,
     make_bimanual_demonstrations,
     make_unimanual_demonstrations,
@@ -36,6 +39,11 @@ from .runtime import (
     unimanual_observation_from_rlbench,
 )
 from .task_specs import get_task_spec, load_task_specs
+from .v3_protocol import (
+    bimanual_checkpoint_trigger_audit,
+    build_v3_trigger_anchor_evidence,
+    checkpoint_trigger_audit,
+)
 
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_ROOT = (
@@ -44,12 +52,26 @@ DEFAULT_DATA_ROOT = (
     / "dynamac_table_ii_g5_a51b4e_128x128_seed0_20260811"
     / "stage_5_demos"
 )
-# The literal paper configuration fails when strict Eq. (6) thresholding leaves
-# no selected frame.  The executable local protocol keeps the tied numerical
-# argmax only in that otherwise undefined case; every checkpoint records this
-# choice in its serialized configuration.
-DEFAULT_CONFIG = INTEGRATION_ROOT / "configs" / "dynamac_rlbench_local.json"
-DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v1"
+# Release defaults always name the immutable configuration file that is part of
+# that release's identity.  ``dynamac_rlbench_local.json`` remains a historical
+# compatibility alias and is deliberately not used for V3 authentication.
+DEFAULT_CONFIG = INTEGRATION_ROOT / "configs" / "dynamac_rlbench_v3.json"
+DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
+TRAINING_MANIFEST_SCHEMA_V2 = "dynamac-direct-training-v2"
+TRAINING_MANIFEST_SCHEMA_V3 = "dynamac-direct-training-v3"
+AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS = frozenset(
+    {TRAINING_MANIFEST_SCHEMA_V2, TRAINING_MANIFEST_SCHEMA_V3}
+)
+V3_ADAPTER_PROTOCOL = {
+    "schema": "rlbench-dynamac-demo-adapter-v3",
+    "pose_target_timing": DYNAMAC_POSE_TARGET_TIMING,
+    "gripper_action_timing": DYNAMAC_GRIPPER_TARGET_TIMING,
+    "action_timing": "obs[t] current state",
+    "pose_and_gripper_sample_aligned": True,
+}
+POLICY_CLOCK_SEMANTICS_ID = (
+    "policy-tick-transaction-commit-on-primary-action-success-v1"
+)
 
 
 def _episode_number(path: Path) -> tuple[int, str]:
@@ -91,6 +113,10 @@ def train_task(
     demonstration_count: int = 5,
 ) -> dict[str, Any]:
     """Fit, validate, and atomically publish one complete task model."""
+
+    from .evaluation_split import validate_training_entry_paths
+
+    validate_training_entry_paths(data_root, models_dir, config_path)
 
     output = models_dir / task
     with reserve_output(output):
@@ -158,6 +184,7 @@ def _train_task_into(
                 "fingerprint": policy.right.fingerprint(),
             },
         }
+        checkpoint_audit = bimanual_checkpoint_trigger_audit(policy)
     else:
         converted = make_unimanual_demonstrations(episodes, spec, names=names)
         policy = DynaMAC(config=config).fit(converted.demonstrations)
@@ -172,9 +199,44 @@ def _train_task_into(
             "fingerprint": policy.fingerprint(),
             "adapter": converted.audit,
         }
-    summary["manifest_schema"] = "dynamac-direct-training-v2"
+        checkpoint_audit = checkpoint_trigger_audit(policy)
+    summary["manifest_schema"] = TRAINING_MANIFEST_SCHEMA_V3
+    summary["checkpoint_trigger_audit"] = checkpoint_audit
+    summary["v3_trigger_anchor_evidence"] = build_v3_trigger_anchor_evidence(
+        task,
+        checkpoint_audit,
+        summary,
+    )
     atomic_json(output / "training.json", summary)
     return summary
+
+
+def _adapter_protocol_identity(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the release-relevant adapter fields without copying bulky audits."""
+
+    audit = manifest.get("adapter")
+    if not isinstance(audit, dict):
+        return None
+    return {key: audit.get(key) for key in V3_ADAPTER_PROTOCOL}
+
+
+def _validate_v3_adapter_protocol(manifest: dict[str, Any]) -> None:
+    if _adapter_protocol_identity(manifest) != V3_ADAPTER_PROTOCOL:
+        raise RuntimeError(
+            "staged V3 manifest does not use aligned obs[t] pose/gripper semantics"
+        )
+
+
+def _validate_v3_trigger_protocol(
+    task: str,
+    manifest: dict[str, Any],
+    checkpoint_audit: dict[str, Any],
+) -> None:
+    if manifest.get("checkpoint_trigger_audit") != checkpoint_audit:
+        raise RuntimeError("staged V3 checkpoint trigger audit mismatch")
+    expected = build_v3_trigger_anchor_evidence(task, checkpoint_audit, manifest)
+    if manifest.get("v3_trigger_anchor_evidence") != expected:
+        raise RuntimeError("staged V3 trigger anchor evidence mismatch")
 
 
 def _validate_published_model(
@@ -188,6 +250,11 @@ def _validate_published_model(
 
     if summary.get("task") != task:
         raise RuntimeError("staged training manifest has the wrong task identity")
+    manifest_schema = summary.get("manifest_schema")
+    if manifest_schema not in AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS:
+        raise RuntimeError("staged training manifest schema is not authenticated")
+    if manifest_schema == TRAINING_MANIFEST_SCHEMA_V3:
+        _validate_v3_adapter_protocol(summary)
     if summary.get("bimanual"):
         base_record = summary.get("config")
         if not isinstance(base_record, dict):
@@ -225,12 +292,26 @@ def _validate_published_model(
         right_identity = right.summary()
         if any(left_identity[field] != right_identity[field] for field in identity_fields):
             raise RuntimeError("staged bimanual checkpoints have mismatched model identity")
+        if manifest_schema == TRAINING_MANIFEST_SCHEMA_V3:
+            _validate_v3_trigger_protocol(
+                task,
+                summary,
+                bimanual_checkpoint_trigger_audit(
+                    BimanualDynaMAC(left=left, right=right)
+                ),
+            )
     else:
         policy = DynaMAC.load(output / "model.npz")
         if summary.get("fingerprint") != policy.fingerprint():
             raise RuntimeError("staged checkpoint fingerprint mismatch")
         if summary.get("config") != asdict(policy.config):
             raise RuntimeError("staged checkpoint config mismatch")
+        if manifest_schema == TRAINING_MANIFEST_SCHEMA_V3:
+            _validate_v3_trigger_protocol(
+                task,
+                summary,
+                checkpoint_trigger_audit(policy),
+            )
 
 
 class _WireObservation:
@@ -268,8 +349,9 @@ class PolicyServer:
             raise ValueError("training manifest task does not match the requested policy")
         if manifest.get("bimanual") not in {None, self.bimanual}:
             raise ValueError("training manifest arm count does not match the task")
-        manifest_authenticated = manifest.get("manifest_schema") == (
-            "dynamac-direct-training-v2"
+        manifest_authenticated = (
+            manifest.get("manifest_schema")
+            in AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS
         )
         if manifest_authenticated:
             _validate_published_model(task, task_dir, manifest)
@@ -299,6 +381,22 @@ class PolicyServer:
                 "training_manifest_schema": manifest.get("manifest_schema"),
                 "manifest_authenticated": manifest_authenticated,
                 "training_config": manifest.get("config") if manifest_authenticated else None,
+                "training_adapter_protocol": (
+                    _adapter_protocol_identity(manifest)
+                    if manifest_authenticated
+                    else None
+                ),
+                "checkpoint_trigger_audit_fingerprint": (
+                    manifest.get("checkpoint_trigger_audit", {}).get("fingerprint")
+                    if manifest_authenticated
+                    and isinstance(manifest.get("checkpoint_trigger_audit"), dict)
+                    else None
+                ),
+                "v3_trigger_anchor_evidence": (
+                    manifest.get("v3_trigger_anchor_evidence")
+                    if manifest_authenticated
+                    else None
+                ),
             }
             if self.bimanual
             else {
@@ -314,8 +412,67 @@ class PolicyServer:
                 "training_manifest_schema": manifest.get("manifest_schema"),
                 "manifest_authenticated": manifest_authenticated,
                 "training_config": manifest.get("config") if manifest_authenticated else None,
+                "training_adapter_protocol": (
+                    _adapter_protocol_identity(manifest)
+                    if manifest_authenticated
+                    else None
+                ),
+                "checkpoint_trigger_audit_fingerprint": (
+                    manifest.get("checkpoint_trigger_audit", {}).get("fingerprint")
+                    if manifest_authenticated
+                    and isinstance(manifest.get("checkpoint_trigger_audit"), dict)
+                    else None
+                ),
+                "v3_trigger_anchor_evidence": (
+                    manifest.get("v3_trigger_anchor_evidence")
+                    if manifest_authenticated
+                    else None
+                ),
             }
         )
+        self._pending_transaction: dict[str, Any] | None = None
+        self._next_transaction_id = 1
+
+    def _capture_runtime(self) -> Any:
+        """Capture all mutable policy state before one tentative prediction."""
+
+        if not self.bimanual:
+            return self.policy._capture_runtime_state()
+        return {
+            "left": self.policy.left._capture_runtime_state(),
+            "right": self.policy.right._capture_runtime_state(),
+            "last_left_action": deepcopy(self.policy._last_left_action),
+            "last_right_action": deepcopy(self.policy._last_right_action),
+        }
+
+    def _restore_runtime(self, state: Any) -> None:
+        if not self.bimanual:
+            self.policy._restore_runtime_state(state)
+            return
+        self.policy.left._restore_runtime_state(state["left"])
+        self.policy.right._restore_runtime_state(state["right"])
+        self.policy._last_left_action = deepcopy(state["last_left_action"])
+        self.policy._last_right_action = deepcopy(state["last_right_action"])
+
+    def _resolve_transaction(self, request: dict[str, Any], *, commit: bool) -> dict[str, Any]:
+        pending = self._pending_transaction
+        if pending is None:
+            raise RuntimeError("no policy action is awaiting commit or abort")
+        transaction_id = request.get("transaction_id")
+        if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
+            raise RuntimeError("policy transaction id must be an integer")
+        if transaction_id != pending["transaction_id"]:
+            raise RuntimeError("policy transaction id does not match the pending action")
+        if not commit:
+            self._restore_runtime(pending["runtime"])
+        self._pending_transaction = None
+        return {
+            "ok": True,
+            "transaction_id": transaction_id,
+            "committed": bool(commit),
+            "aborted": bool(not commit),
+            "complete": self.policy.complete,
+        }
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
         command = request.get("command")
@@ -334,34 +491,70 @@ class PolicyServer:
                 "bimanual": self.bimanual,
                 "policy_steps": policy_steps,
                 "model_identity": self.model_identity,
+                "policy_clock_semantics_id": POLICY_CLOCK_SEMANTICS_ID,
             }
         if command == "close":
+            if self._pending_transaction is not None:
+                self._restore_runtime(self._pending_transaction["runtime"])
+                self._pending_transaction = None
             return {"ok": True, "closed": True}
+        if command == "commit":
+            return self._resolve_transaction(request, commit=True)
+        if command == "abort":
+            return self._resolve_transaction(request, commit=False)
         if command not in {"reset", "act"}:
-            raise ValueError("command must be ping, reset, act, or close")
+            raise ValueError("command must be ping, reset, act, commit, abort, or close")
         observation = _WireObservation(request["observation"])
         if self.bimanual:
             left, right = bimanual_observations_from_rlbench(observation, self.task)
             if command == "reset":
+                if self._pending_transaction is not None:
+                    self._restore_runtime(self._pending_transaction["runtime"])
+                    self._pending_transaction = None
                 self.policy.reset(left, right, mode_strategy="map")
                 return {"ok": True, "complete": self.policy.complete}
+            if self._pending_transaction is not None:
+                raise RuntimeError("the previous policy action still awaits commit or abort")
             if self.policy.complete:
                 return {"ok": True, "complete": True, "action": None}
-            action = self.policy.act(left, right)
+            runtime = self._capture_runtime()
+            try:
+                action = self.policy.act(left, right)
+            except Exception:
+                self._restore_runtime(runtime)
+                raise
             wire_action = bimanual_action_to_rlbench(action).tolist()
         else:
             current = unimanual_observation_from_rlbench(observation, self.task)
             if command == "reset":
+                if self._pending_transaction is not None:
+                    self._restore_runtime(self._pending_transaction["runtime"])
+                    self._pending_transaction = None
                 self.policy.reset(current, mode_strategy="map")
                 return {"ok": True, "complete": self.policy.complete}
+            if self._pending_transaction is not None:
+                raise RuntimeError("the previous policy action still awaits commit or abort")
             if self.policy.complete:
                 return {"ok": True, "complete": True, "action": None}
-            action = self.policy.act(current)
+            runtime = self._capture_runtime()
+            try:
+                action = self.policy.act(current)
+            except Exception:
+                self._restore_runtime(runtime)
+                raise
             wire_action = unimanual_action_to_rlbench(action).tolist()
+        transaction_id = self._next_transaction_id
+        self._next_transaction_id += 1
+        self._pending_transaction = {
+            "transaction_id": transaction_id,
+            "runtime": runtime,
+        }
         return {
             "ok": True,
             "complete": self.policy.complete,
+            "complete_after_commit": self.policy.complete,
             "action": wire_action,
+            "transaction_id": transaction_id,
         }
 
 

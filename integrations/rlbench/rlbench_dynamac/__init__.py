@@ -10,6 +10,8 @@ _DEMO_ADAPTER_EXPORTS = (
     "ArmEpisodeArrays",
     "BimanualDemonstrationResult",
     "BimanualEpisodeArrays",
+    "DYNAMAC_GRIPPER_TARGET_TIMING",
+    "DYNAMAC_POSE_TARGET_TIMING",
     "UnimanualDemonstrationResult",
     "UnsafeLowDimPickleError",
     "adapt_bimanual_demonstrations",
@@ -22,6 +24,7 @@ _DEMO_ADAPTER_EXPORTS = (
     "make_unimanual_demonstrations",
 )
 _SEGMENTATION_EXPORTS = (
+    "DYNAMAC_CURRENT_STATE_TIMING",
     "TAPAS_ACTION_TIMING",
     "TAPAS_BIMANUAL_APPLICATION_SOURCE_STATUS",
     "TAPAS_DEFAULT_CONFIG_PATH",
@@ -31,6 +34,7 @@ _SEGMENTATION_EXPORTS = (
     "TAPASSegmentation",
     "TAPASSegmentationConfig",
     "align_tapas_boundaries",
+    "current_gripper_state",
     "forward_gripper_action",
     "forward_pose_action",
     "load_rlbench_segmentation_config",
