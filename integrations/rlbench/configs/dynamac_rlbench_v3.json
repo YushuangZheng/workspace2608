@@ -7,7 +7,7 @@
   "kinematic_analysis_enabled": true,
   "eq5_position_weight": 1.0,
   "eq5_rotation_weight": 0.0,
-  "link_mask_scope": "skill_majority",
+  "link_mask_scope": "skill_majority_gate_timestep",
   "link_filter": "none",
   "temporal_variance_window": 5,
   "temporal_variance_threshold": 0.0001,

@@ -98,7 +98,8 @@ def test_schema_v13_checkpoint_roundtrips_explicit_timestep_component_masks(
     assert restored.fingerprint() == policy.fingerprint()
     assert restored.summary()["model_schema_version"] == 13
     assert restored.summary()["selection_semantics_id"] == (
-        "eq5_skill_majority_mask_before_eq6_time_state_position3d_unimodal_v1"
+        "eq5_timestep_availability_before_eq6_and_poe_"
+        "time_state_position3d_unimodal_v1"
     )
     assert restored.config == policy.config
     assert restored.summary()["config"] == asdict(policy.config)

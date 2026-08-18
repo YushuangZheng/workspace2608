@@ -6,8 +6,9 @@ The implementation follows Algorithm 1 and Eqs. (1)--(6):
   :math:`R^3 \\times S^3`;
 * fit each stream with a discrete-time Riemannian Gaussian (DiGaP) or a mixture
   of them (MiDiGaP);
-* identify skill-level kinematic links offline by strict majority voting over
-  the Eq. (5) time mask;
+* identify kinematic links offline with either the archived skill-majority
+  mask or the V3 strict-majority gate followed by per-time-state Eq. (5)
+  availability;
 * create and accumulate frozen virtual end-effector frames at skill starts;
 * select task parameters with Eq. (6);
 * transform marginals back to the world frame and combine them with a PoE in a
@@ -44,6 +45,13 @@ RIEPY_MANIFOLD_REGULARIZATION = 1.0e-6
 SELECTION_SEMANTICS_ID = (
     "eq5_skill_majority_mask_before_eq6_time_state_position3d_unimodal_v1"
 )
+TIMESTEP_SELECTION_SEMANTICS_ID = (
+    "eq5_timestep_availability_before_eq6_and_poe_time_state_position3d_unimodal_v1"
+)
+MAJORITY_GATED_TIMESTEP_SELECTION_SEMANTICS_ID = (
+    "eq5_skill_majority_gate_timestep_availability_before_eq6_and_poe_"
+    "time_state_position3d_unimodal_v1"
+)
 CovarianceEstimationMethod = Literal[
     "diagonal_empirical_ridge",
     "diagonal_empirical_spd_floor",
@@ -52,6 +60,18 @@ CovarianceEstimationMethod = Literal[
 CandidateKind = Literal["dynamic", "virtual"]
 Eq6EmptySelection = Literal["error", "keep_argmax"]
 Eq6CovarianceScope = Literal["full_pose", "eq5_weighted_subspace"]
+
+
+def _selection_semantics_id(config: Any) -> str:
+    """Return an artifact identity without changing archived V2 identities."""
+
+    if config.link_mask_scope == "skill_majority":
+        return SELECTION_SEMANTICS_ID
+    if config.link_mask_scope == "timestep":
+        return TIMESTEP_SELECTION_SEMANTICS_ID
+    if config.link_mask_scope == "skill_majority_gate_timestep":
+        return MAJORITY_GATED_TIMESTEP_SELECTION_SEMANTICS_ID
+    raise ValueError(f"未知 link_mask_scope：{config.link_mask_scope}")
 
 
 def _as_float_array(value: Array | Sequence[float]) -> Array:
@@ -782,6 +802,7 @@ def _eq6_skill_selection(
     availability: dict[str, Array],
     candidate_kind: dict[str, CandidateKind],
     empty_selection: Eq6EmptySelection = "error",
+    semantics_id: str = SELECTION_SEMANTICS_ID,
 ) -> tuple[tuple[str, ...], dict[str, bool], dict[str, Any]]:
     """执行一次 Eq. (5) 候选过滤后的论文 Eq. (6) 技能级筛选。
 
@@ -799,6 +820,7 @@ def _eq6_skill_selection(
         availability=availability,
         candidate_kind=candidate_kind,
     )
+    details["semantics_id"] = semantics_id
     scores = details["scores"]
     selected_by_threshold = {
         name: bool(scores[name] > tau_omega) for name in details["frame_names"]
@@ -1107,9 +1129,14 @@ class DynaMACConfig:
     # 显式改成正数可复现旧 full-pose 实验口径。
     eq5_position_weight: float = 1.0
     eq5_rotation_weight: float = 0.0
-    # 原始 time mask 先按可选过滤器处理，再以严格 >50% 提升成 skill mask。
-    # ``timestep`` 只保留为 schema-12 逐时刻实验兼容选项。
-    link_mask_scope: Literal["skill_majority", "timestep"] = "skill_majority"
+    # Eq. (5) 始终先产生逐时刻 raw mask。``skill_majority`` 冻结 V1/V2 的
+    # 技能级常量口径；V3 的 ``skill_majority_gate_timestep`` 只用严格 >50%
+    # 决定是否启用 raw mask，启用后仍逐时刻读取。
+    link_mask_scope: Literal[
+        "skill_majority",
+        "timestep",
+        "skill_majority_gate_timestep",
+    ] = "skill_majority"
     link_filter: Literal["none", "temporal_variance"] = "none"
     temporal_variance_window: int = 5
     temporal_variance_threshold: float = 1.0e-4
@@ -1229,10 +1256,21 @@ class DynaMACConfig:
             or self.eq5_position_weight + self.eq5_rotation_weight <= 0.0
         ):
             raise ValueError("Eq. (5) 位置/旋转权重必须非负且至少一个为正")
-        if self.link_mask_scope not in {"skill_majority", "timestep"}:
+        if self.link_mask_scope not in {
+            "skill_majority",
+            "timestep",
+            "skill_majority_gate_timestep",
+        }:
             raise ValueError("未知 link_mask_scope")
         if self.link_filter not in {"none", "temporal_variance"}:
             raise ValueError("未知 link_filter")
+        if (
+            self.link_mask_scope == "skill_majority_gate_timestep"
+            and self.link_filter != "none"
+        ):
+            raise ValueError(
+                "skill_majority_gate_timestep 必须直接门控 raw Eq. (5) mask"
+            )
         if self.maximum_modes < 1:
             raise ValueError("模态数必须为正")
         if self.temporal_variance_window < 1 or self.temporal_variance_threshold < 0.0:
@@ -1278,8 +1316,8 @@ class StreamModel:
     frame: str
     mean: Array  # [M, T, 7]
     covariance: Array  # [M, T, 6, 6]
-    # schema 13 / SELECTION_SEMANTICS_ID: 默认 active/availability 在整个 skill
-    # 内恒定；数组时间轴仅为与 DiGaP marginal 对齐及兼容显式 timestep 消融。
+    # schema 13 同时可表达历史 skill-majority 与 V3 多数门控后的 timestep
+    # availability；两者由 config 和 selection semantics identity 严格区分。
     # active 严格等于 Eq. (5) availability AND Eq. (6) skill selection。
     active: Array | None = None  # [T] 或 [M, T]
     availability: Array | None = None  # [T] 或 [M, T]
@@ -1441,9 +1479,10 @@ def _filter_link_mask(
 ) -> tuple[Array, Array]:
     """返回逐时刻 Eq. (5) 判定与最终链接掩码。
 
-    作者口径先得到 time mask，再以严格 ``mean(linked) > 0.5`` 提升为整个
-    skill 恒定的 mask。恰好 50% 因而判为未链接。schema-12 的逐时刻行为仅
-    可通过显式 ``link_mask_scope="timestep"`` 继续用于消融实验。
+    ``link_mask_scope="timestep"`` 原样保留逐时刻判定。历史
+    ``skill_majority`` 协议以严格 ``mean(linked) > 0.5`` 提升为整个 skill
+    恒定的 mask。V3 ``skill_majority_gate_timestep`` 只用同一严格多数决定
+    是否启用 raw mask：启用时保留逐时刻 raw 值，否则整段不链接。
     """
 
     raw = np.asarray(scale < config.tau_m, dtype=bool)
@@ -1465,7 +1504,30 @@ def _filter_link_mask(
     if config.link_mask_scope == "skill_majority":
         skill_linked = bool(float(np.mean(pointwise)) > 0.5)
         return raw, np.full(pointwise.shape, skill_linked, dtype=bool)
+    if config.link_mask_scope == "skill_majority_gate_timestep":
+        gate_enabled = _strict_majority_gate(raw)
+        return raw, raw.copy() if gate_enabled else np.zeros(raw.shape, dtype=bool)
     raise ValueError(f"未知 link_mask_scope：{config.link_mask_scope}")
+
+
+def _strict_majority_gate(raw_linked: Array) -> bool:
+    """Return the author's strict skill gate over a non-empty raw time mask."""
+
+    values = np.asarray(raw_linked, dtype=bool)
+    if values.ndim != 1 or len(values) == 0:
+        raise ValueError("Eq. (5) raw linked mask 必须是非空 [T] 布尔序列")
+    return bool(float(np.mean(values)) > 0.5)
+
+
+def _majority_gate_audit(raw_linked: Array, config: DynaMACConfig) -> bool | None:
+    """Expose the V3 gate without assigning that meaning to legacy scopes."""
+
+    if (
+        not config.kinematic_analysis_enabled
+        or config.link_mask_scope != "skill_majority_gate_timestep"
+    ):
+        return None
+    return _strict_majority_gate(raw_linked)
 
 
 def _kinematic_link_masks(
@@ -2382,6 +2444,12 @@ class DynaMAC:
         return self._complete
 
     @property
+    def selection_semantics_id(self) -> str:
+        """Config-specific model identity; V1/V2 checkpoints keep their ID."""
+
+        return _selection_semantics_id(self.config)
+
+    @property
     def training_audit(self) -> dict[str, Any]:
         """最近一次 ``fit`` 的只读审计副本；checkpoint 加载后为空。"""
 
@@ -2463,18 +2531,20 @@ class DynaMAC:
         self,
         demonstrations: Sequence[DynaMACDemonstration],
     ) -> DynaMAC:
-        """执行 Algorithm 1，学习技能级链接掩码与 Eq. (6) 技能集合。
+        """执行 Algorithm 1，学习 Eq. (5) 掩码与 Eq. (6) 技能集合。
 
-        Eq. (5) 先生成归一化 time mask，再用严格 ``>50%`` 的多数规则冻结为
-        整个 skill 的常量掩码；Eq. (6) 与最终 DiGaP 使用同一条策略流。默认
-        策略流是 time-state（当前 EE），不是 next action。
+        Eq. (5) 先生成逐时刻 raw mask。V3 以严格多数决定是否启用该
+        frame/skill 的 mask：通过时保留 raw 的逐时刻结构，不通过时整段
+        availability 为真；历史协议仍可显式折叠成 skill-majority 常量。
+        Eq. (6) 与最终 DiGaP 使用同一条 time-state 策略流（当前 EE），
+        不是 next action。
         """
 
         frame_names, skill_sequence = _validate_demonstrations(demonstrations)
         self._training_audit = {
             "audit_schema_version": 1,
             "model_schema_version": MODEL_SCHEMA_VERSION,
-            "semantics_id": SELECTION_SEMANTICS_ID,
+            "semantics_id": self.selection_semantics_id,
             "paper_scope": "DynaMAC Algorithm 1 + MiDiGaP + TAPAS skill inputs",
             "policy_feedback": False,
             "frame_names": frame_names,
@@ -2535,7 +2605,7 @@ class DynaMAC:
             if len(candidate_kind) != len(candidate_frames):
                 raise ValueError("真实任务参数名不得与 DynaMAC 虚拟帧名冲突")
             skill_audit: dict[str, Any] = {
-                "semantics_id": SELECTION_SEMANTICS_ID,
+                "semantics_id": self.selection_semantics_id,
                 "skill_label": int(label),
                 "duration": int(duration),
                 "source_skill_indices": tuple(
@@ -2610,6 +2680,19 @@ class DynaMAC:
                         "filtered_link_mask": linked_mask.tolist(),
                         "filter": self.config.link_filter,
                         "mask_scope": self.config.link_mask_scope,
+                        **(
+                            {
+                                "majority_gate_enabled": _majority_gate_audit(
+                                    raw_mask, self.config
+                                ),
+                                "majority_gate_rule": (
+                                    "strict_mean_raw_linked_gt_0.5"
+                                ),
+                            }
+                            if self.config.link_mask_scope
+                            == "skill_majority_gate_timestep"
+                            else {}
+                        ),
                         "kinematic_analysis_enabled": (
                             self.config.kinematic_analysis_enabled
                         ),
@@ -2619,7 +2702,11 @@ class DynaMAC:
                             if self.config.kinematic_analysis_enabled
                             else "explicit_bypass_all_dynamic_candidates_available"
                         ),
-                        "skill_linked": bool(linked_mask[0]),
+                        "skill_linked": (
+                            bool(linked_mask[0])
+                            if self.config.link_mask_scope == "skill_majority"
+                            else None
+                        ),
                         "scope": "paper_order_pooled_preliminary_digap",
                         "per_mode": [],
                     }
@@ -2649,6 +2736,19 @@ class DynaMAC:
                         ),
                         "filter": self.config.link_filter,
                         "mask_scope": self.config.link_mask_scope,
+                        **(
+                            {
+                                "majority_gate_enabled": _majority_gate_audit(
+                                    raw_mask, self.config
+                                ),
+                                "majority_gate_rule": (
+                                    "strict_mean_raw_linked_gt_0.5"
+                                ),
+                            }
+                            if self.config.link_mask_scope
+                            == "skill_majority_gate_timestep"
+                            else {}
+                        ),
                         "kinematic_analysis_enabled": (
                             self.config.kinematic_analysis_enabled
                         ),
@@ -2658,7 +2758,11 @@ class DynaMAC:
                             if self.config.kinematic_analysis_enabled
                             else "explicit_bypass_all_dynamic_candidates_available"
                         ),
-                        "skill_linked": bool(linked_mask[0]),
+                        "skill_linked": (
+                            bool(linked_mask[0])
+                            if self.config.link_mask_scope == "skill_majority"
+                            else None
+                        ),
                         "filter_status": (
                             "METHOD_ABLATION_EQ5_DISABLED"
                             if not self.config.kinematic_analysis_enabled
@@ -2696,6 +2800,7 @@ class DynaMAC:
                     availability=pooled_availability,
                     candidate_kind=candidate_kind,
                     empty_selection=self.config.eq6_empty_selection,
+                    semantics_id=self.selection_semantics_id,
                 )
                 scores = selection_details["scores"]
                 skill_audit["task_parameter_selection"] = {
@@ -2882,6 +2987,19 @@ class DynaMAC:
                                 "raw_link_mask": raw_mask.tolist(),
                                 "filtered_link_mask": linked_mask.tolist(),
                                 "mask_scope": self.config.link_mask_scope,
+                                **(
+                                    {
+                                        "majority_gate_enabled": _majority_gate_audit(
+                                            raw_mask, self.config
+                                        ),
+                                        "majority_gate_rule": (
+                                            "strict_mean_raw_linked_gt_0.5"
+                                        ),
+                                    }
+                                    if self.config.link_mask_scope
+                                    == "skill_majority_gate_timestep"
+                                    else {}
+                                ),
                                 "kinematic_analysis_enabled": (
                                     self.config.kinematic_analysis_enabled
                                 ),
@@ -2893,7 +3011,11 @@ class DynaMAC:
                                     if self.config.kinematic_analysis_enabled
                                     else "explicit_bypass_all_dynamic_candidates_available"
                                 ),
-                                "skill_linked": bool(linked_mask[0]),
+                                "skill_linked": (
+                                    bool(linked_mask[0])
+                                    if self.config.link_mask_scope == "skill_majority"
+                                    else None
+                                ),
                             }
                         )
                     scales = np.stack(mode_scales)
@@ -2915,6 +3037,26 @@ class DynaMAC:
                         ).tolist(),
                         "filter": self.config.link_filter,
                         "mask_scope": self.config.link_mask_scope,
+                        **(
+                            {
+                                "majority_gate_enabled": (
+                                    [
+                                        _majority_gate_audit(mask, self.config)
+                                        for mask in mode_raw_masks
+                                    ]
+                                    if modes > 1
+                                    else _majority_gate_audit(
+                                        mode_raw_masks[0], self.config
+                                    )
+                                ),
+                                "majority_gate_rule": (
+                                    "strict_mean_raw_linked_gt_0.5"
+                                ),
+                            }
+                            if self.config.link_mask_scope
+                            == "skill_majority_gate_timestep"
+                            else {}
+                        ),
                         "kinematic_analysis_enabled": (
                             self.config.kinematic_analysis_enabled
                         ),
@@ -2948,6 +3090,7 @@ class DynaMAC:
                         },
                         candidate_kind=candidate_kind,
                         empty_selection=self.config.eq6_empty_selection,
+                        semantics_id=self.selection_semantics_id,
                     )
                     for mode in range(modes)
                 ]
@@ -3018,8 +3161,9 @@ class DynaMAC:
                     "or the configured threshold rather than applying a silent "
                     f"fallback; scores: {score_summary}"
                 )
-            # Eq. (5) 的作者口径已把 time mask 提升为 skill 常量；Eq. (6)
-            # 决定该流是否进入同一个 skill 的最终 PoE。
+            # Eq. (6) 决定技能级 frame selection；最终 PoE 再与 Eq. (5)
+            # 的配置粒度 availability（V3 为多数门控后的逐时刻 raw mask）
+            # 严格取交集。
             framewise_participation = _compose_framewise_poe_participation(
                 eq5_availability,
                 eq6_selected,
@@ -3033,7 +3177,12 @@ class DynaMAC:
                         else (
                             "per_skill_strict_majority_eq5"
                             if self.config.link_mask_scope == "skill_majority"
-                            else "per_timestep_within_skill_eq5_EXPERIMENTAL"
+                            else (
+                                "skill_majority_gate_then_raw_per_timestep_eq5"
+                                if self.config.link_mask_scope
+                                == "skill_majority_gate_timestep"
+                                else "per_timestep_within_skill_eq5"
+                            )
                         )
                     ),
                     "task_parameter_selection_granularity": "per_skill_max_over_time_eq6",
@@ -3146,7 +3295,7 @@ class DynaMAC:
                             "active": stream.active.copy(),
                             "availability": stream.availability.copy(),
                             "selected_by_eq6": stream.selected_by_eq6.copy(),
-                            "semantics_id": SELECTION_SEMANTICS_ID,
+                            "semantics_id": self.selection_semantics_id,
                         }
                         for name, stream in streams.items()
                     },
@@ -3399,7 +3548,7 @@ class DynaMAC:
         gripper = skill.gripper[self._active_mode, index].copy()
         diagnostics = {
             "method": self.name,
-            "selection_semantics_id": SELECTION_SEMANTICS_ID,
+            "selection_semantics_id": self.selection_semantics_id,
             "skill_index": self._skill_index,
             "skill_label": skill.label,
             "time_index": index,
@@ -3425,8 +3574,10 @@ class DynaMAC:
                     "selected_by_eq6_for_skill": skill.streams[name].is_selected(
                         self._active_mode
                     ),
-                    "exogenous_for_skill_by_eq5": skill.streams[name].is_available(
-                        self._active_mode, mask_index
+                    "exogenous_for_skill_by_eq5": (
+                        skill.streams[name].is_available(self._active_mode, mask_index)
+                        if self.config.link_mask_scope == "skill_majority"
+                        else None
                     ),
                     "exogenous_at_t_by_eq5": skill.streams[name].is_available(
                         self._active_mode, mask_index
@@ -3456,7 +3607,12 @@ class DynaMAC:
                 else (
                     "eq6_per_skill_with_eq5_skill_mask"
                     if self.config.link_mask_scope == "skill_majority"
-                    else "eq6_per_skill_with_eq5_framewise_participation_EXPERIMENTAL"
+                    else (
+                        "eq6_per_skill_with_majority_gated_eq5_framewise_participation"
+                        if self.config.link_mask_scope
+                        == "skill_majority_gate_timestep"
+                        else "eq6_per_skill_with_eq5_framewise_participation"
+                    )
                 )
             ),
             "kinematic_link_granularity": (
@@ -3465,13 +3621,19 @@ class DynaMAC:
                 else (
                     "offline_per_skill_strict_majority"
                     if self.config.link_mask_scope == "skill_majority"
-                    else "offline_per_timestep_within_skill_EXPERIMENTAL"
+                    else (
+                        "offline_skill_majority_gate_then_raw_per_timestep"
+                        if self.config.link_mask_scope
+                        == "skill_majority_gate_timestep"
+                        else "offline_per_timestep_within_skill"
+                    )
                 )
             ),
             "kinematic_analysis_enabled": self.config.kinematic_analysis_enabled,
             "task_parameter_selection_granularity": "offline_per_skill_max_over_time",
-            # DynaMAC 从演示学习并冻结 skill mask；推理不重算链接，也不读取
-            # 原始 time mask。
+            # DynaMAC 从演示中离线学习并冻结 availability；推理不会根据
+            # 在线接触重新判定链接，但 V3 会逐时间索引读取多数门控后冻结的
+            # raw mask。
             "online_link_detection": False,
         }
         self._time_index += 1
@@ -3504,7 +3666,7 @@ class DynaMAC:
             ),
             "policy_type": self.name,
             "model_schema_version": MODEL_SCHEMA_VERSION,
-            "selection_semantics_id": SELECTION_SEMANTICS_ID,
+            "selection_semantics_id": self.selection_semantics_id,
             "demonstration_count": demonstration_count,
             "tapas_reference_commit": TAPAS_REFERENCE_COMMIT,
             "config": asdict(self.config),
@@ -3695,9 +3857,10 @@ class DynaMAC:
                     f"checkpoint policy type {metadata.get('policy_type')!r} cannot be "
                     f"loaded by {expected_policy_type!r}"
                 )
-            if metadata.get("selection_semantics_id") != SELECTION_SEMANTICS_ID:
+            config = DynaMACConfig(**metadata["config"])
+            if metadata.get("selection_semantics_id") != _selection_semantics_id(config):
                 raise ValueError("DynaMAC checkpoint 的任务参数选择 semantics_id 不匹配")
-            policy = cls(DynaMACConfig(**metadata["config"]))
+            policy = cls(config)
             policy.frame_names = tuple(metadata["frame_names"])
             policy.skill_sequence = tuple(int(value) for value in metadata["skill_sequence"])
             for index, skill_meta in enumerate(metadata["skills"]):
