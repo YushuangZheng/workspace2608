@@ -5,10 +5,11 @@ MiDiGaP, together with an RLBench reproduction suite for simulator Tables
 I–III. It is based on the papers, pinned public TAPAS/RLBench code, and written
 implementation clarifications; it does not contain unreleased author code.
 
-The RLBench integration and its default artifact paths target the local `v2`
-protocol. The completed `v1` checkpoints and results remain immutable
-historical provenance. The `v2` evaluation matrix is still being regenerated
-and must not yet be treated as a final paper comparison.
+The RLBench integration and its default artifact paths target the frozen local
+`v3` protocol. Completed `v1` and `v2` checkpoints and results remain immutable
+historical provenance. V3 uses a sealed, reusable fixed evaluation set; its
+formal 200-episode matrix is complete, while dynamic results remain explicitly
+non-comparable diagnostics wherever the paper protocol is unpublished.
 
 ## What is implemented
 
@@ -41,18 +42,20 @@ candidate events and assigns the resulting shared boundaries to both policies.
 The choice and task-specific thresholds are dataset protocol, not a universal
 DynaMAC equation.
 
-RLBench observation extraction, next-observation gripper encoding, task
+RLBench observation extraction, current-observation signed gripper encoding, task
 profiles, configuration paths, and debug plots remain in
 [`integrations/rlbench/rlbench_dynamac/`](integrations/rlbench/rlbench_dynamac/).
 
 ### Task frames and model selection
 
 - Equation (5) detects kinematic links from position covariance using
-  `tau_M=0.005`; the pointwise mask is promoted to a skill-level mask by a
-  strict majority.
-- Equation (6) uses `tau_omega=0.5`. The current `v2` configuration evaluates
+  `tau_M=0.005`. A strict skill majority decides only whether to enable the raw
+  per-time-step mask; availability itself remains time-indexed.
+- Equation (6) uses `tau_omega=0.5`. The current `v3` configuration evaluates
   it in the same Equation (5)-weighted subspace: 3D position under position and
-  rotation weights `1/0`.
+  rotation weights `1/0`. At each time step its denominator includes only
+  available frames, and final participation is
+  `Eq6Selected(frame) AND Eq5Available(frame,t)`.
 - If strict Equation (6) thresholding selects no frame, the executable local
   protocol keeps the numerical argmax. This is an explicit local completion,
   not a confirmed author-side rule.
@@ -65,7 +68,7 @@ profiles, configuration paths, and debug plots remain in
 The exact Equation (6) covariance subspace, empty-selection behavior, and some
 task-specific segmentation settings remain author-side reproduction questions.
 They are serialized in every checkpoint; authenticated evaluator and report
-validation rejects mixed `v1`/`v2` model and result identities.
+validation reject mixed `v1`/`v2`/`v3` model and result identities.
 
 ### Dual-arm coordination
 
@@ -88,11 +91,14 @@ and simulator stepping are kept outside the core policy.
 - This retry budget handles controller execution failures only. It is not a
   DynaMAC grasp-retry mechanism: an action that executes but misses contact is
   committed, and the fixed skill schedule is not extended.
-- Dynamic diagnostics move the existing episode's `boundary_root()` without
-  calling `task.init_episode()`. Goal sampling restores only the task
-  configuration tree, leaves the live robot untouched, rejects newly
-  introduced robot–environment collision pairs, and records preservation and
-  actual-motion evidence in every applied intervention.
+- Static, smooth, and teleport conditions reuse the same sealed per-episode
+  source state; smooth and teleport also share the same preregistered goal B.
+  Disposable offline generations certify A and B, while formal rollout binds
+  A and never samples, restores, or selects a scene from policy outcomes.
+- Dynamic onset uses preregistered task/skill ticks on the committed policy
+  clock. Every boundary-root command preserves structural and semantic
+  invariants. Its exact robot-contact delta is authenticated as a diagnostic,
+  not used to censor a fixed episode based on one policy's evolved pose.
 - Policy task-frame inputs are simulator-state ground-truth poses, not outputs
   from a visual pose detector.
 
@@ -117,11 +123,12 @@ environment intervention implementation.
 The working reproduction workspace currently uses:
 
 - 45 five-demonstration `low_dim_obs.pkl` episodes for Tables I–III;
-- historical `models/v1/` checkpoints and the completed `results/v1/` set;
-- retrained `models/v2/` checkpoints for the current Equation (6)
-  configuration;
-- a partially regenerated `results/v2/` evaluation matrix;
-- 33 confirmed-failure replay videos from archived `v1` evaluations.
+- immutable historical `models/v1`, `models/v2`, `results/v1`, and `results/v2`
+  release directories;
+- `models/v3` and `results/v3` as the current training/evaluation defaults;
+- a sealed V3 fixed evaluation set containing no outcomes or model data;
+- 33 confirmed-failure replay videos from archived `v1` evaluations and the
+  canonical paper comparison.
 
 Demonstrations, checkpoints, result JSON, videos, reference-paper copies,
 RoboTwin, RoboDojo, RLBench, TAPAS, PyRep, and CoppeliaSim are intentionally
@@ -157,6 +164,9 @@ pipeline.
 See [`integrations/rlbench/README.md`](integrations/rlbench/README.md) for
 dependency setup, the low-dimensional demonstration layout, training and
 evaluation commands, release directories, and report generation.
+
+The complete frozen V3 mechanism and trigger table are in
+[integrations/rlbench/V3_PROTOCOL.md](integrations/rlbench/V3_PROTOCOL.md).
 
 Pinned external revisions and licenses are recorded in
 [`integrations/rlbench/THIRD_PARTY.md`](integrations/rlbench/THIRD_PARTY.md).

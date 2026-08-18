@@ -12,9 +12,12 @@ from integrations.rlbench.rlbench_dynamac.paper_comparison import (
     DEFAULT_RELEASE,
     EXPECTED_LOCAL_CONFIG,
     EXPECTED_RELEASE_CONFIGS,
+    EXPECTED_RELEASE_SELECTION_SEMANTICS_IDS,
     EXPECTED_SELECTION_SEMANTICS_ID,
     EXPECTED_TAPAS_COMMIT,
     INTEGRATION_ROOT,
+    _expected_v4_root_motion_protocol,
+    _v3_derived_motion_metric_matches,
     build_document,
     build_parser,
     build_records,
@@ -23,16 +26,35 @@ from integrations.rlbench.rlbench_dynamac.paper_comparison import (
     markdown,
 )
 from integrations.rlbench.rlbench_dynamac.runtime import (
+    LOW_DIM_POSE_ROTATION_TOLERANCE_RAD,
     LOW_DIM_POSE_TRANSLATION_TOLERANCE_M,
+    LOW_DIM_STATE_ROUNDTRIP_ATOL,
     PRESERVE_INSTANCE_MOTION_PROTOCOL_ID,
     ROOT_COMMAND_TRANSLATION_TOLERANCE_M,
     ScenarioController,
 )
+from integrations.rlbench.rlbench_dynamac.task_specs import get_task_spec
 from integrations.rlbench.rlbench_dynamac.unimanual_evaluate import (
     EXPECTED_UNIMANUAL_BASE_SCENE_SHA256,
     EXPECTED_UNIMANUAL_BASE_VISION_SENSOR_COUNT,
     LOW_DIM_HEADLESS_SCENE_PROTOCOL_ID,
 )
+
+
+def test_v4_validator_contract_matches_runtime_metadata() -> None:
+    assert _expected_v4_root_motion_protocol() == ScenarioController(
+        "teleport_task"
+    ).protocol_metadata()
+
+
+def test_v3_derived_motion_metric_allows_only_serialization_roundoff() -> None:
+    assert _v3_derived_motion_metric_matches(
+        0.7267024878023849,
+        0.7267024878023851,
+    )
+    assert not _v3_derived_motion_metric_matches(0.1, 0.1 + 1.0e-12)
+    assert not _v3_derived_motion_metric_matches(float("nan"), 0.1)
+    assert not _v3_derived_motion_metric_matches(True, 1.0)
 
 
 def _write_run(
@@ -58,6 +80,9 @@ def _write_run(
         "smooth_task_motion" if scenario == "smooth" else "teleport_task"
     )
     motion_protocol = ScenarioController(motion_kind).protocol_metadata()
+    roundtrip_chunk_count = (
+        len(get_task_spec(task).pose_chunks) if root_motion else 1
+    )
     preservation = {
         "initialized_episode_preserved": True,
         "task_init_episode_called": False,
@@ -66,7 +91,7 @@ def _write_run(
         "low_dim_state_roundtrip_comparison_mode": (
             "pose_chunks_sign_invariant"
         ),
-        "low_dim_state_roundtrip_chunk_count": 1,
+        "low_dim_state_roundtrip_chunk_count": roundtrip_chunk_count,
         "low_dim_state_roundtrip_l2": 0.0,
         "low_dim_state_roundtrip_max_abs": 0.0,
         "low_dim_state_roundtrip_max_translation_m": 0.0,
@@ -172,7 +197,9 @@ def _write_run(
     if table_i_schema:
         payload["schema"] = "dynamac-table-i-evaluation-v2"
     if corrected:
-        selected_training_config = dict(training_config or EXPECTED_LOCAL_CONFIG)
+        selected_training_config = dict(
+            training_config or EXPECTED_RELEASE_CONFIGS["v2"]
+        )
         selected_release = next(
             (
                 release
@@ -183,7 +210,9 @@ def _write_run(
         )
         payload["model_identity"] = {
             "model_schema_version": 13,
-            "selection_semantics_id": EXPECTED_SELECTION_SEMANTICS_ID,
+            "selection_semantics_id": (
+                EXPECTED_RELEASE_SELECTION_SEMANTICS_IDS[selected_release]
+            ),
             "tapas_reference_commit": EXPECTED_TAPAS_COMMIT,
             "training_config": selected_training_config,
             "fingerprint": fingerprint,
@@ -301,7 +330,7 @@ def _write_run(
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_report_defaults_select_v2_with_an_explicit_model_identity() -> None:
+def test_report_defaults_select_v3_with_an_explicit_model_identity() -> None:
     args = build_parser().parse_args([])
     document = build_document(
         [],
@@ -312,13 +341,13 @@ def test_report_defaults_select_v2_with_an_explicit_model_identity() -> None:
         release=args.release,
     )
 
-    assert DEFAULT_RELEASE == "v2"
-    assert args.release == "v2"
+    assert DEFAULT_RELEASE == "v3"
+    assert args.release == "v3"
     assert args.markdown_output == DEFAULT_OUTPUT_DIR / "paper_comparison.md"
     assert args.csv_output == DEFAULT_OUTPUT_DIR / "paper_comparison.csv"
     assert args.json_output == DEFAULT_OUTPUT_DIR / "paper_comparison.json"
-    assert document["schema"] == "dynamac-paper-comparison-v2"
-    assert document["selection"]["release"] == "v2"
+    assert document["schema"] == "dynamac-paper-comparison-v3"
+    assert document["selection"]["release"] == "v3"
     expected = document["selection"]["expected_model_identity"]
     assert expected["training_config"]["eq6_covariance_scope"] == (
         "eq5_weighted_subspace"
@@ -864,10 +893,25 @@ def test_v4_root_motion_requires_complete_protocol_metadata(
 @pytest.mark.parametrize(
     ("field", "bad_value"),
     (
+        ("task_validate_called", True),
+        ("low_dim_state_roundtrip_comparison_mode", "scalar_max_abs"),
+        ("low_dim_state_roundtrip_chunk_count", 0),
         (
             "low_dim_state_roundtrip_max_translation_m",
             LOW_DIM_POSE_TRANSLATION_TOLERANCE_M * 2.0,
         ),
+        (
+            "low_dim_state_roundtrip_max_rotation_rad",
+            LOW_DIM_POSE_ROTATION_TOLERANCE_RAD * 2.0,
+        ),
+        (
+            "configuration_tree_rollback",
+            "task_then_current_robot_components_after_each_attempt",
+        ),
+        ("live_robot_state_untouched", False),
+        ("live_robot_configuration_trees_accessed", True),
+        ("waypoint_cache_identity_preserved", False),
+        ("robot_configuration_trees_restored", True),
         ("robot_collision_pair_policy", "reject_all_collision_pairs"),
         ("source_robot_external_collision_pairs", None),
         (
@@ -923,6 +967,36 @@ def test_v4_root_motion_rejects_incomplete_preservation_evidence(
         and row["task"] == "LiftTray"
     )
     assert lift["status"] == "invalid diagnostic"
+
+
+def test_v4_root_motion_accepts_sign_invariant_pose_roundtrip_evidence(tmp_path):
+    path = tmp_path / "bimanual_lift_tray_teleport_seed0_n200_h1000.json"
+    _write_run(
+        path,
+        task="bimanual_lift_tray",
+        scenario="teleport",
+        rate=0.9,
+        paper_comparable=False,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    preservation = payload["results"][73]["scenario_events"][0][
+        "instance_preservation"
+    ]
+    preservation["low_dim_state_roundtrip_l2"] = 4.0
+    preservation["low_dim_state_roundtrip_max_abs"] = (
+        2.0 + LOW_DIM_STATE_ROUNDTRIP_ATOL
+    )
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    records, _ = build_records(tmp_path, seed=0, episodes=200, horizon=1000)
+    lift = next(
+        row
+        for row in records
+        if row["table"] == "III"
+        and row["condition"] == "Dynamic environment"
+        and row["task"] == "LiftTray"
+    )
+    assert lift["status"] == "non-comparable diagnostic"
 
 
 def test_v4_root_motion_accepts_preserved_source_contact_pair(tmp_path):

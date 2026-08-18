@@ -528,6 +528,47 @@ def test_experimental_eq5_link_mask_can_remain_per_timestep() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("linked_count", "gate_enabled"),
+    ((6, True), (5, False), (4, False)),
+)
+def test_v3_eq5_strict_majority_only_gates_the_raw_timestep_mask(
+    linked_count,
+    gate_enabled,
+) -> None:
+    scale = np.full(10, 2.0e-3)
+    scale[:linked_count] = 2.0e-4
+    raw, linked = _filter_link_mask(
+        scale,
+        DynaMACConfig(
+            tau_m=1.0e-3,
+            link_filter="none",
+            link_mask_scope="skill_majority_gate_timestep",
+        ),
+    )
+
+    expected_raw = np.arange(10) < linked_count
+    np.testing.assert_array_equal(raw, expected_raw)
+    np.testing.assert_array_equal(
+        linked,
+        expected_raw if gate_enabled else np.zeros(10, dtype=bool),
+    )
+
+
+def test_v3_eq5_gate_has_a_distinct_artifact_identity() -> None:
+    config = DynaMACConfig(link_mask_scope="skill_majority_gate_timestep")
+
+    assert DynaMAC(config).selection_semantics_id == (
+        "eq5_skill_majority_gate_timestep_availability_before_eq6_and_poe_"
+        "time_state_position3d_unimodal_v1"
+    )
+    with pytest.raises(ValueError, match="raw Eq. \\(5\\) mask"):
+        DynaMACConfig(
+            link_mask_scope="skill_majority_gate_timestep",
+            link_filter="temporal_variance",
+        )
+
+
 def test_eq5_filters_eq6_candidates_and_denominator_before_max_t() -> None:
     """Eq. (6) normalizes shares only over candidates available under Eq. (5)."""
 
@@ -937,10 +978,19 @@ def test_temporal_filter_and_active_mask_remain_component_specific() -> None:
         assert ("object" in second_action.diagnostics["active_frames"]) is object_active
 
 
-def link_transition_demonstrations() -> tuple[list[DynaMACDemonstration], np.ndarray]:
-    """Use one spurious link, four true links, and a later unlinking interval."""
+def link_transition_demonstrations(
+    raw_link: np.ndarray | None = None,
+) -> tuple[list[DynaMACDemonstration], np.ndarray]:
+    """Build demonstrations whose Eq. (5) result follows an explicit time mask."""
 
-    raw_link = np.asarray([False, True, False, False, True, True, True, True, False, False])
+    if raw_link is None:
+        raw_link = np.asarray(
+            [False, True, False, False, True, True, True, True, False, False]
+        )
+    else:
+        raw_link = np.asarray(raw_link, dtype=bool)
+    if raw_link.ndim != 1 or len(raw_link) < 2:
+        raise ValueError("raw link fixture must be a one-dimensional sequence")
     demonstrations = []
     demo_count = 7
     for demo_index in range(demo_count):
@@ -1001,6 +1051,7 @@ def test_fit_fails_closed_when_selected_frames_leave_pointwise_poe_gap(
         availability,
         candidate_kind,
         empty_selection,
+        semantics_id,
     ):
         _, _, details = _eq6_skill_selection(
             covariances,
@@ -1008,6 +1059,7 @@ def test_fit_fails_closed_when_selected_frames_leave_pointwise_poe_gap(
             availability=availability,
             candidate_kind=candidate_kind,
             empty_selection=empty_selection,
+            semantics_id=semantics_id,
         )
         assert np.any(availability["object"])
         assert np.any(~availability["object"])
@@ -1063,12 +1115,16 @@ def test_algorithm_1_applies_eq5_mask_per_timestep_and_restores_unlinked_frame()
     selection = policy.training_audit["skills"][0]["task_parameter_selection"]
     assert (
         selection["kinematic_link_granularity"]
-        == "per_timestep_within_skill_eq5_EXPERIMENTAL"
+        == "per_timestep_within_skill_eq5"
     )
     assert selection["task_parameter_selection_granularity"] == "per_skill_max_over_time_eq6"
     np.testing.assert_array_equal(
         selection["poe_participation_mask"]["object"][0],
         ~expected_link,
+    )
+    assert policy.selection_semantics_id == (
+        "eq5_timestep_availability_before_eq6_and_poe_"
+        "time_state_position3d_unimodal_v1"
     )
 
     first = demonstrations[0]
@@ -1083,6 +1139,9 @@ def test_algorithm_1_applies_eq5_mask_per_timestep_and_restores_unlinked_frame()
         assert action.diagnostics["frame_status"]["object"][
             "participates_in_poe_at_t"
         ] is (not expected_link[time_index])
+        assert action.diagnostics["frame_status"]["object"][
+            "exogenous_for_skill_by_eq5"
+        ] is None
         assert set(action.diagnostics["marginal_means"]) == set(action.diagnostics["active_frames"])
 
     # The object is masked at t=4..7 and rejoins the PoE at t=8 within one skill.
@@ -1090,6 +1149,103 @@ def test_algorithm_1_applies_eq5_mask_per_timestep_and_restores_unlinked_frame()
         skill.streams["object"].active[3:10],
         [True, False, False, False, False, True, True],
     )
+
+
+def test_v3_majority_gate_preserves_raw_mask_in_eq6_and_final_poe() -> None:
+    raw_link = np.asarray(
+        [False, True, True, False, True, True, True, True, False, False]
+    )
+    demonstrations, measured_raw = link_transition_demonstrations(raw_link)
+    policy = DynaMAC(
+        DynaMACConfig(
+            tau_m=1.0e-3,
+            tau_omega=0.0,
+            eq6_covariance_scope="eq5_weighted_subspace",
+            link_filter="none",
+            link_mask_scope="skill_majority_gate_timestep",
+            position_variance_floor=1.0e-12,
+            rotation_variance_floor=1.0e-12,
+            maximum_modes=1,
+            clustering_length=len(raw_link),
+            resampling_method="interpolate",
+            default_mode_strategy="map",
+        )
+    ).fit(demonstrations)
+
+    skill = policy.skills[0]
+    diagnostics = skill.link_diagnostics["object"]
+    selection = policy.training_audit["skills"][0]["task_parameter_selection"]
+    np.testing.assert_array_equal(measured_raw, raw_link)
+    np.testing.assert_array_equal(diagnostics["raw_link_mask"], raw_link)
+    np.testing.assert_array_equal(diagnostics["filtered_link_mask"], raw_link)
+    assert diagnostics["majority_gate_enabled"] is True
+    assert diagnostics["majority_gate_rule"] == "strict_mean_raw_linked_gt_0.5"
+    np.testing.assert_array_equal(selection["eq5_availability"]["object"], ~raw_link)
+    object_index = selection["frame_names"].index("object")
+    np.testing.assert_array_equal(
+        selection["relative_precision"][object_index, raw_link],
+        np.zeros(np.count_nonzero(raw_link)),
+    )
+    np.testing.assert_array_equal(
+        selection["poe_participation_mask"]["object"][0],
+        ~raw_link,
+    )
+    np.testing.assert_array_equal(skill.streams["object"].active, ~raw_link)
+    assert selection["kinematic_link_granularity"] == (
+        "skill_majority_gate_then_raw_per_timestep_eq5"
+    )
+
+    first = demonstrations[0]
+    policy.reset(
+        DynaMACObservation(first.ee_pose[0], {"object": first.frames["object"][0]}),
+        mode_strategy="map",
+    )
+    for time_index, linked in enumerate(raw_link):
+        action = policy.act(
+            DynaMACObservation(
+                first.ee_pose[time_index],
+                {"object": first.frames["object"][time_index]},
+            )
+        )
+        assert ("object" in action.diagnostics["active_frames"]) is (not linked)
+
+
+def test_v3_exact_half_gate_keeps_frame_available_in_eq6_and_final_poe() -> None:
+    demonstrations, raw_link = link_transition_demonstrations()
+    assert np.mean(raw_link) == 0.5
+    policy = DynaMAC(
+        DynaMACConfig(
+            tau_m=1.0e-3,
+            tau_omega=0.0,
+            eq6_covariance_scope="eq5_weighted_subspace",
+            link_filter="none",
+            link_mask_scope="skill_majority_gate_timestep",
+            position_variance_floor=1.0e-12,
+            rotation_variance_floor=1.0e-12,
+            maximum_modes=1,
+            clustering_length=len(raw_link),
+            resampling_method="interpolate",
+            default_mode_strategy="map",
+        )
+    ).fit(demonstrations)
+
+    skill = policy.skills[0]
+    diagnostics = skill.link_diagnostics["object"]
+    selection = policy.training_audit["skills"][0]["task_parameter_selection"]
+    expected_available = np.ones(len(raw_link), dtype=bool)
+    assert diagnostics["majority_gate_enabled"] is False
+    np.testing.assert_array_equal(
+        diagnostics["filtered_link_mask"], np.zeros(len(raw_link), dtype=bool)
+    )
+    np.testing.assert_array_equal(
+        selection["eq5_availability"]["object"], expected_available
+    )
+    object_index = selection["frame_names"].index("object")
+    assert np.all(selection["relative_precision"][object_index] > 0.0)
+    np.testing.assert_array_equal(
+        selection["poe_participation_mask"]["object"][0], expected_available
+    )
+    np.testing.assert_array_equal(skill.streams["object"].active, expected_available)
 
 
 def test_main_and_no_ka_bind_their_own_eq5_masks_into_eq6_and_final_poe() -> None:

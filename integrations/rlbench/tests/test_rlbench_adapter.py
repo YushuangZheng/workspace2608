@@ -12,18 +12,21 @@ from essay2608.policy.tapas_segmentation import (
     TAPASSegmentationConfig,
     _single_grasp_contact_cycle_subset,
     align_tapas_boundaries,
+    gripper_change_boundaries,
     segment_bimanual_trajectories,
     segment_trajectories,
 )
 
 from integrations.rlbench.rlbench_dynamac.demo_adapter import (
+    DYNAMAC_GRIPPER_TARGET_TIMING,
     load_low_dim_obs_pickles,
     make_bimanual_demonstrations,
     make_unimanual_demonstrations,
 )
 from integrations.rlbench.rlbench_dynamac.tapas_segmentation import (
-    TAPAS_ACTION_TIMING,
+    DYNAMAC_CURRENT_STATE_TIMING,
     TAPAS_DEFAULT_CONFIG_PATH,
+    current_gripper_state,
     load_rlbench_segmentation_config,
 )
 from integrations.rlbench.rlbench_dynamac.tapas_segmentation import (
@@ -52,6 +55,16 @@ V1_MODEL_CONFIG = (
     Path(__file__).resolve().parents[1]
     / "configs"
     / "dynamac_rlbench_v1.json"
+)
+V2_MODEL_CONFIG = (
+    Path(__file__).resolve().parents[1]
+    / "configs"
+    / "dynamac_rlbench_v2.json"
+)
+V3_MODEL_CONFIG = (
+    Path(__file__).resolve().parents[1]
+    / "configs"
+    / "dynamac_rlbench_v3.json"
 )
 TABLE_I_DATA_ROOT = (
     Path(__file__).resolve().parents[1]
@@ -209,6 +222,57 @@ def test_v2_experiment_config_uses_eq5_weighted_position_scope_for_eq6() -> None
     } == {
         key: value for key, value in v2.items() if key != "eq6_covariance_scope"
     }
+
+
+def test_v2_config_is_frozen_and_v3_changes_only_eq5_mask_granularity() -> None:
+    local_v2 = json.loads(LOCAL_MODEL_CONFIG.read_text(encoding="utf-8"))
+    frozen_v2 = json.loads(V2_MODEL_CONFIG.read_text(encoding="utf-8"))
+    v3 = json.loads(V3_MODEL_CONFIG.read_text(encoding="utf-8"))
+
+    assert frozen_v2 == local_v2
+    assert frozen_v2["link_mask_scope"] == "skill_majority"
+    assert v3["link_mask_scope"] == "skill_majority_gate_timestep"
+    assert v3["link_filter"] == "none"
+    assert v3["eq6_covariance_scope"] == "eq5_weighted_subspace"
+    assert (v3["eq5_position_weight"], v3["eq5_rotation_weight"]) == (1.0, 0.0)
+    assert {
+        key: value for key, value in frozen_v2.items() if key != "link_mask_scope"
+    } == {
+        key: value for key, value in v3.items() if key != "link_mask_scope"
+    }
+
+
+def test_v3_gripper_target_uses_current_state_at_the_same_pose_sample() -> None:
+    states = np.asarray([1.0, 1.0, 0.0, 0.0, 1.0])
+    assert gripper_change_boundaries(states, min_end_distance=0) == (2, 4)
+    np.testing.assert_array_equal(
+        current_gripper_state(states),
+        np.asarray([1.0, 1.0, -1.0, -1.0, 1.0]),
+    )
+
+    episode = [
+        SimpleNamespace(
+            gripper_pose=_xyzw_pose(float(index)),
+            gripper_open=float(state),
+            task_low_dim_state=(_task_state(2, sample=index),),
+        )
+        for index, state in enumerate(states)
+    ]
+    segmentation = align_tapas_boundaries(((),), (len(states),))
+    result = make_unimanual_demonstrations(
+        [episode],
+        "stack_wine",
+        segmentation=segmentation,
+    )
+
+    np.testing.assert_array_equal(
+        result.demonstrations[0].gripper[:, 0],
+        np.asarray([1.0, 1.0, -1.0, -1.0, 1.0]),
+    )
+    assert result.audit["schema"] == "rlbench-dynamac-demo-adapter-v3"
+    assert result.audit["pose_and_gripper_sample_aligned"] is True
+    assert result.audit["gripper_action_timing"] == DYNAMAC_GRIPPER_TARGET_TIMING
+    assert result.audit["action_timing"] == DYNAMAC_CURRENT_STATE_TIMING
 
 
 def test_velocity_and_gripper_change_candidates_are_unioned() -> None:
@@ -395,4 +459,4 @@ def test_demo_adapter_routes_store_independent_and_handover_shared_union() -> No
         handover.left_demonstrations[0].ee_pose,
     )
     assert handover.audit["pose_target_timing"] == "time-state current EE pose from obs[t]"
-    assert handover.audit["gripper_action_timing"] == TAPAS_ACTION_TIMING
+    assert handover.audit["gripper_action_timing"] == DYNAMAC_GRIPPER_TARGET_TIMING

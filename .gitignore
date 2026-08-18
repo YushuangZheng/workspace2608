@@ -36,3 +36,4 @@ integrations/rlbench/data/**
 # Local tooling
 .venv/
 .DS_Store
+ESSAY2608_FILE_TREE_*.json

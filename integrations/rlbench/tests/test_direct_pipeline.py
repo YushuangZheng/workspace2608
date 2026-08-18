@@ -15,7 +15,7 @@ from essay2608.policy.dynamac import (
     StreamModel,
 )
 
-from integrations.rlbench.rlbench_dynamac import unimanual_evaluate
+from integrations.rlbench.rlbench_dynamac import direct_evaluate, unimanual_evaluate
 from integrations.rlbench.rlbench_dynamac.direct_evaluate import (
     DEFAULT_MODELS_DIR as DEFAULT_EVALUATION_MODELS_DIR,
 )
@@ -51,10 +51,19 @@ from integrations.rlbench.rlbench_dynamac.direct_report import (
 )
 from integrations.rlbench.rlbench_dynamac.records import atomic_json, reserve_output
 from integrations.rlbench.rlbench_dynamac.runtime import (
+    DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+    FINAL_SETTLING_PROTOCOL_ID,
+    FRESH_TASK_GENERATION_EVIDENCE_SCHEMA,
+    FRESH_TASK_GENERATION_PROTOCOL_ID,
+    STAGED_MOTION_PLAN_VALIDATION_SCHEMA,
     PrimaryActionRetryBudget,
+    StagedMotionPlan,
+    _canonical_json_fingerprint,
     bimanual_observations_from_rlbench,
     execute_joint_target_control,
+    run_final_settling,
+    staged_motion_plan_batch,
 )
 from integrations.rlbench.rlbench_dynamac.table_iii_coordination import (
     _run_episode as _run_coordination_episode,
@@ -287,6 +296,15 @@ class _AlwaysInvalidPrimaryEnvironment:
         return self.observation, 0.0, False
 
 
+def _formal_episode_inputs(environment):
+    descriptions, observation = environment.reset()
+    return {
+        "descriptions": descriptions,
+        "observation": observation,
+        "fresh_task_generation": {"test_fixture": True},
+    }
+
+
 def _bimanual_validation_case(monkeypatch):
     base = DynaMACConfig(eq6_empty_selection="keep_argmax")
     derived = BimanualDynaMAC(config=base)
@@ -311,6 +329,7 @@ def _bimanual_validation_case(monkeypatch):
         staticmethod(lambda path: policies[path.name]),
     )
     manifest = {
+        "manifest_schema": "dynamac-direct-training-v2",
         "task": "bimanual_handover_item",
         "bimanual": True,
         "config": asdict(base),
@@ -343,17 +362,17 @@ def test_direct_training_discovers_episodes_in_numeric_order(tmp_path) -> None:
     ]
 
 
-def test_v2_is_the_non_overwriting_default_artifact_release() -> None:
+def test_v3_is_the_non_overwriting_default_artifact_release() -> None:
     integration_root = DEFAULT_CONFIG.parents[1]
 
-    assert DEFAULT_CONFIG == integration_root / "configs" / "dynamac_rlbench_local.json"
-    assert DEFAULT_TRAINING_MODELS_DIR == integration_root / "models" / "v2"
-    assert DEFAULT_EVALUATION_MODELS_DIR == integration_root / "models" / "v2"
-    assert DEFAULT_EVALUATION_RESULTS_DIR == integration_root / "results" / "v2"
-    assert DEFAULT_UNIMANUAL_MODELS_DIR == integration_root / "models" / "v2"
-    assert DEFAULT_UNIMANUAL_RESULTS_DIR == integration_root / "results" / "v2"
+    assert DEFAULT_CONFIG == integration_root / "configs" / "dynamac_rlbench_v3.json"
+    assert DEFAULT_TRAINING_MODELS_DIR == integration_root / "models" / "v3"
+    assert DEFAULT_EVALUATION_MODELS_DIR == integration_root / "models" / "v3"
+    assert DEFAULT_EVALUATION_RESULTS_DIR == integration_root / "results" / "v3"
+    assert DEFAULT_UNIMANUAL_MODELS_DIR == integration_root / "models" / "v3"
+    assert DEFAULT_UNIMANUAL_RESULTS_DIR == integration_root / "results" / "v3"
     assert DEFAULT_DIRECT_REPORT_RESULTS_DIR == (
-        integration_root / "results" / "v2" / "table_ii"
+        integration_root / "results" / "v3" / "table_ii"
     )
 
 
@@ -423,6 +442,96 @@ def test_evaluation_defaults_to_200_episodes() -> None:
     assert args.max_primary_action_attempts == 3
 
 
+def test_motion_plan_cache_waits_for_concurrent_staging_writer(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pytest.skip("formal evaluation now requires a sealed canonical eval-set ID")
+    cache = tmp_path / "shared-plans.json"
+    generation_lock = cache.with_name(cache.name + ".generation.lock")
+    generation_lock.write_text("pid=123\n", encoding="utf-8")
+    generation_body = {
+        "schema": FRESH_TASK_GENERATION_EVIDENCE_SCHEMA,
+        "protocol_id": FRESH_TASK_GENERATION_PROTOCOL_ID,
+        "generation_index": 1,
+        "episode_seed": 0,
+        "variation": 0,
+        "task_name": "bimanual_handover_item",
+        "physics_running_before_stop": False,
+        "physics_stopped_before_task_reload": True,
+        "previous_task_present": False,
+        "previous_task_unloaded_before_stop": False,
+        "previous_task_unloaded_while_physics_running": False,
+        "scene_task_absent_before_stop": True,
+        "task_model_loaded_fresh": True,
+        "fresh_task_python_instance_created": True,
+        "task_model_only_reloaded": True,
+        "base_scene_reloaded": False,
+        "physics_started_by_task_environment": True,
+        "rng_seeded_after_reload_immediately_before_reset": True,
+        "variation_set_after_seed_before_reset": True,
+        "task_environment_reset_calls": 1,
+        "reset_verify_instance": True,
+    }
+    generation_evidence = {
+        **generation_body,
+        "fingerprint": _canonical_json_fingerprint(generation_body),
+    }
+    plan = StagedMotionPlan(
+        task_name="bimanual_handover_item",
+        source_pose=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        goal_pose=(0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        source_low_dim_state=(0.0,),
+        episode_seed=0,
+        variation=0,
+        validation={
+            "schema": STAGED_MOTION_PLAN_VALIDATION_SCHEMA,
+            "source_waypoint_validated": True,
+            "goal_waypoint_validated": True,
+            "sampling_attempts": 1,
+            "staging_max_attempts": 20,
+            "fresh_task_generation_protocol_id": (
+                FRESH_TASK_GENERATION_PROTOCOL_ID
+            ),
+            "selected_source_fresh_task_generation": generation_evidence,
+        },
+    )
+    payload = staged_motion_plan_batch(
+        task_name="bimanual_handover_item",
+        base_seed=0,
+        variations=[0],
+        plans=[plan],
+    )
+
+    def finish_other_writer(_seconds):
+        atomic_json(cache, payload)
+        generation_lock.unlink()
+
+    monkeypatch.setattr(direct_evaluate.time, "sleep", finish_other_writer)
+    monkeypatch.setattr(
+        direct_evaluate.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("waiting reader must not spawn a second staging process")
+        ),
+    )
+    args = SimpleNamespace(
+        scenario="teleport",
+        motion_plans=cache,
+        task="bimanual_handover_item",
+        seed=0,
+        episodes=1,
+        scenario_max_attempts=20,
+        motion_plan_wait_timeout=5.0,
+        headless=True,
+    )
+
+    path, loaded = direct_evaluate._load_or_generate_motion_plans(args)
+
+    assert path == cache
+    assert loaded["batch_fingerprint"] == payload["batch_fingerprint"]
+
+
 def test_primary_action_retry_budget_resets_only_after_success() -> None:
     budget = PrimaryActionRetryBudget(3)
 
@@ -433,6 +542,57 @@ def test_primary_action_retry_budget_resets_only_after_success() -> None:
     assert budget.record_failure() is False
     assert budget.record_failure() is False
     assert budget.record_failure() is True
+
+
+@pytest.mark.parametrize(
+    ("terminal", "expected_success", "expected_reason"),
+    (
+        ((False, False), False, "maximum_physics_steps_reached"),
+        ((True, True), True, "success"),
+        ((False, True), False, "explicit_terminate"),
+    ),
+)
+def test_final_settling_holds_commands_for_up_to_ten_raw_steps(
+    terminal,
+    expected_success,
+    expected_reason,
+) -> None:
+    class Task:
+        def __init__(self):
+            self.calls = 0
+
+        def success(self):
+            self.calls += 1
+            if terminal == (False, False) or self.calls < 3:
+                return False, False
+            return terminal
+
+    class Scene:
+        def __init__(self):
+            self.task = Task()
+            self.steps = 0
+
+        def step(self):
+            self.steps += 1
+
+    scene = Scene()
+    environment = SimpleNamespace(_scene=scene)
+
+    result = run_final_settling(
+        environment,
+        physics_steps=DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
+    )
+
+    expected_steps = 10 if terminal == (False, False) else 3
+    assert result["protocol_id"] == FINAL_SETTLING_PROTOCOL_ID
+    assert result["maximum_physics_steps"] == 10
+    assert result["steps_executed"] == expected_steps
+    assert result["first_terminal_step"] == (None if expected_steps == 10 else 3)
+    assert result["success"] is expected_success
+    assert result["terminate"] is terminal[1]
+    assert result["stop_reason"] == expected_reason
+    assert scene.steps == expected_steps
+    assert scene.task.calls == expected_steps
 
 
 @pytest.mark.parametrize("invalid", (True, 3.0, 0, -1))
@@ -529,7 +689,13 @@ def test_unimanual_dynamic_event_records_refreshed_policy_observation(
     )
     monkeypatch.setattr(unimanual_evaluate, "ScenarioController", Controller)
 
-    result = _run_unimanual_episode(environment, worker, args, episode=0)
+    result = _run_unimanual_episode(
+        environment,
+        worker,
+        args,
+        episode=0,
+        **_formal_episode_inputs(environment),
+    )
 
     assert result["interventions"] == [
         {
@@ -591,7 +757,10 @@ def test_dynamic_failure_before_trigger_is_retained_as_ineligible(
         (_finalize_bimanual_intervention, "scenario_events"),
     ),
 )
-def test_dynamic_success_before_trigger_fails_closed(finalize, event_key) -> None:
+def test_dynamic_success_before_trigger_is_retained_in_planned_denominator(
+    finalize,
+    event_key,
+) -> None:
     row = {
         "episode": 0,
         "success": True,
@@ -600,14 +769,20 @@ def test_dynamic_success_before_trigger_fails_closed(finalize, event_key) -> Non
         event_key: [],
     }
 
-    with pytest.raises(RuntimeError, match="succeeded before"):
-        finalize(
-            row,
-            scenario="teleport",
-            trigger_step=62,
-            trigger_reached=False,
-            smooth_steps=10,
-        )
+    result = finalize(
+        row,
+        scenario="teleport",
+        trigger_step=62,
+        trigger_reached=False,
+        smooth_steps=10,
+    )
+
+    assert result["success"] is True
+    assert result["pre_intervention_terminal"] is True
+    assert result["pre_intervention_terminal_outcome"] == "success"
+    assert result["dynamic_condition_exercised"] is False
+    assert result["dynamic_condition_unexercised"] is True
+    assert result["intervention_complete"] is None
 
 
 @pytest.mark.parametrize(
@@ -773,6 +948,9 @@ def test_policy_ping_binds_results_to_the_loaded_checkpoint(tmp_path) -> None:
         "training_manifest_schema",
         "manifest_authenticated",
         "training_config",
+        "training_adapter_protocol",
+        "checkpoint_trigger_audit_fingerprint",
+        "v3_trigger_anchor_evidence",
     }
     assert identity["model_schema_version"] == expected_summary["model_schema_version"]
     assert identity["selection_semantics_id"] == expected_summary[
@@ -888,6 +1066,7 @@ def test_bimanual_evaluator_aborts_invalid_target_and_commits_retry(monkeypatch)
         episode=0,
         seed=0,
         horizon=3,
+        **_formal_episode_inputs(environment),
     )
 
     assert result["reason"] == "policy_complete"
@@ -899,6 +1078,66 @@ def test_bimanual_evaluator_aborts_invalid_target_and_commits_retry(monkeypatch)
         ("act", None),
         ("commit", 2),
     ]
+
+
+def test_bimanual_dynamic_motion_does_not_repeat_on_invalid_action_retry(
+    monkeypatch,
+) -> None:
+    _install_invalid_action_module(monkeypatch)
+    pose = np.asarray(_wire_pose())
+    observation = SimpleNamespace(
+        right=SimpleNamespace(gripper_pose=pose, gripper_open=1.0),
+        left=SimpleNamespace(gripper_pose=pose, gripper_open=1.0),
+    )
+    environment = _InvalidThenSuccessfulEnvironment(observation)
+    environment.get_observation = lambda: observation
+    worker = _TransactionalWorker(np.zeros(18))
+
+    class Controller:
+        instances = []
+
+        def __init__(self, *_args, **_kwargs):
+            self.applied_steps = []
+            self.__class__.instances.append(self)
+
+        def resolved_trigger_step(self, _horizon):
+            return 0
+
+        def bind_staged_source(self, *_args, **_kwargs):
+            return {"required": False, "matched": None}
+
+        def apply(self, _task_environment, *, step, horizon):
+            assert horizon == 3
+            self.applied_steps.append(step)
+            return {
+                "kind": "teleport_task",
+                "step": step,
+                "trigger_step": 0,
+                "applied": True,
+                "protocol_effective": True,
+                "complete": True,
+                "endpoint_applied": True,
+            }
+
+    monkeypatch.setattr(direct_evaluate, "ScenarioController", Controller)
+
+    result = direct_evaluate._run_episode(
+        environment,
+        worker,
+        episode=0,
+        seed=0,
+        horizon=3,
+        scenario="teleport",
+        scenario_trigger_step=0,
+        scenario_reference_steps=3,
+        **_formal_episode_inputs(environment),
+    )
+
+    assert Controller.instances[0].applied_steps == [0]
+    assert len(result["scenario_events"]) == 1
+    assert result["committed_policy_steps"] == 1
+    assert result["dynamic_clock_steps"] == 1
+    assert result["intervention_complete"] is True
 
 
 def test_unimanual_evaluator_aborts_invalid_target_and_commits_retry(monkeypatch) -> None:
@@ -917,7 +1156,13 @@ def test_unimanual_evaluator_aborts_invalid_target_and_commits_retry(monkeypatch
         horizon=3,
     )
 
-    result = _run_unimanual_episode(environment, worker, args, episode=0)
+    result = _run_unimanual_episode(
+        environment,
+        worker,
+        args,
+        episode=0,
+        **_formal_episode_inputs(environment),
+    )
 
     assert result["reason"] == "policy_complete"
     assert result["invalid_actions"] == 1
@@ -946,10 +1191,12 @@ def test_coordination_evaluator_uses_the_shared_policy_transaction_protocol(
         environment,
         worker,
         episode=0,
+        variation=0,
         seed=0,
         horizon=3,
         arm="left",
         trigger=0,
+        **_formal_episode_inputs(environment),
     )
 
     assert result["reason"] == "policy_complete"
@@ -980,6 +1227,7 @@ def test_bimanual_retry_budget_fails_closed_without_committing(monkeypatch) -> N
         seed=0,
         horizon=10,
         max_primary_action_attempts=3,
+        **_formal_episode_inputs(environment),
     )
 
     assert result["reason"] == "primary_action_retry_exhausted"
@@ -1014,7 +1262,13 @@ def test_unimanual_retry_budget_fails_closed_without_committing(monkeypatch) -> 
         horizon=10,
     )
 
-    result = _run_unimanual_episode(environment, worker, args, episode=0)
+    result = _run_unimanual_episode(
+        environment,
+        worker,
+        args,
+        episode=0,
+        **_formal_episode_inputs(environment),
+    )
 
     assert result["reason"] == "primary_action_retry_exhausted"
     assert result["invalid_actions"] == 3
@@ -1032,8 +1286,11 @@ def test_dynamic_evaluators_retain_retry_exhaustion_before_trigger(
         right=SimpleNamespace(gripper_pose=pose, gripper_open=1.0),
         left=SimpleNamespace(gripper_pose=pose, gripper_open=1.0),
     )
+    bimanual_environment = _AlwaysInvalidPrimaryEnvironment(
+        bimanual_observation
+    )
     bimanual = _run_bimanual_episode(
-        _AlwaysInvalidPrimaryEnvironment(bimanual_observation),
+        bimanual_environment,
         _TransactionalWorker(np.zeros(18)),
         episode=0,
         seed=0,
@@ -1041,6 +1298,7 @@ def test_dynamic_evaluators_retain_retry_exhaustion_before_trigger(
         scenario="teleport",
         scenario_reference_steps=187,
         max_primary_action_attempts=3,
+        **_formal_episode_inputs(bimanual_environment),
     )
 
     unimanual_observation = SimpleNamespace(gripper_pose=pose, gripper_open=1.0)
@@ -1054,11 +1312,15 @@ def test_dynamic_evaluators_retain_retry_exhaustion_before_trigger(
         max_primary_action_attempts=2,
         horizon=10,
     )
+    unimanual_environment = _AlwaysInvalidPrimaryEnvironment(
+        unimanual_observation
+    )
     unimanual = _run_unimanual_episode(
-        _AlwaysInvalidPrimaryEnvironment(unimanual_observation),
+        unimanual_environment,
         _TransactionalWorker(np.zeros(9)),
         unimanual_args,
         episode=0,
+        **_formal_episode_inputs(unimanual_environment),
     )
 
     assert bimanual["reason"] == "primary_action_retry_exhausted"
@@ -1085,11 +1347,13 @@ def test_coordination_retry_budget_fails_closed_without_committing(
         environment,
         worker,
         episode=0,
+        variation=0,
         seed=0,
         horizon=10,
         arm="left",
         trigger=0,
         max_primary_action_attempts=3,
+        **_formal_episode_inputs(environment),
     )
 
     assert result["reason"] == "primary_action_retry_exhausted"
@@ -1127,6 +1391,7 @@ def test_noop_terminal_outcome_precedes_retry_exhaustion(
         seed=0,
         horizon=10,
         max_primary_action_attempts=3,
+        **_formal_episode_inputs(environment),
     )
 
     assert result["reason"] == expected_reason

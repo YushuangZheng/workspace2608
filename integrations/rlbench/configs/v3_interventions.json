@@ -1,0 +1,151 @@
+{
+  "schema": "rlbench-dynamac-v3-interventions-v2",
+  "release": "v3",
+  "phase_formula": "local_tick / (skill_duration - 1)",
+  "smooth_steps": 10,
+  "final_settling_physics_steps": 10,
+  "dynamic_environment": {
+    "stack_wine": {
+      "anchor_arm": "single",
+      "interaction_arm": "single",
+      "interaction_object": "wine_bottle",
+      "interaction_event": "open gripper approaching the wine bottle before grasp",
+      "expected_gripper_state": "open",
+      "skill_label": 0,
+      "evidence_frame": "wine_bottle",
+      "expected_duration": 72,
+      "local_tick": 58,
+      "phase": 0.8169014084507042,
+      "required_active_window": [58, 67]
+    },
+    "place_cups": {
+      "anchor_arm": "single",
+      "interaction_arm": "single",
+      "interaction_object": "mug0",
+      "interaction_event": "open gripper approaching mug0 before grasp",
+      "expected_gripper_state": "open",
+      "skill_label": 0,
+      "evidence_frame": "mug0",
+      "expected_duration": 59,
+      "local_tick": 45,
+      "phase": 0.7758620689655172,
+      "required_active_window": [45, 54]
+    },
+    "open_microwave": {
+      "anchor_arm": "single",
+      "interaction_arm": "single",
+      "interaction_object": "microwave_door",
+      "interaction_event": "open gripper approaching the microwave door handle before grasp",
+      "expected_gripper_state": "open",
+      "skill_label": 0,
+      "evidence_frame": "microwave_door",
+      "expected_duration": 101,
+      "local_tick": 85,
+      "phase": 0.85,
+      "required_active_window": [85, 94]
+    },
+    "wipe_desk": {
+      "anchor_arm": "single",
+      "interaction_arm": "single",
+      "interaction_object": "sponge",
+      "interaction_event": "open gripper approaching the sponge before grasp",
+      "expected_gripper_state": "open",
+      "skill_label": 0,
+      "evidence_frame": "sponge",
+      "expected_duration": 74,
+      "local_tick": 52,
+      "phase": 0.7123287671232876,
+      "required_active_window": [52, 61]
+    },
+    "bimanual_put_bottle_in_fridge": {
+      "anchor_arm": "right",
+      "interaction_arm": "left",
+      "interaction_object": "bottle",
+      "interaction_event": "left open gripper approaching the bottle before grasp; right anchor is a policy-clock checkpoint",
+      "expected_gripper_state": "open",
+      "skill_label": 0,
+      "evidence_frame": "fridge_root",
+      "expected_duration": 126,
+      "local_tick": 110,
+      "phase": 0.88,
+      "required_active_window": [110, 119]
+    },
+    "bimanual_handover_item": {
+      "anchor_arm": "left",
+      "interaction_arm": "left",
+      "interaction_object": "item0",
+      "interaction_event": "left open gripper has not reached the pose above item0 and is moving toward it",
+      "expected_gripper_state": "open",
+      "skill_label": 0,
+      "evidence_frame": "item0",
+      "expected_duration": 74,
+      "local_tick": 50,
+      "phase": 0.684931506849315,
+      "required_active_window": [50, 59]
+    },
+    "bimanual_lift_tray": {
+      "anchor_arm": "left",
+      "interaction_arm": "left",
+      "interaction_object": "tray",
+      "interaction_event": "left open gripper approaching the tray before grasp",
+      "expected_gripper_state": "open",
+      "skill_label": 0,
+      "evidence_frame": "tray",
+      "expected_duration": 63,
+      "local_tick": 49,
+      "phase": 0.7903225806451613,
+      "required_active_window": [49, 58]
+    },
+    "bimanual_sweep_to_dustpan": {
+      "anchor_arm": "left",
+      "interaction_arm": "left",
+      "interaction_object": "dustpan",
+      "interaction_event": "left open gripper approaching the dustpan before grasp",
+      "expected_gripper_state": "open",
+      "skill_label": 0,
+      "evidence_frame": "dustpan",
+      "expected_duration": 64,
+      "local_tick": 53,
+      "phase": 0.8412698412698413,
+      "required_active_window": [53, 62]
+    }
+  },
+  "coordination": {
+    "coordination_hand_right": {
+      "perturbed_arm": "right",
+      "anchor_arm": "left",
+      "interaction_object": "item0",
+      "interaction_event": "right open receiver gripper is at item0 held by the left closed giver gripper immediately before transfer",
+      "expected_gripper_states": {"left": "closed", "right": "open"},
+      "handover_stage": "receiver_at_giver_held_item_before_gripper_transfer",
+      "skill_label": 5,
+      "evidence_frame": "right_ee",
+      "expected_duration": 19,
+      "local_tick": 15,
+      "global_tick": 235,
+      "phase": 0.8333333333333334
+    },
+    "coordination_hand_left": {
+      "perturbed_arm": "left",
+      "anchor_arm": "left",
+      "interaction_object": "item0",
+      "interaction_event": "right open receiver gripper is at item0 held by the left closed giver gripper immediately before transfer",
+      "expected_gripper_states": {"left": "closed", "right": "open"},
+      "handover_stage": "receiver_at_giver_held_item_before_gripper_transfer",
+      "skill_label": 5,
+      "evidence_frame": "right_ee",
+      "expected_duration": 19,
+      "local_tick": 15,
+      "global_tick": 235,
+      "phase": 0.8333333333333334
+    }
+  },
+  "provenance": {
+    "source": "V3 checkpoint-backed frame audits plus manual pre-interaction semantics",
+    "frozen_before_v3_formal_evaluation": true,
+    "model_weights_retrained_for_trigger_change": false,
+    "manifests_reauthenticated": true,
+    "integer_ticks_authoritative": true,
+    "result_based_retuning_forbidden": true
+  }
+}

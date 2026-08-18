@@ -51,6 +51,7 @@ TAPAS_DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "configs" / "tapas_segmentation.json"
 )
 TAPAS_ACTION_TIMING = "obs[t] -> obs[t+1], terminal observation repeated"
+DYNAMAC_CURRENT_STATE_TIMING = "obs[t] current state"
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,27 @@ def forward_gripper_action(gripper_state: Any, *, signed: bool = True) -> Array:
         raise ValueError("signed RLBench conversion requires gripper states in [0, 1]")
     action = np.concatenate((state[1:], state[-1:]), axis=0).copy()
     return 2.0 * action - 1.0 if signed else action
+
+
+def current_gripper_state(gripper_state: Any, *, signed: bool = True) -> Array:
+    """Return the gripper state at ``obs[t]`` for each policy time state.
+
+    DynaMAC's time-state model fits the end-effector pose from ``obs[t]``.  The
+    V3 protocol uses the gripper value from that same observation instead of
+    advancing only the gripper stream by one sample.  Boundary extraction also
+    uses the first sample of the new measured state, so no boundary-specific
+    shift is applied here.
+    """
+
+    state = np.asarray(gripper_state, dtype=np.float64)
+    if state.ndim not in {1, 2} or len(state) < 1:
+        raise ValueError("gripper state must have shape [T] or [T, D], T >= 1")
+    if not np.all(np.isfinite(state)):
+        raise ValueError("gripper state contains non-finite values")
+    if signed and (np.any(state < 0.0) or np.any(state > 1.0)):
+        raise ValueError("signed RLBench conversion requires gripper states in [0, 1]")
+    result = state.copy()
+    return 2.0 * result - 1.0 if signed else result
 
 
 def next_observation_actions(
@@ -174,6 +196,7 @@ def save_bimanual_segmentation_debug_plot(
 
 __all__ = [
     "BimanualTAPASSegmentation",
+    "DYNAMAC_CURRENT_STATE_TIMING",
     "TAPAS_ACTION_TIMING",
     "TAPAS_BIMANUAL_APPLICATION_SOURCE_STATUS",
     "TAPAS_CONFIG_DEFAULTS_SOURCE_STATUS",
@@ -189,6 +212,7 @@ __all__ = [
     "TAPASSegmentation",
     "TAPASSegmentationConfig",
     "align_tapas_boundaries",
+    "current_gripper_state",
     "forward_gripper_action",
     "forward_pose_action",
     "gripper_change_boundaries",

@@ -6,7 +6,10 @@ and action-layout tests run on machines without CoppeliaSim.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import random
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -21,6 +24,65 @@ Array = np.ndarray
 PRESERVE_INSTANCE_MOTION_PROTOCOL_ID = (
     "rlbench-boundary-root-preserve-initialized-episode-v4"
 )
+STAGED_VALIDATED_MOTION_PROTOCOL_ID = (
+    "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4"
+)
+STAGED_MOTION_PLAN_SCHEMA = "dynamac-rlbench-staged-motion-plan-v3.4"
+STAGED_MOTION_PLAN_BATCH_SCHEMA = "dynamac-rlbench-staged-motion-plan-batch-v3.4"
+STAGED_MOTION_PLAN_VALIDATION_SCHEMA = (
+    "dynamac-rlbench-staged-motion-plan-validation-v3.4"
+)
+STAGED_SOURCE_PLAN_SCHEMA = "dynamac-rlbench-staged-source-plan-v1"
+STAGED_SOURCE_PLAN_BATCH_SCHEMA = "dynamac-rlbench-staged-source-plan-batch-v1"
+STAGED_SOURCE_VALIDATION_SCHEMA = "dynamac-rlbench-staged-source-validation-v1"
+STAGED_SOURCE_PROTOCOL_ID = "rlbench-deterministic-source-a-only-v1"
+FRESH_TASK_GENERATION_PROTOCOL_ID = (
+    "rlbench-prestop-unload-if-present-stop-reload-start-seed-variation-"
+    "single-reset-v2"
+)
+FRESH_TASK_GENERATION_EVIDENCE_SCHEMA = (
+    "dynamac-rlbench-fresh-task-generation-evidence-v2"
+)
+DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID = (
+    "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-"
+    "single-reset-verify-false-v1"
+)
+DETERMINISTIC_SOURCE_RESET_EVIDENCE_SCHEMA = (
+    "dynamac-rlbench-deterministic-source-reset-evidence-v1"
+)
+SOURCE_SEED_SELECTION_SCHEMA = "dynamac-rlbench-source-seed-selection-v1"
+SOURCE_CERTIFICATION_SCHEMA = "dynamac-rlbench-offline-source-certification-v1"
+GOAL_CERTIFICATION_SCHEMA = "dynamac-rlbench-offline-goal-certification-v1"
+SOURCE_RECONSTRUCTION_SCHEMA = "dynamac-rlbench-source-reconstruction-audit-v1"
+DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS = 20
+SOURCE_RECONSTRUCTION_TRANSLATION_TOLERANCE_M = 1.0e-6
+SOURCE_RECONSTRUCTION_ROTATION_TOLERANCE_RAD = 1.0e-6
+SOURCE_RECONSTRUCTION_SCALAR_TOLERANCE = 1.0e-6
+SOURCE_RECONSTRUCTION_JOINT_TOLERANCE = 1.0e-6
+TASK_SEMANTIC_SIGNATURE_SCHEMA = (
+    "dynamac-rlbench-task-semantic-signature-v2"
+)
+TASK_TREE_STATE_SCHEMA = "rlbench-task-tree-dual-frame-state-v1"
+CROSS_INITIALIZATION_REPRODUCIBILITY_SCHEMA = (
+    "rlbench-cross-initialization-reproducibility-audit-v1"
+)
+FORMAL_INTERVENTION_STATE_AUDIT_SCHEMA = (
+    "rlbench-formal-boundary-root-same-instance-state-audit-v2"
+)
+FORMAL_INTERVENTION_COLLISION_PAIR_POLICY = (
+    "record_exact_post_command_pair_delta_diagnostic_only"
+)
+CROSS_INITIALIZATION_TRANSLATION_TOLERANCE_M = 2.0e-5
+CROSS_INITIALIZATION_ROTATION_TOLERANCE_RAD = 2.0e-4
+CROSS_INITIALIZATION_SCALAR_TOLERANCE = 1.0e-4
+CROSS_INITIALIZATION_JOINT_TOLERANCE = 1.0e-4
+QUATERNION_ROTATION_METRIC = (
+    "sign_invariant_normalized_chord_4asin_half_chord"
+)
+FINAL_SETTLING_PROTOCOL_ID = (
+    "rlbench-hold-final-command-up-to-10-raw-physics-steps-v3"
+)
+DEFAULT_FINAL_SETTLING_PHYSICS_STEPS = 10
 LOW_DIM_STATE_ROUNDTRIP_ATOL = 1.0e-6
 LOW_DIM_POSE_TRANSLATION_TOLERANCE_M = 1.0e-6
 LOW_DIM_POSE_ROTATION_TOLERANCE_RAD = 1.0e-6
@@ -29,6 +91,305 @@ ROOT_ACTUAL_MOTION_TRANSLATION_TOLERANCE_M = 1.0e-9
 ROOT_ACTUAL_MOTION_ROTATION_TOLERANCE_RAD = 1.0e-9
 ROOT_COMMAND_TRANSLATION_TOLERANCE_M = 1.0e-6
 ROOT_COMMAND_ROTATION_TOLERANCE_RAD = 1.0e-6
+
+
+def initialize_fresh_task_generation(
+    environment: Any,
+    task_class: Any,
+    *,
+    episode_seed: int,
+    variation: int,
+    verify_instance: bool = True,
+) -> tuple[Any, Any, Any, dict[str, Any]]:
+    """Load and reset one task generation with no prior physics history.
+
+    The order is deliberately fixed.  If a preceding task exists, unload it
+    while physics is still running so task-owned runtime objects remain valid
+    during ``cleanup``.  Then stop physics, load a new task environment (whose
+    constructor starts physics), seed both RNGs immediately before
+    initialization, set the variation, and call ``reset`` exactly once.
+    Keeping the lifecycle in one helper avoids accidental extra resets in
+    staging candidates and formal episodes.
+    """
+
+    if isinstance(episode_seed, bool) or not isinstance(episode_seed, int):
+        raise TypeError("fresh task-generation seed must be an integer")
+    if episode_seed < 0:
+        raise ValueError("fresh task-generation seed must be non-negative")
+    if isinstance(variation, bool) or not isinstance(variation, int):
+        raise TypeError("fresh task-generation variation must be an integer")
+    if variation < 0:
+        raise ValueError("fresh task-generation variation must be non-negative")
+    pyrep = getattr(environment, "_pyrep", None)
+    stop = getattr(pyrep, "stop", None)
+    get_task = getattr(environment, "get_task", None)
+    if pyrep is None or not callable(stop) or not callable(get_task):
+        raise RuntimeError("RLBench fresh task-generation lifecycle API is unavailable")
+
+    running_before_stop = getattr(pyrep, "running", None)
+    if not isinstance(running_before_stop, bool):
+        raise RuntimeError("PyRep running-state audit is unavailable")
+    scene = getattr(environment, "_scene", None)
+    unload = getattr(scene, "unload", None)
+    if scene is None or not callable(unload):
+        raise RuntimeError("RLBench scene unload lifecycle API is unavailable")
+    previous_task = getattr(scene, "task", None)
+    previous_task_present = previous_task is not None
+    if running_before_stop is not previous_task_present:
+        raise RuntimeError(
+            "fresh task-generation physics/task lifecycle state is inconsistent"
+        )
+    if previous_task_present:
+        if running_before_stop is not True:
+            raise RuntimeError(
+                "preceding task must be unloaded before physics is stopped"
+            )
+        unload()
+        if getattr(scene, "task", None) is not None:
+            raise RuntimeError("preceding task did not unload before physics stop")
+        if getattr(pyrep, "running", None) is not True:
+            raise RuntimeError("preceding task unload unexpectedly stopped physics")
+    stop()
+    if getattr(pyrep, "running", None) is not False:
+        raise RuntimeError("physics did not stop before fresh task reload")
+
+    task_environment = get_task(task_class)
+    if getattr(pyrep, "running", None) is not True:
+        raise RuntimeError("fresh TaskEnvironment did not restart physics")
+    set_variation = getattr(task_environment, "set_variation", None)
+    reset = getattr(task_environment, "reset", None)
+    if not callable(set_variation) or not callable(reset):
+        raise RuntimeError("RLBench fresh TaskEnvironment reset API is unavailable")
+
+    # Reload may consume RNG state in third-party task constructors.  Install
+    # the episode seed immediately before the only initialization reset.
+    random.seed(episode_seed)
+    np.random.seed(episode_seed)
+    set_variation(variation)
+    if not isinstance(verify_instance, bool):
+        raise TypeError("fresh task-generation verification flag must be boolean")
+    reset_collision_checks: list[bool] = []
+    reset_scene = getattr(task_environment, "_scene", None)
+    reset_robot = getattr(reset_scene, "robot", None)
+    original_collision_check = getattr(reset_robot, "is_in_collision", None)
+    robot_dict = getattr(reset_robot, "__dict__", {})
+    had_instance_collision_check = "is_in_collision" in robot_dict
+    prior_instance_collision_check = robot_dict.get("is_in_collision")
+    if not verify_instance:
+        if not callable(original_collision_check):
+            raise RuntimeError("RLBench reset robot collision check is unavailable")
+
+        def audited_collision_check(*args: Any, **kwargs: Any) -> bool:
+            result = bool(original_collision_check(*args, **kwargs))
+            reset_collision_checks.append(result)
+            return result
+
+        setattr(reset_robot, "is_in_collision", audited_collision_check)
+    try:
+        reset_result = reset(verify_instance=verify_instance)
+    finally:
+        if not verify_instance:
+            if had_instance_collision_check:
+                setattr(reset_robot, "is_in_collision", prior_instance_collision_check)
+            else:
+                delattr(reset_robot, "is_in_collision")
+    if not isinstance(reset_result, tuple) or len(reset_result) < 2:
+        raise RuntimeError("fresh TaskEnvironment.reset returned an invalid result")
+    descriptions, observation = reset_result[0], reset_result[1]
+
+    scene = getattr(task_environment, "_scene", None)
+    task = getattr(scene, "task", None)
+    if task is None or task is previous_task:
+        raise RuntimeError("fresh task reload did not create a new task instance")
+    get_name = getattr(task, "get_name", None)
+    task_name = str(get_name()) if callable(get_name) else type(task).__name__
+    generation_index = getattr(environment, "_dynamac_generation_index", 0) + 1
+    setattr(environment, "_dynamac_generation_index", generation_index)
+    body = {
+        "schema": (
+            FRESH_TASK_GENERATION_EVIDENCE_SCHEMA
+            if verify_instance
+            else DETERMINISTIC_SOURCE_RESET_EVIDENCE_SCHEMA
+        ),
+        "protocol_id": (
+            FRESH_TASK_GENERATION_PROTOCOL_ID
+            if verify_instance
+            else DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
+        ),
+        "generation_index": int(generation_index),
+        "episode_seed": int(episode_seed),
+        "variation": int(variation),
+        "task_name": task_name,
+        "physics_running_before_stop": running_before_stop,
+        "physics_stopped_before_task_reload": True,
+        "previous_task_present": previous_task_present,
+        "previous_task_unloaded_before_stop": previous_task_present,
+        "previous_task_unloaded_while_physics_running": previous_task_present,
+        "scene_task_absent_before_stop": True,
+        "task_model_loaded_fresh": True,
+        "fresh_task_python_instance_created": True,
+        "task_model_only_reloaded": True,
+        "base_scene_reloaded": False,
+        "physics_started_by_task_environment": True,
+        "rng_seeded_after_reload_immediately_before_reset": True,
+        "variation_set_after_seed_before_reset": True,
+        "task_environment_reset_calls": 1,
+        "reset_verify_instance": verify_instance,
+    }
+    if not verify_instance:
+        static_positions = bool(getattr(task_environment, "_static_positions", False))
+        is_static_workspace = bool(task.is_static_workspace())
+        body.update(
+            {
+                "reset_random_placement_expected": bool(
+                    not static_positions and not is_static_workspace
+                ),
+                "reset_robot_collision_check_count": len(reset_collision_checks),
+                "reset_robot_collision_check_results": reset_collision_checks,
+            }
+        )
+    evidence = {
+        **body,
+        "fingerprint": _canonical_json_fingerprint(body),
+    }
+    setattr(task_environment, "_dynamac_fresh_generation_evidence", evidence)
+    return task_environment, descriptions, observation, evidence
+
+
+def _canonical_json_fingerprint(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_fresh_task_generation_evidence(
+    evidence: Any,
+    *,
+    episode_seed: int,
+    variation: int,
+    task_name: str,
+    verify_instance: bool = True,
+) -> dict[str, Any]:
+    """Authenticate one lifecycle record and return a defensive copy."""
+
+    expected_fields = {
+        "schema",
+        "protocol_id",
+        "generation_index",
+        "episode_seed",
+        "variation",
+        "task_name",
+        "physics_running_before_stop",
+        "physics_stopped_before_task_reload",
+        "previous_task_present",
+        "previous_task_unloaded_before_stop",
+        "previous_task_unloaded_while_physics_running",
+        "scene_task_absent_before_stop",
+        "task_model_loaded_fresh",
+        "fresh_task_python_instance_created",
+        "task_model_only_reloaded",
+        "base_scene_reloaded",
+        "physics_started_by_task_environment",
+        "rng_seeded_after_reload_immediately_before_reset",
+        "variation_set_after_seed_before_reset",
+        "task_environment_reset_calls",
+        "reset_verify_instance",
+        "fingerprint",
+    }
+    if not verify_instance:
+        expected_fields.update(
+            {
+                "reset_robot_collision_check_count",
+                "reset_robot_collision_check_results",
+                "reset_random_placement_expected",
+            }
+        )
+    if not isinstance(evidence, dict) or set(evidence) != expected_fields:
+        raise RuntimeError("fresh task-generation evidence fields are invalid")
+    body = {key: value for key, value in evidence.items() if key != "fingerprint"}
+    if (
+        evidence.get("schema")
+        != (
+            FRESH_TASK_GENERATION_EVIDENCE_SCHEMA
+            if verify_instance
+            else DETERMINISTIC_SOURCE_RESET_EVIDENCE_SCHEMA
+        )
+        or evidence.get("protocol_id")
+        != (
+            FRESH_TASK_GENERATION_PROTOCOL_ID
+            if verify_instance
+            else DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
+        )
+        or isinstance(evidence.get("generation_index"), bool)
+        or not isinstance(evidence.get("generation_index"), int)
+        or evidence["generation_index"] < 1
+        or isinstance(evidence.get("episode_seed"), bool)
+        or not isinstance(evidence.get("episode_seed"), int)
+        or isinstance(evidence.get("variation"), bool)
+        or not isinstance(evidence.get("variation"), int)
+        or evidence.get("episode_seed") != episode_seed
+        or evidence.get("variation") != variation
+        or evidence["episode_seed"] < 0
+        or evidence["variation"] < 0
+        or evidence.get("task_name") != task_name
+        or not isinstance(evidence.get("physics_running_before_stop"), bool)
+        or evidence.get("physics_running_before_stop")
+        is not evidence.get("previous_task_present")
+        or evidence.get("physics_stopped_before_task_reload") is not True
+        or not isinstance(evidence.get("previous_task_present"), bool)
+        or evidence.get("previous_task_unloaded_before_stop")
+        is not evidence.get("previous_task_present")
+        or evidence.get("previous_task_unloaded_while_physics_running")
+        is not evidence.get("previous_task_present")
+        or evidence.get("scene_task_absent_before_stop") is not True
+        or evidence.get("task_model_loaded_fresh") is not True
+        or evidence.get("fresh_task_python_instance_created") is not True
+        or evidence.get("task_model_only_reloaded") is not True
+        or evidence.get("base_scene_reloaded") is not False
+        or evidence.get("physics_started_by_task_environment") is not True
+        or evidence.get("rng_seeded_after_reload_immediately_before_reset") is not True
+        or evidence.get("variation_set_after_seed_before_reset") is not True
+        or isinstance(evidence.get("task_environment_reset_calls"), bool)
+        or not isinstance(evidence.get("task_environment_reset_calls"), int)
+        or evidence.get("task_environment_reset_calls") != 1
+        or evidence.get("reset_verify_instance") is not verify_instance
+        or (
+            not verify_instance
+            and (
+                isinstance(evidence.get("reset_robot_collision_check_count"), bool)
+                or not isinstance(
+                    evidence.get("reset_robot_collision_check_count"), int
+                )
+                or evidence.get("reset_robot_collision_check_count") < 0
+                or not isinstance(
+                    evidence.get("reset_random_placement_expected"), bool
+                )
+                or not isinstance(
+                    evidence.get("reset_robot_collision_check_results"), list
+                )
+                or any(
+                    not isinstance(value, bool)
+                    for value in evidence["reset_robot_collision_check_results"]
+                )
+                or evidence["reset_robot_collision_check_count"]
+                != len(evidence["reset_robot_collision_check_results"])
+                or evidence["reset_robot_collision_check_results"]
+                != (
+                    [False]
+                    if evidence["reset_random_placement_expected"]
+                    else []
+                )
+            )
+        )
+        or evidence.get("fingerprint") != _canonical_json_fingerprint(body)
+    ):
+        raise RuntimeError("fresh task-generation evidence is invalid")
+    return dict(evidence)
 
 
 # RLBench's waypoint demonstration generator actuates every gripper at 0.04
@@ -79,6 +440,96 @@ class PrimaryActionRetryBudget:
             "exhaustion_reason": "primary_action_retry_exhausted",
             "counter_reset": "after_successful_primary_action_commit",
         }
+
+
+def final_settling_metadata(
+    physics_steps: int = DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
+) -> dict[str, Any]:
+    """Describe the task-independent terminal settling protocol."""
+
+    if isinstance(physics_steps, bool) or not isinstance(physics_steps, int):
+        raise TypeError("final settling physics steps must be an integer")
+    if physics_steps < 0:
+        raise ValueError("final settling physics steps must be non-negative")
+    return {
+        "protocol_id": (
+            FINAL_SETTLING_PROTOCOL_ID
+            if physics_steps == DEFAULT_FINAL_SETTLING_PHYSICS_STEPS
+            else (
+                "rlbench-hold-final-command-up-to-"
+                f"{physics_steps}-raw-physics-steps-v3"
+            )
+        ),
+        # ``physics_steps`` is retained as the backwards-compatible budget
+        # field.  It is a maximum: success or an explicit task termination
+        # stops settling immediately.
+        "physics_steps": physics_steps,
+        "maximum_physics_steps": physics_steps,
+        "entry_condition": "normal_policy_complete_without_terminal_outcome",
+        "command_semantics": "hold_existing_joint_targets_and_gripper_state",
+        "step_api": "Scene.step",
+        "success_and_failure_check": "Task.success_after_each_raw_physics_step",
+        "early_stop": "first_success_or_explicit_terminate",
+        "policy_clock_advanced": False,
+        "dynamic_clock_advanced": False,
+        "task_specific_adaptation": False,
+    }
+
+
+def run_final_settling(
+    task_environment: Any,
+    *,
+    physics_steps: int = DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
+) -> dict[str, Any]:
+    """Hold final commands and advance only raw simulator physics.
+
+    No policy action is requested and no high-level ``TaskEnvironment.step`` is
+    executed.  Existing joint targets and the gripper state therefore remain
+    active while ``Scene.step`` advances physics and the task callback once.
+    RLBench success/failure conditions are checked after every raw step.
+    """
+
+    metadata = final_settling_metadata(physics_steps)
+    result = {
+        **metadata,
+        "attempted": physics_steps > 0,
+        "available": True,
+        "steps_executed": 0,
+        "first_terminal_step": None,
+        "stop_reason": "budget_zero" if physics_steps == 0 else None,
+        "success": False,
+        "terminate": False,
+    }
+    if physics_steps == 0:
+        return result
+    scene = getattr(task_environment, "_scene", None)
+    step_scene = getattr(scene, "step", None)
+    task = getattr(scene, "task", None)
+    success_fn = getattr(task, "success", None)
+    if not callable(step_scene) or not callable(success_fn):
+        # Lightweight evaluator unit-test doubles intentionally omit private
+        # RLBench scene internals. Real V3 evaluation always has both APIs.
+        result.update(
+            {
+                "available": False,
+                "attempted": False,
+                "stop_reason": "raw_scene_or_task_success_api_unavailable",
+            }
+        )
+        return result
+    for index in range(1, physics_steps + 1):
+        step_scene()
+        success, terminate = success_fn()
+        result["steps_executed"] = index
+        result["success"] = bool(success)
+        result["terminate"] = bool(terminate)
+        if success or terminate:
+            result["first_terminal_step"] = index
+            result["stop_reason"] = "success" if success else "explicit_terminate"
+            break
+    if result["stop_reason"] is None:
+        result["stop_reason"] = "maximum_physics_steps_reached"
+    return result
 
 
 def _protocol_float_token(value: float) -> str:
@@ -466,6 +917,688 @@ def _same_instance_references(
     )
 
 
+def _source_seed(episode_seed: int, variation: int, attempt: int) -> int:
+    """Return the frozen, scenario-independent RNG seed for one source try."""
+
+    if attempt < 1:
+        raise ValueError("source seed attempt must be positive")
+    if attempt == 1:
+        return int(episode_seed)
+    return int(
+        (
+            episode_seed * 1_000_003
+            + variation * 9_176
+            + attempt * 104_729
+        )
+        % (2**32 - 1)
+    )
+
+
+def _source_selection_failure_diagnostic(attempts: list[dict[str, Any]]) -> str:
+    """Summarize rejected A candidates without persisting a partial plan."""
+
+    counts: dict[str, int] = {}
+    for row in attempts:
+        rejection_type = str(row.get("rejection_type") or "unknown")
+        counts[rejection_type] = counts.get(rejection_type, 0) + 1
+    last_reason = (
+        str(attempts[-1].get("rejection_reason") or "unknown")
+        if attempts
+        else "no candidate evidence"
+    )
+    return f"rejection_counts={counts}; last_reason={last_reason}"
+
+
+def _goal_sampling_failure_diagnostic(attempts: list[dict[str, Any]]) -> str:
+    """Summarize rejected B candidates without persisting a partial plan."""
+
+    counts: dict[str, int] = {}
+    for row in attempts:
+        outcome = str(row.get("outcome") or "unknown")
+        counts[outcome] = counts.get(outcome, 0) + 1
+    last_reason = (
+        str(attempts[-1].get("reason") or "unknown")
+        if attempts
+        else "no candidate evidence"
+    )
+    return f"rejection_counts={counts}; last_reason={last_reason}"
+
+
+def _robot_numeric_state(robot: Any) -> dict[str, Any]:
+    """Capture a stable numeric robot state without configuration-tree access."""
+
+    component_names = (
+        ("right_arm", "left_arm", "right_gripper", "left_gripper")
+        if bool(getattr(robot, "is_bimanual", False))
+        else ("arm", "gripper")
+    )
+    rows = []
+    for name in component_names:
+        component = getattr(robot, name, None)
+        if component is None:
+            raise RuntimeError(f"RLBench robot component {name!r} is unavailable")
+        getters = {
+            "joint_positions": "get_joint_positions",
+            "joint_target_positions": "get_joint_target_positions",
+            "joint_velocities": "get_joint_velocities",
+        }
+        row = {"name": name}
+        for field, getter_name in getters.items():
+            getter = getattr(component, getter_name, None)
+            if not callable(getter):
+                raise RuntimeError(
+                    f"RLBench robot component {name!r} cannot report {field}"
+                )
+            values = np.asarray(getter(), dtype=np.float64).reshape(-1)
+            if not np.all(np.isfinite(values)):
+                raise RuntimeError(f"RLBench robot {name!r} {field} is not finite")
+            row[field] = values.tolist()
+        get_tip = getattr(component, "get_tip", None)
+        if callable(get_tip):
+            tip = get_tip()
+            get_pose = getattr(tip, "get_pose", None)
+            if not callable(get_pose):
+                raise RuntimeError(f"RLBench robot {name!r} tip pose is unavailable")
+            pose = np.asarray(get_pose(), dtype=np.float64)
+            if pose.shape != (7,) or not np.all(np.isfinite(pose)):
+                raise RuntimeError(f"RLBench robot {name!r} tip pose is invalid")
+            row["tip_pose"] = pose.tolist()
+        rows.append(row)
+    return {"components": rows}
+
+
+def _robot_numeric_state_audit(
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> dict[str, Any]:
+    """Compare robot state around offline waypoint validation."""
+
+    before_rows = {row["name"]: row for row in before.get("components", [])}
+    after_rows = {row["name"]: row for row in after.get("components", [])}
+    names_matched = before_rows.keys() == after_rows.keys()
+    max_joint_position = 0.0
+    max_joint_target = 0.0
+    max_joint_velocity = 0.0
+    max_tip_translation = 0.0
+    max_tip_rotation = 0.0
+    structure_matched = names_matched
+    for name in sorted(before_rows.keys() | after_rows.keys()):
+        left = before_rows.get(name)
+        right = after_rows.get(name)
+        if left is None or right is None or left.keys() != right.keys():
+            structure_matched = False
+            continue
+        for field, target in (
+            ("joint_positions", "position"),
+            ("joint_target_positions", "target"),
+            ("joint_velocities", "velocity"),
+        ):
+            a = np.asarray(left[field], dtype=np.float64)
+            b = np.asarray(right[field], dtype=np.float64)
+            if a.shape != b.shape:
+                structure_matched = False
+                continue
+            error = float(np.max(np.abs(a - b))) if a.size else 0.0
+            if target == "position":
+                max_joint_position = max(max_joint_position, error)
+            elif target == "target":
+                max_joint_target = max(max_joint_target, error)
+            else:
+                max_joint_velocity = max(max_joint_velocity, error)
+        if "tip_pose" in left:
+            metrics = _root_motion_metrics(
+                np.asarray(left["tip_pose"], dtype=np.float64),
+                np.asarray(right["tip_pose"], dtype=np.float64),
+            )
+            max_tip_translation = max(
+                max_tip_translation,
+                float(metrics["planned_root_translation_m"]),
+            )
+            max_tip_rotation = max(
+                max_tip_rotation,
+                float(metrics["planned_root_rotation_rad"]),
+            )
+    passed = bool(
+        structure_matched
+        and max_joint_position <= SOURCE_RECONSTRUCTION_JOINT_TOLERANCE
+        and max_joint_target <= SOURCE_RECONSTRUCTION_JOINT_TOLERANCE
+        and max_joint_velocity <= SOURCE_RECONSTRUCTION_SCALAR_TOLERANCE
+        and max_tip_translation <= SOURCE_RECONSTRUCTION_TRANSLATION_TOLERANCE_M
+        and max_tip_rotation <= SOURCE_RECONSTRUCTION_ROTATION_TOLERANCE_RAD
+    )
+    return {
+        "structure_matched": structure_matched,
+        "max_joint_position_error": max_joint_position,
+        "max_joint_target_position_error": max_joint_target,
+        "max_joint_velocity_error": max_joint_velocity,
+        "max_tip_translation_error_m": max_tip_translation,
+        "max_tip_rotation_error_rad": max_tip_rotation,
+        "joint_tolerance": SOURCE_RECONSTRUCTION_JOINT_TOLERANCE,
+        "velocity_tolerance": SOURCE_RECONSTRUCTION_SCALAR_TOLERANCE,
+        "tip_translation_tolerance_m": SOURCE_RECONSTRUCTION_TRANSLATION_TOLERANCE_M,
+        "tip_rotation_tolerance_rad": SOURCE_RECONSTRUCTION_ROTATION_TOLERANCE_RAD,
+        "passed": passed,
+    }
+
+
+_CONDITION_STRUCTURAL_FIELDS = {
+    "rlbench.backend.conditions.ColorCondition": (
+        ("shape", "success_rgb"),
+        (),
+    ),
+    "rlbench.backend.conditions.JointCondition": (
+        ("_joint", "_original_pos", "_pos"),
+        (),
+    ),
+    "rlbench.backend.conditions.DetectedCondition": (
+        ("_obj", "_detector", "_negated"),
+        (),
+    ),
+    "rlbench.backend.conditions.NothingGrasped": (("_gripper",), ()),
+    "rlbench.backend.conditions.GraspedCondition": (
+        ("_gripper", "_object_handle"),
+        (),
+    ),
+    "rlbench.backend.conditions.DetectedSeveralCondition": (
+        ("_objects", "_detector", "_number_needed"),
+        (),
+    ),
+    "rlbench.backend.conditions.EmptyCondition": (("_container",), ()),
+    "rlbench.backend.conditions.FollowCondition": (
+        (
+            "_obj",
+            "_ponts",
+            "_relative_to",
+            "_delta_limit",
+            "_start_after_first",
+        ),
+        ("_index", "_strikes"),
+    ),
+    "rlbench.backend.conditions.ConditionSet": (
+        ("_conditions", "_order_matters", "_simultaneously_met"),
+        ("_current_condition_index",),
+    ),
+    "rlbench.backend.conditions.OrConditions": (
+        ("_conditions",),
+        ("_current_condition_index",),
+    ),
+}
+
+
+def _semantic_structural_field_value(name: str, item: Any, *, depth: int) -> Any:
+    """Serialize a structural field with stable cross-process object names."""
+
+    if name.endswith("handle") and isinstance(item, int):
+        try:
+            from pyrep.objects.object import Object
+
+            return {"object_name": str(Object.get_object_name(item))}
+        except Exception as error:
+            raise RuntimeError(
+                "could not resolve condition object handle to a stable name"
+            ) from error
+    return _semantic_reference_value(item, depth=depth + 1)
+
+
+def _condition_structural_value(value: Any, *, depth: int) -> Any | None:
+    """Serialize known Condition structure while excluding execution progress.
+
+    RLBench's ``OrConditions.reset`` creates an otherwise unused
+    ``_current_condition_index`` field, while ``ConditionSet`` and
+    ``FollowCondition`` maintain real runtime progress.  Those counters are
+    not task semantics.  Every structural field is explicit and any unknown
+    Condition subclass or unexpected field fails closed.
+    """
+
+    value_type = f"{type(value).__module__}.{type(value).__qualname__}"
+    schema = _CONDITION_STRUCTURAL_FIELDS.get(value_type)
+    condition_base = any(
+        cls.__module__ == "rlbench.backend.conditions"
+        and cls.__qualname__ == "Condition"
+        for cls in type(value).__mro__
+    )
+    if schema is None:
+        if condition_base:
+            condition_base_class = next(
+                cls
+                for cls in type(value).__mro__
+                if cls.__module__ == "rlbench.backend.conditions"
+                and cls.__qualname__ == "Condition"
+            )
+            if getattr(type(value), "reset", None) is not getattr(
+                condition_base_class,
+                "reset",
+                None,
+            ):
+                raise RuntimeError(
+                    f"custom condition {value_type} has unmodeled runtime state"
+                )
+            attributes = getattr(value, "__dict__", None)
+            if not isinstance(attributes, dict):
+                raise RuntimeError(
+                    f"custom condition {value_type} has no inspectable fields"
+                )
+            if any(callable(item) for item in attributes.values()):
+                raise RuntimeError(
+                    f"custom condition {value_type} contains callable state"
+                )
+            return {
+                "type": value_type,
+                "structural_fields": {
+                    str(name): _semantic_structural_field_value(
+                        str(name),
+                        item,
+                        depth=depth,
+                    )
+                    for name, item in sorted(attributes.items())
+                },
+                "excluded_runtime_progress_fields": [],
+            }
+        return None
+    required_fields, runtime_fields = schema
+    attributes = getattr(value, "__dict__", None)
+    if not isinstance(attributes, dict):
+        raise RuntimeError(f"condition {value_type} has no inspectable fields")
+    present = set(attributes)
+    required = set(required_fields)
+    allowed = required | set(runtime_fields)
+    if not required.issubset(present) or not present.issubset(allowed):
+        raise RuntimeError(f"condition {value_type} fields do not match its schema")
+    return {
+        "type": value_type,
+        "structural_fields": {
+            name: _semantic_structural_field_value(
+                name,
+                attributes[name],
+                depth=depth,
+            )
+            for name in required_fields
+        },
+        # Record the schema, not which counters happen to have been materialized
+        # yet; OrConditions.reset() lazily creates its unused progress field.
+        "excluded_runtime_progress_fields": list(runtime_fields),
+    }
+
+
+def _semantic_reference_value(value: Any, *, depth: int = 0) -> Any:
+    """Return a deterministic, cross-scene description of task semantics."""
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if depth > 16:
+        raise RuntimeError("task semantic structure exceeds the supported depth")
+    if isinstance(value, np.ndarray):
+        return np.asarray(value).tolist()
+    if isinstance(value, dict):
+        return {
+            str(key): _semantic_reference_value(item, depth=depth + 1)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [
+            _semantic_reference_value(item, depth=depth + 1)
+            for item in value
+        ]
+    get_handle = getattr(value, "get_handle", None)
+    get_name = getattr(value, "get_name", None)
+    if callable(get_handle):
+        return {
+            "type": f"{type(value).__module__}.{type(value).__qualname__}",
+            "name": str(get_name()) if callable(get_name) else None,
+        }
+    condition_value = _condition_structural_value(value, depth=depth)
+    if condition_value is not None:
+        return condition_value
+    attributes = getattr(value, "__dict__", None)
+    if isinstance(attributes, dict):
+        return {
+            "type": f"{type(value).__module__}.{type(value).__qualname__}",
+            "fields": {
+                str(name): _semantic_structural_field_value(
+                    str(name),
+                    item,
+                    depth=depth,
+                )
+                for name, item in sorted(attributes.items())
+                if not callable(item) and name not in {"pyrep", "robot", "_robot"}
+            },
+        }
+    raise RuntimeError(
+        "unsupported task semantic value "
+        f"{type(value).__module__}.{type(value).__qualname__}"
+    )
+
+
+def _task_semantic_signature(task: Any) -> dict[str, Any]:
+    """Describe success/failure/grasp semantics without Python identities."""
+
+    return {
+        "schema": TASK_SEMANTIC_SIGNATURE_SCHEMA,
+        "task_class": f"{type(task).__module__}.{type(task).__qualname__}",
+        "success_conditions": [
+            _semantic_reference_value(value)
+            for value in getattr(task, "_success_conditions", ())
+        ],
+        "fail_conditions": [
+            _semantic_reference_value(value)
+            for value in getattr(task, "_fail_conditions", ())
+        ],
+        "graspable_objects": [
+            _semantic_reference_value(value)
+            for value in getattr(task, "_graspable_objects", ())
+        ],
+    }
+
+
+def _task_tree_relative_state(task: Any) -> list[dict[str, Any]]:
+    """Capture the complete task tree in both world and boundary-root frames.
+
+    A task's model base is commonly an ancestor of ``boundary_root`` rather
+    than part of the subtree moved by RLBench's workspace sampler.  Persisting
+    both frames plus explicit subtree membership lets source replays compare
+    every object in world coordinates, while a planned boundary-root move can
+    compare only moved descendants in boundary-root coordinates.  Simulator
+    handles are used neither as persisted identities nor across launches.
+    """
+
+    base = getattr(task, "get_base", lambda: None)()
+    root = task.boundary_root()
+    get_objects = getattr(base, "get_objects_in_tree", None)
+    get_root_objects = getattr(root, "get_objects_in_tree", None)
+    if not callable(get_objects) or not callable(get_root_objects):
+        raise RuntimeError("RLBench task tree enumeration API is unavailable")
+    objects = list(get_objects(exclude_base=False))
+    root_objects = list(get_root_objects(exclude_base=False))
+
+    def stable_key(value: Any) -> tuple[str, str]:
+        get_name = getattr(value, "get_name", None)
+        get_type = getattr(value, "get_type", None)
+        if not callable(get_name) or not callable(get_type):
+            raise RuntimeError("RLBench task object identity API is unavailable")
+        return str(get_name()), str(get_type())
+
+    root_subtree_keys = {stable_key(value) for value in root_objects}
+    rows = []
+    for value in objects:
+        get_name = getattr(value, "get_name", None)
+        get_type = getattr(value, "get_type", None)
+        get_pose = getattr(value, "get_pose", None)
+        get_parent = getattr(value, "get_parent", None)
+        if not callable(get_name) or not callable(get_type) or not callable(get_pose):
+            raise RuntimeError("RLBench task object introspection API is unavailable")
+        parent = get_parent() if callable(get_parent) else None
+        parent_name_fn = getattr(parent, "get_name", None)
+        row = {
+            "name": str(get_name()),
+            "type": str(get_type()),
+            "parent": (
+                str(parent_name_fn()) if callable(parent_name_fn) else None
+            ),
+            "in_boundary_root_subtree": stable_key(value) in root_subtree_keys,
+            "world_pose": np.asarray(
+                get_pose(),
+                dtype=np.float64,
+            ).tolist(),
+            "pose_relative_to_boundary_root": np.asarray(
+                get_pose(relative_to=root),
+                dtype=np.float64,
+            ).tolist(),
+        }
+        get_joint_position = getattr(value, "get_joint_position", None)
+        if callable(get_joint_position):
+            row["joint_position"] = float(get_joint_position())
+        rows.append(row)
+    rows.sort(key=lambda row: (row["name"], row["type"], row["parent"] or ""))
+    if len({(row["name"], row["type"]) for row in rows}) != len(rows):
+        raise RuntimeError("task tree contains duplicate stable name/type identities")
+    return rows
+
+
+def _task_tree_velocity_summary(task: Any) -> dict[str, Any]:
+    """Record finite task-object velocities as diagnostics, never identity."""
+
+    base = getattr(task, "get_base", lambda: None)()
+    get_objects = getattr(base, "get_objects_in_tree", None)
+    if not callable(get_objects):
+        raise RuntimeError("RLBench task tree enumeration API is unavailable")
+    rows = []
+    for value in get_objects(exclude_base=False):
+        get_velocity = getattr(value, "get_velocity", None)
+        get_name = getattr(value, "get_name", None)
+        get_type = getattr(value, "get_type", None)
+        if (
+            not callable(get_velocity)
+            or not callable(get_name)
+            or not callable(get_type)
+        ):
+            raise RuntimeError("RLBench task object velocity API is unavailable")
+        linear, angular = get_velocity()
+        linear = np.asarray(linear, dtype=np.float64)
+        angular = np.asarray(angular, dtype=np.float64)
+        finite = bool(
+            linear.shape == (3,)
+            and angular.shape == (3,)
+            and np.all(np.isfinite(linear))
+            and np.all(np.isfinite(angular))
+        )
+        rows.append(
+            {
+                "name": str(get_name()),
+                "type": str(get_type()),
+                "finite": finite,
+                "linear_speed_m_s": (
+                    float(np.linalg.norm(linear)) if finite else None
+                ),
+                "angular_speed_rad_s": (
+                    float(np.linalg.norm(angular)) if finite else None
+                ),
+            }
+        )
+    rows.sort(key=lambda row: (row["name"], row["type"]))
+    all_finite = bool(rows) and all(row["finite"] for row in rows)
+    return {
+        "schema": "rlbench-task-tree-velocity-summary-v1",
+        "compared_for_identity": False,
+        "diagnostic_only": True,
+        "object_count": len(rows),
+        "all_finite": all_finite,
+        "max_linear_speed_m_s": max(
+            (
+                float(row["linear_speed_m_s"])
+                for row in rows
+                if row["linear_speed_m_s"] is not None
+            ),
+            default=0.0,
+        ),
+        "max_angular_speed_rad_s": max(
+            (
+                float(row["angular_speed_rad_s"])
+                for row in rows
+                if row["angular_speed_rad_s"] is not None
+            ),
+            default=0.0,
+        ),
+    }
+
+
+def _compare_task_tree_relative_state(
+    expected: list[dict[str, Any]],
+    actual: list[dict[str, Any]],
+    *,
+    boundary_root_may_move: bool = False,
+    translation_tolerance_m: float = LOW_DIM_POSE_TRANSLATION_TOLERANCE_M,
+    rotation_tolerance_rad: float = LOW_DIM_POSE_ROTATION_TOLERANCE_RAD,
+    joint_tolerance: float = LOW_DIM_STATE_ROUNDTRIP_ATOL,
+) -> dict[str, Any]:
+    """Compare task topology and state in the physically correct frame.
+
+    Source replay (A-to-A) uses world poses for every object.  Planned A-to-B
+    root motion uses root-relative poses for boundary-root descendants and
+    world poses for objects outside that subtree.  Parent relationships,
+    subtree membership, and joint values must remain unchanged in both modes.
+    """
+
+    expected_map = {(row["name"], row["type"]): row for row in expected}
+    actual_map = {(row["name"], row["type"]): row for row in actual}
+    topology_matched = expected_map.keys() == actual_map.keys()
+    rows = []
+    all_matched = topology_matched
+    for key in sorted(expected_map.keys() | actual_map.keys()):
+        left = expected_map.get(key)
+        right = actual_map.get(key)
+        if left is None or right is None:
+            rows.append(
+                {
+                    "name": key[0],
+                    "type": key[1],
+                    "matched": False,
+                    "missing_from_expected": left is None,
+                    "missing_from_actual": right is None,
+                }
+            )
+            all_matched = False
+            continue
+        parent_matched = left.get("parent") == right.get("parent")
+        subtree_membership_matched = (
+            left.get("in_boundary_root_subtree")
+            == right.get("in_boundary_root_subtree")
+        )
+        world_pose_metrics = _root_motion_metrics(
+            np.asarray(left["world_pose"], dtype=np.float64),
+            np.asarray(right["world_pose"], dtype=np.float64),
+        )
+        relative_pose_metrics = _root_motion_metrics(
+            np.asarray(left["pose_relative_to_boundary_root"], dtype=np.float64),
+            np.asarray(right["pose_relative_to_boundary_root"], dtype=np.float64),
+        )
+        compare_relative = bool(
+            boundary_root_may_move
+            and left.get("in_boundary_root_subtree") is True
+        )
+        pose_metrics = (
+            relative_pose_metrics if compare_relative else world_pose_metrics
+        )
+        pose_matched = bool(
+            pose_metrics["planned_root_translation_m"]
+            <= translation_tolerance_m
+            and pose_metrics["planned_root_rotation_rad"]
+            <= rotation_tolerance_rad
+        )
+        joint_left = left.get("joint_position")
+        joint_right = right.get("joint_position")
+        joint_matched = (
+            joint_left is None
+            and joint_right is None
+            or joint_left is not None
+            and joint_right is not None
+            and abs(float(joint_left) - float(joint_right))
+            <= joint_tolerance
+        )
+        matched = (
+            parent_matched
+            and subtree_membership_matched
+            and pose_matched
+            and joint_matched
+        )
+        all_matched = all_matched and matched
+        rows.append(
+            {
+                "name": key[0],
+                "type": key[1],
+                "matched": matched,
+                "parent_matched": parent_matched,
+                "subtree_membership_matched": subtree_membership_matched,
+                "in_boundary_root_subtree": left.get(
+                    "in_boundary_root_subtree"
+                ),
+                "pose_comparison_frame": (
+                    "boundary_root" if compare_relative else "world"
+                ),
+                "translation_error_m": pose_metrics[
+                    "planned_root_translation_m"
+                ],
+                "rotation_error_rad": pose_metrics[
+                    "planned_root_rotation_rad"
+                ],
+                "world_translation_error_m": world_pose_metrics[
+                    "planned_root_translation_m"
+                ],
+                "world_rotation_error_rad": world_pose_metrics[
+                    "planned_root_rotation_rad"
+                ],
+                "boundary_root_relative_translation_error_m": (
+                    relative_pose_metrics["planned_root_translation_m"]
+                ),
+                "boundary_root_relative_rotation_error_rad": (
+                    relative_pose_metrics["planned_root_rotation_rad"]
+                ),
+                "joint_position_error": (
+                    None
+                    if joint_left is None or joint_right is None
+                    else abs(float(joint_left) - float(joint_right))
+                ),
+            }
+        )
+    return {
+        "matched": bool(all_matched),
+        "topology_matched": bool(topology_matched),
+        "comparison_mode": (
+            "boundary_root_subtree_relative_else_world"
+            if boundary_root_may_move
+            else "all_objects_world"
+        ),
+        "expected_object_count": len(expected),
+        "actual_object_count": len(actual),
+        "translation_tolerance_m": float(translation_tolerance_m),
+        "rotation_tolerance_rad": float(rotation_tolerance_rad),
+        "joint_tolerance": float(joint_tolerance),
+        "quaternion_rotation_metric": QUATERNION_ROTATION_METRIC,
+        "objects": rows,
+    }
+
+
+def _compact_task_tree_comparison(
+    comparison: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep cross-initialization evidence bounded across retry attempts."""
+
+    rows = comparison.get("objects", [])
+    comparable = [row for row in rows if "translation_error_m" in row]
+    joint_errors = [
+        float(row["joint_position_error"])
+        for row in comparable
+        if row.get("joint_position_error") is not None
+    ]
+    return {
+        "matched": comparison.get("matched"),
+        "topology_matched": comparison.get("topology_matched"),
+        "comparison_mode": comparison.get("comparison_mode"),
+        "expected_object_count": comparison.get("expected_object_count"),
+        "actual_object_count": comparison.get("actual_object_count"),
+        "translation_tolerance_m": comparison.get("translation_tolerance_m"),
+        "rotation_tolerance_rad": comparison.get("rotation_tolerance_rad"),
+        "joint_tolerance": comparison.get("joint_tolerance"),
+        "quaternion_rotation_metric": comparison.get(
+            "quaternion_rotation_metric"
+        ),
+        "all_parents_matched": all(
+            row.get("parent_matched") is True for row in comparable
+        ),
+        "all_subtree_memberships_matched": all(
+            row.get("subtree_membership_matched") is True for row in comparable
+        ),
+        "max_translation_error_m": max(
+            (float(row["translation_error_m"]) for row in comparable),
+            default=0.0,
+        ),
+        "max_rotation_error_rad": max(
+            (float(row["rotation_error_rad"]) for row in comparable),
+            default=0.0,
+        ),
+        "max_joint_position_error": max(joint_errors, default=0.0),
+    }
+
+
 def _reference_key(value: Any) -> tuple[str, int] | tuple[str, None]:
     """Return a stable identity key for a PyRep object wrapper or ``None``."""
 
@@ -599,6 +1732,19 @@ def _collision_pair_records(
     ]
 
 
+def _stable_collision_pair_records(
+    pairs: tuple[tuple[str, int, str], ...],
+) -> list[dict[str, Any]]:
+    """Cross-launch collision evidence using names, never simulator handles."""
+
+    return [
+        {"arm": arm_name, "external_object_name": object_name}
+        for arm_name, object_name in sorted(
+            {(arm_name, object_name) for arm_name, _handle, object_name in pairs}
+        )
+    ]
+
+
 def _grasp_state_snapshot(task: Any, robot: Any) -> dict[str, Any]:
     """Capture gripper membership and object parents without changing them."""
 
@@ -677,6 +1823,97 @@ def _same_grasp_state(before: dict[str, Any], task: Any, robot: Any) -> bool:
     )
 
 
+def _stable_grasp_state(task: Any, robot: Any) -> dict[str, Any]:
+    """Serialize grasp membership and parentage without process-local handles."""
+
+    grippers = (
+        (("right_gripper", robot.right_gripper), ("left_gripper", robot.left_gripper))
+        if bool(getattr(robot, "is_bimanual", False))
+        else (("gripper", robot.gripper),)
+    )
+    rows = []
+    tracked = list(getattr(task, "_graspable_objects", ()))
+    for name, gripper in grippers:
+        grasped = list(gripper.get_grasped_objects())
+        tracked.extend(grasped)
+        rows.append(
+            {
+                "gripper": name,
+                "grasped_objects": sorted(str(value.get_name()) for value in grasped),
+            }
+        )
+    parents = []
+    seen = set()
+    for value in tracked:
+        name = str(value.get_name())
+        if name in seen:
+            continue
+        seen.add(name)
+        parent = value.get_parent()
+        parent_name = (
+            str(parent.get_name())
+            if parent is not None and callable(getattr(parent, "get_name", None))
+            else None
+        )
+        parents.append({"object": name, "parent": parent_name})
+    return {
+        "grippers": rows,
+        "tracked_object_parents": sorted(parents, key=lambda row: row["object"]),
+    }
+
+
+def _workspace_boundary_contains_root(scene: Any, root: Any) -> bool:
+    """Return whether SpawnBoundary recorded a successful root placement."""
+
+    workspace = getattr(scene, "_workspace_boundary", None)
+    boundaries = getattr(workspace, "_boundaries", None)
+    if not isinstance(boundaries, list):
+        raise RuntimeError("RLBench workspace placement audit is unavailable")
+    get_root_handle = getattr(root, "get_handle", None)
+    if not callable(get_root_handle):
+        raise RuntimeError("RLBench boundary-root handle is unavailable")
+    root_handle = int(get_root_handle())
+    return any(
+        any(
+            callable(getattr(value, "get_handle", None))
+            and int(value.get_handle()) == root_handle
+            for value in getattr(boundary, "_contained_objects", ())
+        )
+        for boundary in boundaries
+    )
+
+
+def _workspace_source_placement_succeeded(scene: Any, task: Any) -> bool:
+    """Detect a BoundaryError swallowed by reset(verify_instance=False)."""
+
+    is_static = getattr(task, "is_static_workspace", None)
+    if not callable(is_static):
+        raise RuntimeError("RLBench task static-workspace API is unavailable")
+    if bool(is_static()):
+        return True
+    return _workspace_boundary_contains_root(scene, task.boundary_root())
+
+
+def _authenticate_motion_source_root(task: Any, profile: dict[str, Any]) -> dict[str, str]:
+    root = task.boundary_root()
+    get_name = getattr(root, "get_name", None)
+    get_type = getattr(root, "get_type", None)
+    if not callable(get_name) or not callable(get_type):
+        raise RuntimeError("RLBench boundary-root identity API is unavailable")
+    object_type = get_type()
+    type_name = getattr(object_type, "name", None)
+    if not isinstance(type_name, str) or not type_name:
+        raise RuntimeError("RLBench boundary-root type name is unavailable")
+    actual = {"name": str(get_name()), "type": str(type_name)}
+    expected = {
+        "name": profile.get("spatial_root_name"),
+        "type": profile.get("spatial_root_type"),
+    }
+    if actual != expected:
+        raise RuntimeError("task boundary_root does not match frozen spatial profile")
+    return actual
+
+
 def _is_expected_placement_error(error: Exception) -> bool:
     """Recognize RLBench placement failures without importing RLBench eagerly."""
 
@@ -685,16 +1922,25 @@ def _is_expected_placement_error(error: Exception) -> bool:
 
 
 def _quaternion_angle_xyzw(left: Array, right: Array) -> float:
+    """Return a sign-invariant physical angle with stable small-angle math."""
+
     q_left = np.asarray(left, dtype=np.float64)
     q_right = np.asarray(right, dtype=np.float64)
     left_norm = float(np.linalg.norm(q_left))
     right_norm = float(np.linalg.norm(q_right))
     if left_norm <= 0.0 or right_norm <= 0.0:
         raise ValueError("pose quaternion must be non-zero")
-    dot = float(
-        np.clip(abs(np.dot(q_left / left_norm, q_right / right_norm)), 0.0, 1.0)
+    q_left = q_left / left_norm
+    q_right = q_right / right_norm
+    # For unit quaternions, the shorter sign-invariant chord is
+    # c = 2 sin(theta / 4).  ``4 asin(c / 2)`` is substantially more stable
+    # than ``2 acos(abs(dot))`` when independently initialized scenes differ
+    # by only a few microradians.
+    chord = min(
+        float(np.linalg.norm(q_left - q_right)),
+        float(np.linalg.norm(q_left + q_right)),
     )
-    return float(2.0 * math.acos(dot))
+    return float(4.0 * math.asin(float(np.clip(chord * 0.5, 0.0, 1.0))))
 
 
 def _valid_low_dim_pose_chunks(value: Array) -> Array | None:
@@ -724,7 +1970,14 @@ def _valid_low_dim_pose_chunks(value: Array) -> Array | None:
     return chunks
 
 
-def _low_dim_roundtrip_metrics(before: Array, restored: Array) -> dict[str, Any]:
+def _low_dim_roundtrip_metrics(
+    before: Array,
+    restored: Array,
+    *,
+    translation_tolerance_m: float = LOW_DIM_POSE_TRANSLATION_TOLERANCE_M,
+    rotation_tolerance_rad: float = LOW_DIM_POSE_ROTATION_TOLERANCE_RAD,
+    scalar_tolerance: float = LOW_DIM_STATE_ROUNDTRIP_ATOL,
+) -> dict[str, Any]:
     """Compare a task-state round trip without quaternion-gauge false alarms.
 
     Complete valid seven-value pose chunks use Euclidean translation and the
@@ -764,8 +2017,8 @@ def _low_dim_roundtrip_metrics(before: Array, restored: Array) -> dict[str, Any]
         max_rotation = float(np.max(rotations))
         preserved = bool(
             raw_finite
-            and max_translation <= LOW_DIM_POSE_TRANSLATION_TOLERANCE_M
-            and max_rotation <= LOW_DIM_POSE_ROTATION_TOLERANCE_RAD
+            and max_translation <= translation_tolerance_m
+            and max_rotation <= rotation_tolerance_rad
         )
         comparison_mode = "pose_chunks_sign_invariant"
         chunk_count = int(source_chunks.shape[0])
@@ -773,7 +2026,7 @@ def _low_dim_roundtrip_metrics(before: Array, restored: Array) -> dict[str, Any]
         max_translation = None
         max_rotation = None
         preserved = bool(
-            raw_finite and raw_max_abs <= LOW_DIM_STATE_ROUNDTRIP_ATOL
+            raw_finite and raw_max_abs <= scalar_tolerance
         )
         comparison_mode = "scalar_max_abs"
         chunk_count = 0
@@ -785,6 +2038,10 @@ def _low_dim_roundtrip_metrics(before: Array, restored: Array) -> dict[str, Any]
         "raw_max_abs": raw_max_abs,
         "max_translation_m": max_translation,
         "max_rotation_rad": max_rotation,
+        "translation_tolerance_m": float(translation_tolerance_m),
+        "rotation_tolerance_rad": float(rotation_tolerance_rad),
+        "scalar_tolerance": float(scalar_tolerance),
+        "quaternion_rotation_metric": QUATERNION_ROTATION_METRIC,
     }
 
 
@@ -803,6 +2060,404 @@ def _root_motion_metrics(source: Array, goal: Array) -> dict[str, Any]:
             or rotation > ROOT_ACTUAL_MOTION_ROTATION_TOLERANCE_RAD
         ),
     }
+
+
+def _pose_reproducibility_metrics(
+    reference: Array,
+    current: Array,
+    *,
+    translation_tolerance_m: float,
+    rotation_tolerance_rad: float,
+) -> dict[str, Any]:
+    """Audit two independently initialized poses under explicit hard caps."""
+
+    delta = _root_motion_metrics(reference, current)
+    translation = float(delta["planned_root_translation_m"])
+    rotation = float(delta["planned_root_rotation_rad"])
+    return {
+        "preserved": bool(
+            translation <= translation_tolerance_m
+            and rotation <= rotation_tolerance_rad
+        ),
+        "translation_error_m": translation,
+        "rotation_error_rad": rotation,
+        "translation_tolerance_m": float(translation_tolerance_m),
+        "rotation_tolerance_rad": float(rotation_tolerance_rad),
+        "quaternion_rotation_metric": QUATERNION_ROTATION_METRIC,
+    }
+
+
+def _staging_source_fingerprint(
+    *,
+    task_name: str,
+    variation: int,
+    root_pose: Array,
+    low_dim_state: Array,
+    task_tree_state: list[dict[str, Any]],
+    semantic_signature: dict[str, Any],
+    descriptions: list[str],
+    collision_pair_records: list[dict[str, Any]],
+) -> str:
+    """Fingerprint source identity while excluding diagnostic velocities."""
+
+    return _canonical_json_fingerprint(
+        {
+            "task_name": task_name,
+            "variation": int(variation),
+            "root_pose": np.asarray(root_pose, dtype=np.float64).tolist(),
+            "low_dim_state": np.asarray(low_dim_state, dtype=np.float64).tolist(),
+            "task_tree_state": task_tree_state,
+            "semantic_signature": semantic_signature,
+            "descriptions": list(descriptions),
+            "collision_pairs": collision_pair_records,
+        }
+    )
+
+
+def _source_state_snapshot(
+    scene: Any,
+    descriptions: Any,
+) -> dict[str, Any]:
+    """Capture every portable field used to certify/reconstruct source A."""
+
+    task = getattr(scene, "task", None)
+    robot = getattr(scene, "robot", None)
+    if task is None or robot is None:
+        raise RuntimeError("RLBench source task or robot is unavailable")
+    root_pose = np.asarray(task.boundary_root().get_pose(), dtype=np.float64)
+    low_dim = _task_low_dim_state(task)
+    tree = _task_tree_relative_state(task)
+    semantics = _task_semantic_signature(task)
+    collisions = _stable_collision_pair_records(
+        _robot_external_collision_pairs(scene, robot)
+    )
+    description_list = list(descriptions) if descriptions is not None else None
+    if description_list is None or not all(
+        isinstance(value, str) for value in description_list
+    ):
+        raise RuntimeError("RLBench source descriptions are invalid")
+    get_name = getattr(task, "get_name", None)
+    task_name = str(get_name()) if callable(get_name) else type(task).__name__
+    return {
+        "task_name": task_name,
+        "root_pose": root_pose,
+        "low_dim_state": low_dim,
+        "task_tree": tree,
+        "task_semantics": semantics,
+        "descriptions": description_list,
+        "robot_numeric_state": _robot_numeric_state(robot),
+        "stable_grasp_state": _stable_grasp_state(task, robot),
+        "robot_external_collision_pairs": collisions,
+        "velocity_summary": _task_tree_velocity_summary(task),
+        "instance_references": _instance_reference_snapshot(task),
+        "grasp_identity_state": _grasp_state_snapshot(task, robot),
+    }
+
+
+def _source_reconstruction_audit(
+    expected: dict[str, Any],
+    actual: dict[str, Any],
+) -> dict[str, Any]:
+    """Strictly bind a fresh reset(false) source to its certified A."""
+
+    root = _pose_reproducibility_metrics(
+        expected["root_pose"],
+        actual["root_pose"],
+        translation_tolerance_m=SOURCE_RECONSTRUCTION_TRANSLATION_TOLERANCE_M,
+        rotation_tolerance_rad=SOURCE_RECONSTRUCTION_ROTATION_TOLERANCE_RAD,
+    )
+    low_dim = _low_dim_roundtrip_metrics(
+        expected["low_dim_state"],
+        actual["low_dim_state"],
+        translation_tolerance_m=SOURCE_RECONSTRUCTION_TRANSLATION_TOLERANCE_M,
+        rotation_tolerance_rad=SOURCE_RECONSTRUCTION_ROTATION_TOLERANCE_RAD,
+        scalar_tolerance=SOURCE_RECONSTRUCTION_SCALAR_TOLERANCE,
+    )
+    tree = _compare_task_tree_relative_state(
+        expected["task_tree"],
+        actual["task_tree"],
+        boundary_root_may_move=False,
+        translation_tolerance_m=SOURCE_RECONSTRUCTION_TRANSLATION_TOLERANCE_M,
+        rotation_tolerance_rad=SOURCE_RECONSTRUCTION_ROTATION_TOLERANCE_RAD,
+        joint_tolerance=SOURCE_RECONSTRUCTION_JOINT_TOLERANCE,
+    )
+    robot = _robot_numeric_state_audit(
+        expected["robot_numeric_state"],
+        actual["robot_numeric_state"],
+    )
+    exact = {
+        "task_name": expected["task_name"] == actual["task_name"],
+        "task_semantics": expected["task_semantics"] == actual["task_semantics"],
+        "descriptions": expected["descriptions"] == actual["descriptions"],
+        "stable_grasp_state": (
+            expected["stable_grasp_state"] == actual["stable_grasp_state"]
+        ),
+        "robot_external_collision_pairs": (
+            expected["robot_external_collision_pairs"]
+            == actual["robot_external_collision_pairs"]
+        ),
+    }
+    velocities_finite = bool(
+        expected["velocity_summary"].get("all_finite") is True
+        and actual["velocity_summary"].get("all_finite") is True
+    )
+    passed = bool(
+        root["preserved"]
+        and low_dim["preserved"]
+        and tree["matched"]
+        and robot["passed"]
+        and all(exact.values())
+        and velocities_finite
+    )
+    return {
+        "schema": SOURCE_RECONSTRUCTION_SCHEMA,
+        "root": root,
+        "low_dim_state": low_dim,
+        "task_tree": _compact_task_tree_comparison(tree),
+        "robot_numeric_state": robot,
+        "exact_matches": exact,
+        "task_object_velocities_finite": velocities_finite,
+        "passed": passed,
+    }
+
+
+def _waypoint_cache_evidence(task: Any) -> dict[str, Any]:
+    value = getattr(task, "_waypoints", None)
+    if value is None:
+        return {"state": "none", "waypoints": []}
+    if not isinstance(value, list):
+        raise RuntimeError("RLBench waypoint cache has an invalid type")
+    rows = []
+    for waypoint in value:
+        name = getattr(waypoint, "name", None)
+        if name is None:
+            get_name = getattr(waypoint, "get_name", None)
+            name = get_name() if callable(get_name) else None
+        if not isinstance(name, str) or not name:
+            raise RuntimeError("RLBench waypoint cache identity is unavailable")
+        rows.append({"name": name, "type": type(waypoint).__name__})
+    return {"state": "materialized", "waypoints": rows}
+
+
+def _certify_source_a(
+    scene: Any,
+    descriptions: Any,
+    generation_evidence: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Explicitly validate A offline and prove validation only caches waypoints."""
+
+    task = scene.task
+    robot = scene.robot
+    random_placement_expected = generation_evidence.get(
+        "reset_random_placement_expected"
+    )
+    reset_collision_checks = generation_evidence.get(
+        "reset_robot_collision_check_results"
+    )
+    expected_reset_collision_checks = [False] if random_placement_expected else []
+    if reset_collision_checks != expected_reset_collision_checks:
+        raise RuntimeError("reset(false) source placement collision audit failed")
+    if not _workspace_source_placement_succeeded(scene, task):
+        raise RuntimeError("reset(false) source workspace placement did not succeed")
+    is_in_collision = getattr(robot, "is_in_collision", None)
+    if not callable(is_in_collision):
+        raise RuntimeError("RLBench robot collision aggregate is unavailable")
+    if bool(is_in_collision()):
+        raise RuntimeError("reset(false) source robot is in collision")
+    before = _source_state_snapshot(scene, descriptions)
+    before_references = before["instance_references"]
+    before_grasp = before["grasp_identity_state"]
+    waypoint_before = _waypoint_cache_evidence(task)
+    if waypoint_before["state"] != "none":
+        raise RuntimeError("fresh source waypoint cache is already materialized")
+    validate = getattr(task, "validate", None)
+    if not callable(validate):
+        raise RuntimeError("RLBench Task.validate() is unavailable in staging")
+    validate()
+    after = _source_state_snapshot(scene, descriptions)
+    waypoint_after = _waypoint_cache_evidence(task)
+    if waypoint_after["state"] != "materialized" or not waypoint_after["waypoints"]:
+        raise RuntimeError("source validation did not materialize a waypoint cache")
+    state_audit = _source_reconstruction_audit(before, after)
+    registry_preserved = _same_instance_references(
+        before_references,
+        _instance_reference_snapshot(task),
+    )
+    grasp_preserved = _same_grasp_state(before_grasp, task, robot)
+    passed = bool(state_audit["passed"] and registry_preserved and grasp_preserved)
+    certification = {
+        "schema": SOURCE_CERTIFICATION_SCHEMA,
+        "reset_verify_instance": False,
+        "workspace_placement_succeeded": True,
+        "reset_placement_collision_check_results": reset_collision_checks,
+        "source_robot_collision_free": True,
+        "task_validate_calls": 1,
+        "task_validate_api": "Task.validate",
+        "waypoint_cache_before": waypoint_before,
+        "waypoint_cache_after": waypoint_after,
+        "allowed_validation_mutation": "waypoint_cache_none_to_materialized_only",
+        "state_audit": state_audit,
+        "condition_fail_grasp_registry_identity_preserved": registry_preserved,
+        "grasp_membership_and_parentage_preserved": grasp_preserved,
+        "passed": passed,
+    }
+    if not passed:
+        raise RuntimeError("explicit source validation mutated source A")
+    return before, certification
+
+
+def _certify_goal_b(
+    scene: Any,
+    descriptions: Any,
+) -> dict[str, Any]:
+    """Validate one sampled B and reject every side effect except its cache."""
+
+    task = scene.task
+    robot = scene.robot
+    before = _source_state_snapshot(scene, descriptions)
+    before_references = before["instance_references"]
+    before_grasp = before["grasp_identity_state"]
+    waypoint_before = _waypoint_cache_evidence(task)
+    if waypoint_before["state"] != "none":
+        raise RuntimeError("fresh goal waypoint cache is already materialized")
+    validate = getattr(task, "validate", None)
+    if not callable(validate):
+        raise RuntimeError("RLBench Task.validate() is unavailable in staging")
+    validate()
+    after = _source_state_snapshot(scene, descriptions)
+    waypoint_after = _waypoint_cache_evidence(task)
+    if waypoint_after["state"] != "materialized" or not waypoint_after["waypoints"]:
+        raise RuntimeError("goal validation did not materialize a waypoint cache")
+    state_audit = _source_reconstruction_audit(before, after)
+    registry_preserved = _same_instance_references(
+        before_references,
+        _instance_reference_snapshot(task),
+    )
+    grasp_preserved = _same_grasp_state(before_grasp, task, robot)
+    passed = bool(state_audit["passed"] and registry_preserved and grasp_preserved)
+    certification = {
+        "schema": GOAL_CERTIFICATION_SCHEMA,
+        "task_validate_calls": 1,
+        "task_validate_api": "Task.validate",
+        "waypoint_cache_before": waypoint_before,
+        "waypoint_cache_after": waypoint_after,
+        "allowed_validation_mutation": "waypoint_cache_none_to_materialized_only",
+        "state_audit": state_audit,
+        "condition_fail_grasp_registry_identity_preserved": registry_preserved,
+        "grasp_membership_and_parentage_preserved": grasp_preserved,
+        "passed": passed,
+    }
+    if not passed:
+        raise RuntimeError("explicit goal validation mutated sampled B")
+    return certification
+
+
+def _formal_intervention_state_snapshot(scene: Any) -> dict[str, Any]:
+    """Capture the current formal state immediately around one root command."""
+
+    task = getattr(scene, "task", None)
+    robot = getattr(scene, "robot", None)
+    if task is None or robot is None:
+        raise RuntimeError("formal RLBench task or robot is unavailable")
+    collision_pairs = _robot_external_collision_pairs(scene, robot)
+    return {
+        "task_tree": _task_tree_relative_state(task),
+        "task_semantics": _task_semantic_signature(task),
+        "instance_references": _instance_reference_snapshot(task),
+        "grasp_state": _grasp_state_snapshot(task, robot),
+        "robot_external_collision_pairs": collision_pairs,
+    }
+
+
+def _formal_intervention_state_audit(
+    scene: Any,
+    before: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify that one formal root command has only its intended rigid effect.
+
+    The reference is the policy-evolved state captured immediately before this
+    command, never staged A.  This distinction matters for every smooth
+    fraction: policy and physics may legitimately evolve the formal episode
+    between committed ticks, while ``set_pose`` itself must still preserve the
+    current task topology, joints, semantics, and root-relative subtree state.
+    Robot contact deltas are recorded exactly but are not an integrity gate:
+    the robot pose at intervention time is a policy outcome, so rejecting a
+    fixed A/B plan on that contact would make episode admission policy-dependent.
+    """
+
+    after = _formal_intervention_state_snapshot(scene)
+    tree = _compare_task_tree_relative_state(
+        before["task_tree"],
+        after["task_tree"],
+        boundary_root_may_move=True,
+    )
+    semantics_matched = before["task_semantics"] == after["task_semantics"]
+    registry_identity_preserved = _same_instance_references(
+        before["instance_references"],
+        _instance_reference_snapshot(scene.task),
+    )
+    grasp_membership_and_parentage_preserved = _same_grasp_state(
+        before["grasp_state"],
+        scene.task,
+        scene.robot,
+    )
+    before_pairs = tuple(before["robot_external_collision_pairs"])
+    after_pairs = tuple(after["robot_external_collision_pairs"])
+    new_pairs = tuple(sorted(frozenset(after_pairs) - frozenset(before_pairs)))
+    no_new_collision_pairs = not new_pairs
+    passed = bool(
+        tree["matched"]
+        and semantics_matched
+        and registry_identity_preserved
+        and grasp_membership_and_parentage_preserved
+    )
+    audit = {
+        "schema": FORMAL_INTERVENTION_STATE_AUDIT_SCHEMA,
+        "comparison_class": (
+            "same_formal_initialized_task_instance_immediate_pre_to_post_"
+            "boundary_root_command"
+        ),
+        "reference_state": "current_policy_evolved_formal_state",
+        "task_tree_state_schema": TASK_TREE_STATE_SCHEMA,
+        "task_tree": tree,
+        "task_semantics_matched": semantics_matched,
+        "condition_and_grasp_registry_identity_preserved": (
+            registry_identity_preserved
+        ),
+        "gripper_grasp_membership_and_parentage_preserved": (
+            grasp_membership_and_parentage_preserved
+        ),
+        "robot_external_collision_pair_policy": (
+            FORMAL_INTERVENTION_COLLISION_PAIR_POLICY
+        ),
+        "before_robot_external_collision_pairs": (
+            _stable_collision_pair_records(before_pairs)
+        ),
+        "after_robot_external_collision_pairs": (
+            _stable_collision_pair_records(after_pairs)
+        ),
+        "new_robot_external_collision_pairs": (
+            _stable_collision_pair_records(new_pairs)
+        ),
+        "no_new_robot_external_collision_pairs": no_new_collision_pairs,
+        "passed": passed,
+    }
+    if not tree["matched"]:
+        raise RuntimeError(
+            "formal boundary-root command changed task-tree topology or state "
+            "outside its strict same-instance rigid motion"
+        )
+    if not semantics_matched:
+        raise RuntimeError("formal boundary-root command changed task semantics")
+    if not registry_identity_preserved:
+        raise RuntimeError(
+            "formal boundary-root command replaced task condition/grasp registries"
+        )
+    if not grasp_membership_and_parentage_preserved:
+        raise RuntimeError(
+            "formal boundary-root command changed gripper membership or parentage"
+        )
+    return audit
 
 
 def _root_application_metrics(
@@ -880,6 +2535,1508 @@ def _interpolate_rlbench_pose(source: Array, goal: Array, fraction: float) -> Ar
         scale_goal = math.sin(theta) / sin_theta_0
         quaternion = scale_source * q_source + scale_goal * q_goal
     return np.concatenate((position, quaternion))
+
+
+def _quaternion_multiply_xyzw(left: Array, right: Array) -> Array:
+    lx, ly, lz, lw = np.asarray(left, dtype=np.float64)
+    rx, ry, rz, rw = np.asarray(right, dtype=np.float64)
+    return np.asarray(
+        [
+            lw * rx + lx * rw + ly * rz - lz * ry,
+            lw * ry - lx * rz + ly * rw + lz * rx,
+            lw * rz + lx * ry - ly * rx + lz * rw,
+            lw * rw - lx * rx - ly * ry - lz * rz,
+        ],
+        dtype=np.float64,
+    )
+
+
+def _quaternion_rotate_xyzw(quaternion: Array, vector: Array) -> Array:
+    q = np.asarray(quaternion, dtype=np.float64)
+    q = q / np.linalg.norm(q)
+    pure = np.concatenate((np.asarray(vector, dtype=np.float64), [0.0]))
+    conjugate = np.asarray([-q[0], -q[1], -q[2], q[3]])
+    return _quaternion_multiply_xyzw(
+        _quaternion_multiply_xyzw(q, pure),
+        conjugate,
+    )[:3]
+
+
+def _task_frame_rigid_motion_evidence(
+    task_name: str,
+    source_root: Array,
+    goal_root: Array,
+    source_low_dim: Array,
+    goal_low_dim: Array,
+) -> dict[str, Any]:
+    """Verify every public task frame follows the boundary-root rigid delta."""
+
+    spec = get_task_spec(task_name)
+    source_frames = spec.extract_pose_chunks(
+        source_low_dim,
+        convention="rlbench_xyzw",
+    )
+    goal_frames = spec.extract_pose_chunks(
+        goal_low_dim,
+        convention="rlbench_xyzw",
+    )
+    source_root = np.asarray(source_root, dtype=np.float64)
+    goal_root = np.asarray(goal_root, dtype=np.float64)
+    q_source = source_root[3:7] / np.linalg.norm(source_root[3:7])
+    q_goal = goal_root[3:7] / np.linalg.norm(goal_root[3:7])
+    q_source_inverse = np.asarray(
+        [-q_source[0], -q_source[1], -q_source[2], q_source[3]],
+    )
+    delta_q = _quaternion_multiply_xyzw(q_goal, q_source_inverse)
+    rows = []
+    all_preserved = True
+    for frame_name in spec.frame_names:
+        source = source_frames[frame_name]
+        goal = goal_frames[frame_name]
+        expected_position = goal_root[:3] + _quaternion_rotate_xyzw(
+            delta_q,
+            source[:3] - source_root[:3],
+        )
+        expected_quaternion = _quaternion_multiply_xyzw(delta_q, source[3:7])
+        translation_error = float(np.linalg.norm(goal[:3] - expected_position))
+        rotation_error = _quaternion_angle_xyzw(goal[3:7], expected_quaternion)
+        preserved = bool(
+            translation_error <= LOW_DIM_POSE_TRANSLATION_TOLERANCE_M
+            and rotation_error <= LOW_DIM_POSE_ROTATION_TOLERANCE_RAD
+        )
+        all_preserved = all_preserved and preserved
+        rows.append(
+            {
+                "frame": frame_name,
+                "translation_error_m": translation_error,
+                "rotation_error_rad": rotation_error,
+                "preserved": preserved,
+            }
+        )
+    return {
+        "task_spec": task_name,
+        "source_expression": spec.source_expression,
+        "checked_frames": list(spec.frame_names),
+        "all_pose_chunks_follow_boundary_root_rigid_transform": all_preserved,
+        "translation_tolerance_m": LOW_DIM_POSE_TRANSLATION_TOLERANCE_M,
+        "rotation_tolerance_rad": LOW_DIM_POSE_ROTATION_TOLERANCE_RAD,
+        "frames": rows,
+    }
+
+
+def _validate_staged_motion_plan_validation(
+    *,
+    task_name: str,
+    episode_seed: int,
+    variation: int,
+    source_pose: Array,
+    source_low_dim_state: Array,
+    validation: dict[str, Any],
+) -> None:
+    """Fail closed on a re-signed but internally inconsistent V3.4 plan."""
+
+    from .v3_protocol import load_v3_motion_source_protocol, motion_source_profile
+
+    motion_protocol = load_v3_motion_source_protocol()
+    profile = motion_source_profile(task_name, motion_protocol)
+    source_seed = validation.get("source_seed")
+    selection = validation.get("source_seed_selection")
+    certification = validation.get("source_certification")
+    selected_reconstruction = validation.get("selected_source_reconstruction")
+    source_attempts = selection.get("attempts") if isinstance(selection, dict) else None
+    goal_attempts = validation.get("goal_candidate_attempts")
+    goal_certification = validation.get("goal_certification")
+    sampling_attempts = validation.get("sampling_attempts")
+    if (
+        validation.get("schema") != STAGED_MOTION_PLAN_VALIDATION_SCHEMA
+        or validation.get("fresh_task_generation_protocol_id")
+        != DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
+        or validation.get("motion_source_protocol_schema")
+        != motion_protocol["schema"]
+        or validation.get("motion_source_protocol_fingerprint")
+        != motion_protocol["fingerprint"]
+        or validation.get("motion_source_profile") != profile
+        or validation.get("resolved_spatial_root")
+        != {"name": profile["spatial_root_name"], "type": profile["spatial_root_type"]}
+        or validation.get("formal_rollout_sample_or_restore") is not False
+        or validation.get("formal_source_binding_required") is not True
+        or validation.get("source_waypoint_validated") is not True
+        or validation.get("goal_waypoint_validated") is not True
+        or not isinstance(goal_certification, dict)
+        or goal_certification.get("schema") != GOAL_CERTIFICATION_SCHEMA
+        or goal_certification.get("task_validate_calls") != 1
+        or goal_certification.get("waypoint_cache_before")
+        != {"state": "none", "waypoints": []}
+        or not isinstance(goal_certification.get("waypoint_cache_after"), dict)
+        or goal_certification["waypoint_cache_after"].get("state")
+        != "materialized"
+        or not goal_certification["waypoint_cache_after"].get("waypoints")
+        or goal_certification.get("state_audit", {}).get("passed") is not True
+        or goal_certification.get(
+            "condition_fail_grasp_registry_identity_preserved"
+        )
+        is not True
+        or goal_certification.get("grasp_membership_and_parentage_preserved")
+        is not True
+        or goal_certification.get("passed") is not True
+        or validation.get("source_certification_and_exported_source_different_generations")
+        is not True
+        or validation.get("accepted_candidate_reconstructed_A_and_B_same_instance")
+        is not True
+        or validation.get("task_get_state_called_directly_by_candidate_sampler")
+        is not False
+        or validation.get("task_restore_state_called_directly_by_candidate_sampler")
+        is not False
+        or validation.get("goal_sampling_max_attempts")
+        != motion_protocol["goal_sampling_max_attempts"]
+        or isinstance(source_seed, bool)
+        or not isinstance(source_seed, int)
+        or source_seed < 0
+        or isinstance(sampling_attempts, bool)
+        or not isinstance(sampling_attempts, int)
+        or not 1 <= sampling_attempts
+        <= validation.get("goal_sampling_max_attempts", 0)
+    ):
+        raise ValueError("staged deterministic-source validation header is invalid")
+    if (
+        not isinstance(selection, dict)
+        or selection.get("schema") != SOURCE_SEED_SELECTION_SCHEMA
+        or selection.get("logical_episode_seed") != episode_seed
+        or selection.get("max_attempts")
+        != motion_protocol["source_selection_max_attempts"]
+        or selection.get("selected_source_seed") != source_seed
+        or not isinstance(source_attempts, list)
+        or not source_attempts
+        or selection.get("attempts_used") != len(source_attempts)
+        or len(source_attempts) > selection["max_attempts"]
+        or [row.get("attempt") for row in source_attempts]
+        != list(range(1, len(source_attempts) + 1))
+    ):
+        raise ValueError("staged source-seed selection evidence is invalid")
+    for index, row in enumerate(source_attempts, 1):
+        expected_seed = _source_seed(episode_seed, variation, index)
+        accepted = index == len(source_attempts)
+        if (
+            not isinstance(row, dict)
+            or row.get("source_seed") != expected_seed
+            or row.get("resolved_spatial_root")
+            != validation["resolved_spatial_root"]
+            or row.get("accepted") is not accepted
+            or (row.get("certification_ref") is not None) is not accepted
+            or (row.get("rejection_type") is None) is not accepted
+            or (row.get("rejection_reason") is None) is not accepted
+        ):
+            raise ValueError("staged source attempt ledger is invalid")
+        try:
+            _validate_fresh_task_generation_evidence(
+                row.get("fresh_task_generation"),
+                episode_seed=expected_seed,
+                variation=variation,
+                task_name=task_name,
+                verify_instance=False,
+            )
+        except RuntimeError as error:
+            raise ValueError("staged source reset evidence is invalid") from error
+    if (
+        source_seed != source_attempts[-1]["source_seed"]
+        or validation.get("source_certification_fresh_task_generation")
+        != source_attempts[-1]["fresh_task_generation"]
+        or source_attempts[-1].get("certification_ref")
+        != "validation.source_certification"
+        or not isinstance(certification, dict)
+        or certification.get("schema") != SOURCE_CERTIFICATION_SCHEMA
+        or certification.get("reset_verify_instance") is not False
+        or certification.get("task_validate_calls") != 1
+        or certification.get("workspace_placement_succeeded") is not True
+        or certification.get("source_robot_collision_free") is not True
+        or certification.get("condition_fail_grasp_registry_identity_preserved")
+        is not True
+        or certification.get("grasp_membership_and_parentage_preserved") is not True
+        or certification.get("waypoint_cache_before")
+        != {"state": "none", "waypoints": []}
+        or not isinstance(certification.get("waypoint_cache_after"), dict)
+        or certification["waypoint_cache_after"].get("state") != "materialized"
+        or not certification["waypoint_cache_after"].get("waypoints")
+        or certification.get("state_audit", {}).get("passed") is not True
+        or certification.get("passed") is not True
+    ):
+        raise ValueError("staged source certification proof is invalid")
+    try:
+        _validate_fresh_task_generation_evidence(
+            validation.get("selected_source_fresh_task_generation"),
+            episode_seed=source_seed,
+            variation=variation,
+            task_name=task_name,
+            verify_instance=False,
+        )
+    except RuntimeError as error:
+        raise ValueError("selected source reset evidence is invalid") from error
+    if (
+        not isinstance(selected_reconstruction, dict)
+        or selected_reconstruction.get("schema") != SOURCE_RECONSTRUCTION_SCHEMA
+        or selected_reconstruction.get("resolved_spatial_root")
+        != validation["resolved_spatial_root"]
+        or selected_reconstruction.get("passed") is not True
+        or not isinstance(goal_attempts, list)
+        or len(goal_attempts) != sampling_attempts
+        or [row.get("attempt") for row in goal_attempts]
+        != list(range(1, sampling_attempts + 1))
+    ):
+        raise ValueError("selected or candidate source reconstruction is invalid")
+    for index, row in enumerate(goal_attempts, 1):
+        expected_candidate_seed = int(
+            (episode_seed * 1_000_003 + variation * 9_176 + index * 7_919)
+            % (2**32 - 1)
+        )
+        accepted = index == sampling_attempts
+        reconstruction = row.get("source_reconstruction")
+        if (
+            row.get("candidate_seed") != expected_candidate_seed
+            or (row.get("outcome") == "accepted") is not accepted
+            or row.get("outcome")
+            not in {
+                "accepted",
+                "placement_rejected",
+                "waypoint_rejected",
+                "collision_rejected",
+            }
+            or (row.get("reason") is None) is not accepted
+            or not isinstance(reconstruction, dict)
+            or reconstruction.get("schema") != SOURCE_RECONSTRUCTION_SCHEMA
+            or reconstruction.get("resolved_spatial_root")
+            != validation["resolved_spatial_root"]
+            or reconstruction.get("source_waypoint_cache_state") != "none"
+            or reconstruction.get("passed") is not True
+            or (
+                row.get("outcome") != "placement_rejected"
+                and row.get("workspace_placement_succeeded") is not True
+            )
+            or (
+                accepted
+                and (
+                    row.get("goal_certification_ref")
+                    != "validation.goal_certification"
+                    or
+                    not isinstance(row.get("goal_waypoint_cache"), dict)
+                    or row["goal_waypoint_cache"].get("state") != "materialized"
+                    or not row["goal_waypoint_cache"].get("waypoints")
+                )
+            )
+        ):
+            raise ValueError("goal-candidate reconstruction ledger is invalid")
+        try:
+            _validate_fresh_task_generation_evidence(
+                row.get("fresh_task_generation"),
+                episode_seed=source_seed,
+                variation=variation,
+                task_name=task_name,
+                verify_instance=False,
+            )
+        except RuntimeError as error:
+            raise ValueError("goal-candidate reset evidence is invalid") from error
+    if (
+        validation.get("selected_candidate_seed")
+        != goal_attempts[-1]["candidate_seed"]
+        or validation.get("placement_rejections")
+        != sum(row["outcome"] == "placement_rejected" for row in goal_attempts)
+        or validation.get("waypoint_rejections")
+        != sum(row["outcome"] == "waypoint_rejected" for row in goal_attempts)
+        or validation.get("new_collision_pair_rejections")
+        != sum(row["outcome"] == "collision_rejected" for row in goal_attempts)
+    ):
+        raise ValueError("staged goal rejection accounting is invalid")
+    generation_evidence = [
+        row["fresh_task_generation"] for row in source_attempts
+    ] + [validation["selected_source_fresh_task_generation"]] + [
+        row["fresh_task_generation"] for row in goal_attempts
+    ]
+    if (
+        any(
+            left["generation_index"] + 1 != right["generation_index"]
+            for left, right in zip(generation_evidence, generation_evidence[1:])
+        )
+    ):
+        raise ValueError("staged fresh-generation ledger is invalid")
+    if (
+        validation.get("source_task_tree_object_count")
+        != len(validation.get("source_task_tree_relative_state", []))
+        or validation.get("source_task_tree_fingerprint")
+        != _canonical_json_fingerprint(validation["source_task_tree_relative_state"])
+        or validation.get("task_semantic_fingerprint")
+        != _canonical_json_fingerprint(validation.get("task_semantic_signature"))
+        or validation.get("source_low_dim_size")
+        != int(np.asarray(source_low_dim_state).size)
+    ):
+        raise ValueError("staged source structural fingerprints are invalid")
+    selected_source_fingerprint = _staging_source_fingerprint(
+        task_name=task_name,
+        variation=variation,
+        root_pose=source_pose,
+        low_dim_state=source_low_dim_state,
+        task_tree_state=validation["source_task_tree_relative_state"],
+        semantic_signature=validation["task_semantic_signature"],
+        descriptions=validation["task_descriptions"],
+        collision_pair_records=validation["source_robot_external_collision_pairs"],
+    )
+    if validation.get("selected_source_fingerprint") != selected_source_fingerprint:
+        raise ValueError("staged selected-source fingerprint is invalid")
+
+
+@dataclass(frozen=True)
+class StagedMotionPlan:
+    """A/B root poses validated before the formal rollout is launched."""
+
+    task_name: str
+    source_pose: tuple[float, ...]
+    goal_pose: tuple[float, ...]
+    source_low_dim_state: tuple[float, ...]
+    episode_seed: int
+    variation: int
+    validation: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.task_name, str) or not self.task_name.strip():
+            raise ValueError("staged task name must be non-empty")
+        source = np.asarray(self.source_pose, dtype=np.float64)
+        goal = np.asarray(self.goal_pose, dtype=np.float64)
+        low_dim = np.asarray(self.source_low_dim_state, dtype=np.float64).reshape(-1)
+        if source.shape != (7,) or goal.shape != (7,):
+            raise ValueError("staged source and goal poses must contain seven values")
+        if not np.all(np.isfinite(source)) or not np.all(np.isfinite(goal)):
+            raise ValueError("staged motion poses must be finite")
+        if not np.all(np.isfinite(low_dim)):
+            raise ValueError("staged source low-dimensional state must be finite")
+        if isinstance(self.episode_seed, bool) or not isinstance(self.episode_seed, int):
+            raise TypeError("staged episode seed must be an integer")
+        if self.episode_seed < 0:
+            raise ValueError("staged episode seed must be non-negative")
+        if isinstance(self.variation, bool) or not isinstance(self.variation, int):
+            raise TypeError("staged variation must be an integer")
+        if self.variation < 0:
+            raise ValueError("staged variation must be non-negative")
+        if not isinstance(self.validation, dict):
+            raise TypeError("staged validation evidence must be a dictionary")
+        if self.validation.get("schema") != STAGED_MOTION_PLAN_VALIDATION_SCHEMA:
+            raise ValueError("staged motion-plan validation schema is invalid")
+        if self.validation.get("source_waypoint_validated") is not True:
+            raise ValueError("staged source configuration was not waypoint validated")
+        if self.validation.get("goal_waypoint_validated") is not True:
+            raise ValueError("staged goal configuration was not waypoint validated")
+        staging_max_attempts = self.validation.get("goal_sampling_max_attempts")
+        sampling_attempts = self.validation.get("sampling_attempts")
+        if (
+            isinstance(staging_max_attempts, bool)
+            or not isinstance(staging_max_attempts, int)
+            or staging_max_attempts < 1
+        ):
+            raise ValueError("staged motion plan has no valid maximum attempt budget")
+        if (
+            isinstance(sampling_attempts, bool)
+            or not isinstance(sampling_attempts, int)
+            or not 1 <= sampling_attempts <= staging_max_attempts
+        ):
+            raise ValueError("staged motion plan sampling-attempt evidence is invalid")
+        _validate_staged_motion_plan_validation(
+            task_name=self.task_name,
+            episode_seed=self.episode_seed,
+            variation=self.variation,
+            source_pose=source,
+            source_low_dim_state=low_dim,
+            validation=self.validation,
+        )
+        object.__setattr__(self, "source_pose", tuple(float(v) for v in source))
+        object.__setattr__(self, "goal_pose", tuple(float(v) for v in goal))
+        object.__setattr__(
+            self,
+            "source_low_dim_state",
+            tuple(float(v) for v in low_dim),
+        )
+        object.__setattr__(self, "validation", dict(self.validation))
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "schema": STAGED_MOTION_PLAN_SCHEMA,
+            "protocol_id": STAGED_VALIDATED_MOTION_PROTOCOL_ID,
+            "task_name": self.task_name,
+            "episode_seed": self.episode_seed,
+            "variation": self.variation,
+            "source_pose": list(self.source_pose),
+            "goal_pose": list(self.goal_pose),
+            "source_low_dim_state": list(self.source_low_dim_state),
+            "validation": dict(self.validation),
+        }
+
+    def fingerprint(self) -> str:
+        return _canonical_json_fingerprint(self.metadata())
+
+    def to_json(self) -> dict[str, Any]:
+        return {**self.metadata(), "fingerprint": self.fingerprint()}
+
+    @classmethod
+    def from_json(cls, payload: dict[str, Any]) -> StagedMotionPlan:
+        if not isinstance(payload, dict):
+            raise ValueError("staged motion plan payload must be a dictionary")
+        validation = payload.get("validation")
+        plan = cls(
+            task_name=payload.get("task_name", ""),
+            source_pose=tuple(payload.get("source_pose", ())),
+            goal_pose=tuple(payload.get("goal_pose", ())),
+            source_low_dim_state=tuple(payload.get("source_low_dim_state", ())),
+            episode_seed=payload.get("episode_seed"),
+            variation=payload.get("variation"),
+            validation=validation if isinstance(validation, dict) else {},
+        )
+        if payload.get("protocol_id") != STAGED_VALIDATED_MOTION_PROTOCOL_ID:
+            raise ValueError("staged motion plan protocol ID is invalid")
+        if payload.get("schema") != STAGED_MOTION_PLAN_SCHEMA:
+            raise ValueError("staged motion plan schema is invalid")
+        if payload.get("fingerprint") != plan.fingerprint():
+            raise ValueError("staged motion plan fingerprint is invalid")
+        return plan
+
+
+def staged_motion_plan_batch(
+    *,
+    task_name: str,
+    base_seed: int,
+    variations: list[int],
+    plans: list[StagedMotionPlan],
+) -> dict[str, Any]:
+    """Build a scenario-independent, fingerprinted plan-cache payload."""
+
+    if len(variations) != len(plans):
+        raise ValueError("staged plan variation schedule length mismatch")
+    for episode, (variation, plan) in enumerate(zip(variations, plans)):
+        if plan.task_name != task_name:
+            raise ValueError("staged plan task does not match batch task")
+        if plan.episode_seed != base_seed + episode:
+            raise ValueError("staged plan episode seed does not match batch schedule")
+        if plan.variation != variation:
+            raise ValueError("staged plan variation does not match batch schedule")
+    body = {
+        "schema": STAGED_MOTION_PLAN_BATCH_SCHEMA,
+        "protocol_id": STAGED_VALIDATED_MOTION_PROTOCOL_ID,
+        "task_name": task_name,
+        "base_seed": int(base_seed),
+        "episodes": len(plans),
+        "variation_schedule": [int(value) for value in variations],
+        "scenario_independent": True,
+        "seed_domain": (
+            "logical_episode=base_seed+episode;"
+            "A=certified_selected_source_seed_rebuilt_with_reset_false;"
+            "B=deterministic_post_source_reconstruction_candidate_seed;"
+            "scenario_excluded"
+        ),
+        "plans": [plan.to_json() for plan in plans],
+    }
+    return {**body, "batch_fingerprint": _canonical_json_fingerprint(body)}
+
+
+def load_staged_motion_plan_batch(payload: dict[str, Any]) -> list[StagedMotionPlan]:
+    """Authenticate and deserialize one scenario-independent plan batch."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("staged motion plan batch must be a dictionary")
+    if payload.get("schema") != STAGED_MOTION_PLAN_BATCH_SCHEMA:
+        raise ValueError("staged motion plan batch schema is invalid")
+    if payload.get("protocol_id") != STAGED_VALIDATED_MOTION_PROTOCOL_ID:
+        raise ValueError("staged motion plan batch protocol is invalid")
+    if payload.get("scenario_independent") is not True:
+        raise ValueError("staged motion plan batch is scenario-dependent")
+    fingerprint = payload.get("batch_fingerprint")
+    body = {key: value for key, value in payload.items() if key != "batch_fingerprint"}
+    expected = _canonical_json_fingerprint(body)
+    if fingerprint != expected:
+        raise ValueError("staged motion plan batch fingerprint is invalid")
+    raw_plans = payload.get("plans")
+    if not isinstance(raw_plans, list):
+        raise ValueError("staged motion plan batch plans are invalid")
+    plans = [StagedMotionPlan.from_json(item) for item in raw_plans]
+    generation_evidence = [
+        evidence
+        for plan in plans
+        for evidence in (
+            [
+                row["fresh_task_generation"]
+                for row in plan.validation["source_seed_selection"]["attempts"]
+            ]
+            + [plan.validation["selected_source_fresh_task_generation"]]
+            + [
+                row["fresh_task_generation"]
+                for row in plan.validation["goal_candidate_attempts"]
+            ]
+        )
+    ]
+    if (
+        [row["generation_index"] for row in generation_evidence]
+        != list(range(1, len(generation_evidence) + 1))
+        or any(
+            row.get("previous_task_present") is not (index > 0)
+            or row.get("physics_running_before_stop") is not (index > 0)
+            for index, row in enumerate(generation_evidence)
+        )
+    ):
+        raise ValueError("staged plan batch fresh-generation ledger is invalid")
+    expected_payload = staged_motion_plan_batch(
+        task_name=payload.get("task_name"),
+        base_seed=payload.get("base_seed"),
+        variations=payload.get("variation_schedule"),
+        plans=plans,
+    )
+    if expected_payload != payload:
+        raise ValueError("staged motion plan batch fields are inconsistent")
+    return plans
+
+
+@dataclass(frozen=True)
+class StagedSourcePlan:
+    """One offline-certified deterministic A for coordination evaluation."""
+
+    task_name: str
+    source_pose: tuple[float, ...]
+    source_low_dim_state: tuple[float, ...]
+    episode_seed: int
+    variation: int
+    validation: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        source = np.asarray(self.source_pose, dtype=np.float64)
+        low_dim = np.asarray(self.source_low_dim_state, dtype=np.float64).reshape(-1)
+        if (
+            not isinstance(self.task_name, str)
+            or not self.task_name
+            or source.shape != (7,)
+            or not np.all(np.isfinite(source))
+            or not np.all(np.isfinite(low_dim))
+            or isinstance(self.episode_seed, bool)
+            or not isinstance(self.episode_seed, int)
+            or self.episode_seed < 0
+            or isinstance(self.variation, bool)
+            or not isinstance(self.variation, int)
+            or self.variation < 0
+        ):
+            raise ValueError("staged source plan identity or numeric state is invalid")
+        validation = self.validation
+        selection = validation.get("source_seed_selection") if isinstance(validation, dict) else None
+        reconstruction = validation.get("selected_source_reconstruction") if isinstance(validation, dict) else None
+        certification = validation.get("source_certification") if isinstance(validation, dict) else None
+        if (
+            validation.get("schema") != STAGED_SOURCE_VALIDATION_SCHEMA
+            or validation.get("fresh_task_generation_protocol_id")
+            != DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
+            or validation.get("formal_task_validate_calls") != 0
+            or validation.get("source_seed") != selection.get("selected_source_seed")
+            or selection.get("logical_episode_seed") != self.episode_seed
+            or selection.get("max_attempts") != DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS
+            or not isinstance(selection.get("attempts"), list)
+            or selection.get("attempts_used") != len(selection["attempts"])
+            or not isinstance(certification, dict)
+            or certification.get("schema") != SOURCE_CERTIFICATION_SCHEMA
+            or certification.get("reset_verify_instance") is not False
+            or certification.get("workspace_placement_succeeded") is not True
+            or certification.get("source_robot_collision_free") is not True
+            or certification.get("task_validate_calls") != 1
+            or certification.get("waypoint_cache_before")
+            != {"state": "none", "waypoints": []}
+            or not isinstance(certification.get("waypoint_cache_after"), dict)
+            or certification["waypoint_cache_after"].get("state")
+            != "materialized"
+            or not certification["waypoint_cache_after"].get("waypoints")
+            or certification.get("state_audit", {}).get("passed") is not True
+            or certification.get(
+                "condition_fail_grasp_registry_identity_preserved"
+            )
+            is not True
+            or certification.get("grasp_membership_and_parentage_preserved")
+            is not True
+            or certification.get("passed") is not True
+            or not isinstance(reconstruction, dict)
+            or reconstruction.get("schema") != SOURCE_RECONSTRUCTION_SCHEMA
+            or reconstruction.get("passed") is not True
+            or validation.get("selected_source_fingerprint")
+            != _staging_source_fingerprint(
+                task_name=self.task_name,
+                variation=self.variation,
+                root_pose=source,
+                low_dim_state=low_dim,
+                task_tree_state=validation.get("source_task_tree_relative_state"),
+                semantic_signature=validation.get("task_semantic_signature"),
+                descriptions=validation.get("task_descriptions"),
+                collision_pair_records=validation.get(
+                    "source_robot_external_collision_pairs"
+                ),
+            )
+        ):
+            raise ValueError("staged source validation evidence is invalid")
+        for index, row in enumerate(selection["attempts"], 1):
+            accepted = index == selection["attempts_used"]
+            expected_seed = _source_seed(self.episode_seed, self.variation, index)
+            if (
+                row.get("attempt") != index
+                or row.get("source_seed") != expected_seed
+                or row.get("accepted") is not accepted
+            ):
+                raise ValueError("staged source selection ledger is invalid")
+            try:
+                _validate_fresh_task_generation_evidence(
+                    row.get("fresh_task_generation"),
+                    episode_seed=expected_seed,
+                    variation=self.variation,
+                    task_name=self.task_name,
+                    verify_instance=False,
+                )
+            except RuntimeError as error:
+                raise ValueError("staged source proof reset is invalid") from error
+        proof = validation.get("source_certification_fresh_task_generation")
+        selected = validation.get("selected_source_fresh_task_generation")
+        try:
+            _validate_fresh_task_generation_evidence(
+                selected,
+                episode_seed=validation["source_seed"],
+                variation=self.variation,
+                task_name=self.task_name,
+                verify_instance=False,
+            )
+        except RuntimeError as error:
+            raise ValueError("selected staged source reset is invalid") from error
+        if (
+            not isinstance(proof, dict)
+            or not isinstance(selected, dict)
+            or proof != selection["attempts"][-1]["fresh_task_generation"]
+            or proof.get("generation_index") >= selected.get("generation_index")
+            or validation.get(
+                "source_certification_and_exported_source_different_generations"
+            )
+            is not True
+        ):
+            raise ValueError("staged source proof/export isolation is invalid")
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "schema": STAGED_SOURCE_PLAN_SCHEMA,
+            "protocol_id": STAGED_SOURCE_PROTOCOL_ID,
+            "task_name": self.task_name,
+            "source_pose": list(self.source_pose),
+            "source_low_dim_state": list(self.source_low_dim_state),
+            "episode_seed": self.episode_seed,
+            "variation": self.variation,
+            "validation": self.validation,
+        }
+
+    def fingerprint(self) -> str:
+        return _canonical_json_fingerprint(self.metadata())
+
+    def to_json(self) -> dict[str, Any]:
+        return {**self.metadata(), "fingerprint": self.fingerprint()}
+
+    @classmethod
+    def from_json(cls, payload: dict[str, Any]) -> StagedSourcePlan:
+        if not isinstance(payload, dict):
+            raise ValueError("staged source payload must be a dictionary")
+        plan = cls(
+            task_name=payload.get("task_name"),
+            source_pose=tuple(payload.get("source_pose", ())),
+            source_low_dim_state=tuple(payload.get("source_low_dim_state", ())),
+            episode_seed=payload.get("episode_seed"),
+            variation=payload.get("variation"),
+            validation=payload.get("validation"),
+        )
+        if (
+            payload.get("schema") != STAGED_SOURCE_PLAN_SCHEMA
+            or payload.get("protocol_id") != STAGED_SOURCE_PROTOCOL_ID
+            or payload.get("fingerprint") != plan.fingerprint()
+        ):
+            raise ValueError("staged source payload authentication failed")
+        return plan
+
+
+def stage_source_plan(
+    environment: Any,
+    task_class: Any,
+    *,
+    task_name: str,
+    episode_seed: int,
+    variation: int,
+) -> StagedSourcePlan:
+    """Certify A offline, discard the proof generation, and rebuild clean A."""
+
+    attempts = []
+    certified = certification = proof_evidence = None
+    selected_seed = None
+    for attempt in range(1, DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS + 1):
+        source_seed = _source_seed(episode_seed, variation, attempt)
+        task_environment, descriptions, _observation, evidence = (
+            initialize_fresh_task_generation(
+                environment,
+                task_class,
+                episode_seed=source_seed,
+                variation=variation,
+                verify_instance=False,
+            )
+        )
+        scene = task_environment._scene
+        actual_name = str(scene.task.get_name())
+        if actual_name != task_name:
+            raise RuntimeError("A-only task identity does not match preregistration")
+        try:
+            snapshot, candidate_certification = _certify_source_a(
+                scene,
+                descriptions,
+                evidence,
+            )
+        except Exception as error:
+            expected = _is_expected_placement_error(error) or str(error) in {
+                "reset(false) source workspace placement did not succeed",
+                "reset(false) source robot is in collision",
+                "reset(false) source placement collision audit failed",
+            }
+            if not expected:
+                raise
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "source_seed": source_seed,
+                    "accepted": False,
+                    "fresh_task_generation": evidence,
+                    "rejection_type": type(error).__name__,
+                    "rejection_reason": str(error) or type(error).__name__,
+                }
+            )
+            continue
+        attempts.append(
+            {
+                "attempt": attempt,
+                "source_seed": source_seed,
+                "accepted": True,
+                "fresh_task_generation": evidence,
+                "rejection_type": None,
+                "rejection_reason": None,
+            }
+        )
+        certified = snapshot
+        certification = candidate_certification
+        proof_evidence = evidence
+        selected_seed = source_seed
+        break
+    if certified is None or selected_seed is None:
+        raise RuntimeError(
+            "could not certify deterministic coordination source A after "
+            f"{DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS} attempts; "
+            f"{_source_selection_failure_diagnostic(attempts)}"
+        )
+    task_environment, descriptions, _observation, selected_evidence = (
+        initialize_fresh_task_generation(
+            environment,
+            task_class,
+            episode_seed=selected_seed,
+            variation=variation,
+            verify_instance=False,
+        )
+    )
+    selected = _source_state_snapshot(task_environment._scene, descriptions)
+    reconstruction = _source_reconstruction_audit(certified, selected)
+    if not reconstruction["passed"] or _waypoint_cache_evidence(
+        task_environment._scene.task
+    )["state"] != "none":
+        raise RuntimeError("selected coordination A did not reconstruct cleanly")
+    selection = {
+        "schema": SOURCE_SEED_SELECTION_SCHEMA,
+        "logical_episode_seed": episode_seed,
+        "seed_derivation": "attempt1=episode_seed;fallback=(episode_seed*1000003+variation*9176+attempt*104729)%4294967295",
+        "max_attempts": DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS,
+        "attempts_used": len(attempts),
+        "selected_source_seed": selected_seed,
+        "attempts": attempts,
+    }
+    validation = {
+        "schema": STAGED_SOURCE_VALIDATION_SCHEMA,
+        "fresh_task_generation_protocol_id": DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
+        "source_seed": selected_seed,
+        "source_seed_selection": selection,
+        "source_certification": certification,
+        "source_certification_fresh_task_generation": proof_evidence,
+        "selected_source_fresh_task_generation": selected_evidence,
+        "selected_source_reconstruction": reconstruction,
+        "source_certification_and_exported_source_different_generations": True,
+        "formal_task_validate_calls": 0,
+        "task_descriptions": selected["descriptions"],
+        "task_semantic_signature": selected["task_semantics"],
+        "source_task_tree_relative_state": selected["task_tree"],
+        "selected_source_robot_numeric_state": selected["robot_numeric_state"],
+        "selected_source_stable_grasp_state": selected["stable_grasp_state"],
+        "source_robot_external_collision_pairs": selected[
+            "robot_external_collision_pairs"
+        ],
+        "selected_source_fingerprint": _staging_source_fingerprint(
+            task_name=task_name,
+            variation=variation,
+            root_pose=selected["root_pose"],
+            low_dim_state=selected["low_dim_state"],
+            task_tree_state=selected["task_tree"],
+            semantic_signature=selected["task_semantics"],
+            descriptions=selected["descriptions"],
+            collision_pair_records=selected["robot_external_collision_pairs"],
+        ),
+    }
+    return StagedSourcePlan(
+        task_name=task_name,
+        source_pose=tuple(selected["root_pose"]),
+        source_low_dim_state=tuple(selected["low_dim_state"]),
+        episode_seed=episode_seed,
+        variation=variation,
+        validation=validation,
+    )
+
+
+def staged_source_plan_batch(
+    *,
+    task_name: str,
+    task_module: str,
+    task_class: str,
+    base_seed: int,
+    variations: list[int],
+    plans: list[StagedSourcePlan],
+) -> dict[str, Any]:
+    if len(variations) != len(plans):
+        raise ValueError("staged source variation schedule length mismatch")
+    if any(
+        plan.task_name != task_name
+        or plan.episode_seed != base_seed + episode
+        or plan.variation != variation
+        for episode, (variation, plan) in enumerate(zip(variations, plans))
+    ):
+        raise ValueError("staged source batch schedule is inconsistent")
+    body = {
+        "schema": STAGED_SOURCE_PLAN_BATCH_SCHEMA,
+        "protocol_id": STAGED_SOURCE_PROTOCOL_ID,
+        "task_name": task_name,
+        "task_module": task_module,
+        "task_class": task_class,
+        "base_seed": base_seed,
+        "episodes": len(plans),
+        "variation_schedule": variations,
+        "plans": [plan.to_json() for plan in plans],
+    }
+    return {**body, "batch_fingerprint": _canonical_json_fingerprint(body)}
+
+
+def load_staged_source_plan_batch(payload: dict[str, Any]) -> list[StagedSourcePlan]:
+    if not isinstance(payload, dict):
+        raise ValueError("staged source batch must be a dictionary")
+    fingerprint = payload.get("batch_fingerprint")
+    body = {key: value for key, value in payload.items() if key != "batch_fingerprint"}
+    if (
+        payload.get("schema") != STAGED_SOURCE_PLAN_BATCH_SCHEMA
+        or payload.get("protocol_id") != STAGED_SOURCE_PROTOCOL_ID
+        or fingerprint != _canonical_json_fingerprint(body)
+        or not isinstance(payload.get("plans"), list)
+    ):
+        raise ValueError("staged source batch authentication failed")
+    plans = [StagedSourcePlan.from_json(row) for row in payload["plans"]]
+    expected = staged_source_plan_batch(
+        task_name=payload.get("task_name"),
+        task_module=payload.get("task_module"),
+        task_class=payload.get("task_class"),
+        base_seed=payload.get("base_seed"),
+        variations=payload.get("variation_schedule"),
+        plans=plans,
+    )
+    if expected != payload:
+        raise ValueError("staged source batch fields are inconsistent")
+    return plans
+
+
+def bind_staged_source_plan(
+    task_environment: Any,
+    plan: StagedSourcePlan,
+    *,
+    descriptions: Any,
+    fresh_task_generation: dict[str, Any],
+) -> dict[str, Any]:
+    """Strictly bind a formal reset(false) to one sealed coordination A."""
+
+    try:
+        _validate_fresh_task_generation_evidence(
+            fresh_task_generation,
+            episode_seed=plan.validation["source_seed"],
+            variation=plan.variation,
+            task_name=plan.task_name,
+            verify_instance=False,
+        )
+    except RuntimeError as error:
+        raise RuntimeError("formal coordination reset evidence is invalid") from error
+
+    selected = {
+        "task_name": plan.task_name,
+        "root_pose": np.asarray(plan.source_pose, dtype=np.float64),
+        "low_dim_state": np.asarray(plan.source_low_dim_state, dtype=np.float64),
+        "task_tree": plan.validation["source_task_tree_relative_state"],
+        "task_semantics": plan.validation["task_semantic_signature"],
+        "descriptions": plan.validation["task_descriptions"],
+        "robot_numeric_state": plan.validation["selected_source_robot_numeric_state"],
+        "stable_grasp_state": plan.validation["selected_source_stable_grasp_state"],
+        "robot_external_collision_pairs": plan.validation[
+            "source_robot_external_collision_pairs"
+        ],
+        "velocity_summary": {"all_finite": True},
+    }
+    actual = _source_state_snapshot(task_environment._scene, descriptions)
+    # Velocity magnitudes are diagnostic, not source identity.
+    selected["velocity_summary"] = actual["velocity_summary"]
+    audit = _source_reconstruction_audit(selected, actual)
+    if not audit["passed"] or _waypoint_cache_evidence(
+        task_environment._scene.task
+    )["state"] != "none":
+        raise RuntimeError("formal coordination source A binding failed")
+    return {
+        "schema": "dynamac-rlbench-formal-source-a-binding-v1",
+        "required": True,
+        "matched": True,
+        "source_seed": plan.validation["source_seed"],
+        "fresh_task_generation": fresh_task_generation,
+        "task_validate_calls": 0,
+        "source_reconstruction": audit,
+        "plan_fingerprint": plan.fingerprint(),
+    }
+
+
+def stage_scenario_motion_plan(
+    environment: Any,
+    task_class: Any,
+    *,
+    episode_seed: int,
+    variation: int,
+    task_name: str | None = None,
+    max_attempts: int = 100,
+    source_max_attempts: int = DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS,
+) -> StagedMotionPlan:
+    """Certify deterministic A offline, then sample B from fresh A rebuilds."""
+
+    if max_attempts < 1:
+        raise ValueError("staging max attempts must be positive")
+    if source_max_attempts < 1:
+        raise ValueError("source selection max attempts must be positive")
+    if source_max_attempts != DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS:
+        raise ValueError("source selection max attempts differ from frozen protocol")
+    from .v3_protocol import load_v3_motion_source_protocol, motion_source_profile
+
+    motion_source_protocol = load_v3_motion_source_protocol()
+    if (
+        motion_source_protocol["source_selection_max_attempts"]
+        != source_max_attempts
+        or motion_source_protocol["goal_sampling_max_attempts"] != max_attempts
+    ):
+        raise RuntimeError("motion-source staging budgets are inconsistent")
+    if task_name is None:
+        raise ValueError("staging requires a frozen motion-source task name")
+    spatial_profile = motion_source_profile(task_name, motion_source_protocol)
+
+    resolved_task_name = task_name
+    source_attempt_rows: list[dict[str, Any]] = []
+    certified_source = None
+    source_certification = None
+    certification_generation_evidence = None
+    selected_source_seed = None
+    selected_source_attempt = None
+
+    for source_attempt in range(1, source_max_attempts + 1):
+        candidate_source_seed = _source_seed(
+            episode_seed,
+            variation,
+            source_attempt,
+        )
+        (
+            task_environment,
+            descriptions,
+            _observation,
+            generation_evidence,
+        ) = initialize_fresh_task_generation(
+            environment,
+            task_class,
+            episode_seed=candidate_source_seed,
+            variation=variation,
+            verify_instance=False,
+        )
+        scene = getattr(task_environment, "_scene", None)
+        task = getattr(scene, "task", None)
+        if task is None:
+            raise RuntimeError("RLBench source-certification task is unavailable")
+        get_name = getattr(task, "get_name", None)
+        actual_task_name = str(get_name()) if callable(get_name) else type(task).__name__
+        if resolved_task_name is None:
+            resolved_task_name = actual_task_name
+        elif resolved_task_name != actual_task_name:
+            raise RuntimeError("staging task identity does not match requested task")
+        resolved_source_root = _authenticate_motion_source_root(task, spatial_profile)
+        try:
+            source_snapshot, certification = _certify_source_a(
+                scene,
+                descriptions,
+                generation_evidence,
+            )
+        except Exception as error:
+            expected = _is_expected_placement_error(error) or str(error) in {
+                "reset(false) source workspace placement did not succeed",
+                "reset(false) source robot is in collision",
+                "reset(false) source placement collision audit failed",
+            }
+            if not expected:
+                raise
+            source_attempt_rows.append(
+                {
+                    "attempt": source_attempt,
+                    "source_seed": candidate_source_seed,
+                    "resolved_spatial_root": resolved_source_root,
+                    "fresh_task_generation": generation_evidence,
+                    "accepted": False,
+                    "rejection_type": type(error).__name__,
+                    "rejection_reason": str(error) or type(error).__name__,
+                    "certification_ref": None,
+                }
+            )
+            continue
+        source_attempt_rows.append(
+            {
+                "attempt": source_attempt,
+                "source_seed": candidate_source_seed,
+                "resolved_spatial_root": resolved_source_root,
+                "fresh_task_generation": generation_evidence,
+                "accepted": True,
+                "rejection_type": None,
+                "rejection_reason": None,
+                "certification_ref": "validation.source_certification",
+            }
+        )
+        certified_source = source_snapshot
+        source_certification = certification
+        certification_generation_evidence = generation_evidence
+        selected_source_seed = candidate_source_seed
+        selected_source_attempt = source_attempt
+        break
+    if certified_source is None or selected_source_seed is None:
+        raise RuntimeError(
+            "could not certify a deterministic source A after "
+            f"{source_max_attempts} attempts; "
+            f"{_source_selection_failure_diagnostic(source_attempt_rows)}"
+        )
+
+    # Discard the OMPL-certified generation.  The exported A is a fresh
+    # reset(false) reconstruction, matching B retries and formal rollout.
+    (
+        task_environment,
+        selected_descriptions,
+        _observation,
+        selected_source_generation_evidence,
+    ) = initialize_fresh_task_generation(
+        environment,
+        task_class,
+        episode_seed=selected_source_seed,
+        variation=variation,
+        verify_instance=False,
+    )
+    selected_scene = task_environment._scene
+    selected_resolved_root = _authenticate_motion_source_root(
+        selected_scene.task,
+        spatial_profile,
+    )
+    selected_source = _source_state_snapshot(selected_scene, selected_descriptions)
+    selected_reconstruction = _source_reconstruction_audit(
+        certified_source,
+        selected_source,
+    )
+    if not selected_reconstruction["passed"]:
+        raise RuntimeError("selected source seed did not reconstruct certified A")
+    selected_reconstruction["resolved_spatial_root"] = selected_resolved_root
+
+    selected_source_fingerprint = _staging_source_fingerprint(
+        task_name=resolved_task_name,
+        variation=variation,
+        root_pose=selected_source["root_pose"],
+        low_dim_state=selected_source["low_dim_state"],
+        task_tree_state=selected_source["task_tree"],
+        semantic_signature=selected_source["task_semantics"],
+        descriptions=selected_source["descriptions"],
+        collision_pair_records=selected_source["robot_external_collision_pairs"],
+    )
+
+    goal_pose = None
+    goal_collision_pairs = None
+    accepted_source_collision_pairs = None
+    goal_pre_validation_task_tree = None
+    goal_waypoint_validation_task_tree = None
+    task_tree_motion = None
+    rigid_motion = None
+    goal_certification = None
+    goal_attempt_rows: list[dict[str, Any]] = []
+    attempts_used = 0
+    placement_rejections = 0
+    waypoint_rejections = 0
+    collision_rejections = 0
+    last_error = None
+
+    for attempt in range(1, max_attempts + 1):
+        attempts_used = attempt
+        (
+            task_environment,
+            descriptions,
+            _observation,
+            generation_evidence,
+        ) = initialize_fresh_task_generation(
+            environment,
+            task_class,
+            episode_seed=selected_source_seed,
+            variation=variation,
+            verify_instance=False,
+        )
+        scene = getattr(task_environment, "_scene", None)
+        task = getattr(scene, "task", None)
+        workspace_boundary = getattr(scene, "_workspace_boundary", None)
+        robot = getattr(scene, "robot", None)
+        if task is None or workspace_boundary is None or robot is None:
+            raise RuntimeError("RLBench staging scene placement internals are unavailable")
+        resolved_candidate_root = _authenticate_motion_source_root(
+            task,
+            spatial_profile,
+        )
+        root = task.boundary_root()
+        get_name = getattr(task, "get_name", None)
+        actual_task_name = (
+            str(get_name()) if callable(get_name) else type(task).__name__
+        )
+        if resolved_task_name is None:
+            resolved_task_name = actual_task_name
+        elif actual_task_name != resolved_task_name:
+            raise RuntimeError("staging task identity does not match requested task")
+        current_source = _source_state_snapshot(scene, descriptions)
+        reconstruction = _source_reconstruction_audit(selected_source, current_source)
+        reconstruction["resolved_spatial_root"] = resolved_candidate_root
+        if not reconstruction["passed"]:
+            raise RuntimeError("B retry source did not reconstruct selected A")
+        source_waypoint_cache = _waypoint_cache_evidence(task)
+        if source_waypoint_cache["state"] != "none":
+            raise RuntimeError("B retry source unexpectedly materialized waypoints")
+        reconstruction["source_waypoint_cache_state"] = "none"
+        current_descriptions = current_source["descriptions"]
+        current_semantic_signature = current_source["task_semantics"]
+        current_task_tree_state = current_source["task_tree"]
+        current_source_pose = current_source["root_pose"]
+        current_source_low_dim = current_source["low_dim_state"]
+        validate = getattr(task, "validate", None)
+        if not callable(validate):
+            raise RuntimeError("RLBench Task.validate() is unavailable in staging")
+        current_source_collisions = _robot_external_collision_pairs(scene, robot)
+        initial_orientation = getattr(scene, "_initial_task_pose", None)
+        if initial_orientation is None:
+            raise RuntimeError("RLBench Scene._initial_task_pose is unavailable")
+        min_rotation, max_rotation = task.base_rotation_bounds()
+        # B randomness is separate from A randomness, making retries both
+        # deterministic and independent of how much RNG reset() consumed.
+        candidate_seed = int(
+            (episode_seed * 1_000_003 + variation * 9_176 + attempt * 7_919)
+            % (2**32 - 1)
+        )
+        random.seed(candidate_seed)
+        np.random.seed(candidate_seed)
+        workspace_boundary.clear()
+        try:
+            root.set_orientation(initial_orientation)
+            workspace_boundary.sample(
+                root,
+                min_rotation=min_rotation,
+                max_rotation=max_rotation,
+            )
+            if not _workspace_boundary_contains_root(scene, root):
+                placement_rejections += 1
+                last_error = "workspace sampler did not record a successful goal"
+                goal_attempt_rows.append(
+                    {
+                        "attempt": attempt,
+                        "candidate_seed": candidate_seed,
+                        "source_reconstruction": reconstruction,
+                        "workspace_placement_succeeded": False,
+                        "outcome": "placement_rejected",
+                        "reason": last_error,
+                        "fresh_task_generation": generation_evidence,
+                    }
+                )
+                continue
+            candidate = np.asarray(root.get_pose(), dtype=np.float64).copy()
+            if candidate.shape != (7,) or not np.all(np.isfinite(candidate)):
+                raise RuntimeError("workspace sampler returned an invalid root pose")
+            if not _root_motion_metrics(
+                current_source_pose,
+                candidate,
+            )["planned_root_motion"]:
+                placement_rejections += 1
+                last_error = "sampled root pose equals its source pose"
+                goal_attempt_rows.append(
+                    {
+                        "attempt": attempt,
+                        "candidate_seed": candidate_seed,
+                        "source_reconstruction": reconstruction,
+                        "workspace_placement_succeeded": True,
+                        "outcome": "placement_rejected",
+                        "reason": last_error,
+                        "fresh_task_generation": generation_evidence,
+                    }
+                )
+                continue
+            candidate_collisions = _robot_external_collision_pairs(scene, robot)
+            if (
+                frozenset(candidate_collisions)
+                - frozenset(current_source_collisions)
+            ):
+                collision_rejections += 1
+                last_error = "sampled goal introduces new robot collision pairs"
+                goal_attempt_rows.append(
+                    {
+                        "attempt": attempt,
+                        "candidate_seed": candidate_seed,
+                        "source_reconstruction": reconstruction,
+                        "workspace_placement_succeeded": True,
+                        "outcome": "collision_rejected",
+                        "reason": last_error,
+                        "fresh_task_generation": generation_evidence,
+                    }
+                )
+                continue
+            candidate_tree_pre_validation = _task_tree_relative_state(task)
+            goal_pre_validation_task_tree = _compare_task_tree_relative_state(
+                current_task_tree_state,
+                candidate_tree_pre_validation,
+                boundary_root_may_move=True,
+            )
+            if not goal_pre_validation_task_tree["matched"]:
+                raise RuntimeError(
+                    "staged B sampling changed task-tree topology or state "
+                    "outside the commanded boundary-root rigid motion"
+                )
+            if _task_semantic_signature(task) != current_semantic_signature:
+                raise RuntimeError("staging B sampling changed task semantics")
+            try:
+                candidate_goal_certification = _certify_goal_b(
+                    scene,
+                    current_descriptions,
+                )
+            except Exception as error:
+                if not _is_expected_placement_error(error):
+                    raise
+                waypoint_rejections += 1
+                last_error = str(error) or type(error).__name__
+                goal_attempt_rows.append(
+                    {
+                        "attempt": attempt,
+                        "candidate_seed": candidate_seed,
+                        "source_reconstruction": reconstruction,
+                        "workspace_placement_succeeded": True,
+                        "goal_waypoint_cache": _waypoint_cache_evidence(task),
+                        "outcome": "waypoint_rejected",
+                        "reason": last_error,
+                        "fresh_task_generation": generation_evidence,
+                    }
+                )
+                continue
+            candidate_collisions = _robot_external_collision_pairs(scene, robot)
+            if (
+                frozenset(candidate_collisions)
+                - frozenset(current_source_collisions)
+            ):
+                collision_rejections += 1
+                last_error = (
+                    "waypoint validation leaves new robot collision pairs at goal"
+                )
+                goal_attempt_rows.append(
+                    {
+                        "attempt": attempt,
+                        "candidate_seed": candidate_seed,
+                        "source_reconstruction": reconstruction,
+                        "workspace_placement_succeeded": True,
+                        "outcome": "collision_rejected",
+                        "reason": last_error,
+                        "fresh_task_generation": generation_evidence,
+                    }
+                )
+                continue
+            candidate_tree_post_validation = _task_tree_relative_state(task)
+            goal_waypoint_cache = _waypoint_cache_evidence(task)
+            if goal_waypoint_cache["state"] != "materialized":
+                raise RuntimeError("B validation did not materialize waypoints")
+            goal_waypoint_validation_task_tree = (
+                _compare_task_tree_relative_state(
+                    candidate_tree_pre_validation,
+                    candidate_tree_post_validation,
+                    boundary_root_may_move=False,
+                )
+            )
+            if not goal_waypoint_validation_task_tree["matched"]:
+                raise RuntimeError(
+                    "staged B waypoint validation changed task-tree topology or state"
+                )
+            if _task_semantic_signature(task) != current_semantic_signature:
+                raise RuntimeError("staging B validation changed task semantics")
+            task_tree_motion = _compare_task_tree_relative_state(
+                current_task_tree_state,
+                candidate_tree_post_validation,
+                boundary_root_may_move=True,
+            )
+            if not task_tree_motion["matched"]:
+                raise RuntimeError(
+                    "staged B changed task-tree topology or state outside the "
+                    "commanded boundary-root rigid motion"
+                )
+            candidate_low_dim = _task_low_dim_state(task)
+            rigid_motion = _task_frame_rigid_motion_evidence(
+                resolved_task_name,
+                current_source_pose,
+                candidate,
+                current_source_low_dim,
+                candidate_low_dim,
+            )
+            if not rigid_motion[
+                "all_pose_chunks_follow_boundary_root_rigid_transform"
+            ]:
+                raise RuntimeError(
+                    "staged boundary-root motion does not rigidly move every task frame"
+                )
+            goal_pose = candidate
+            goal_certification = candidate_goal_certification
+            goal_collision_pairs = candidate_collisions
+            accepted_source_collision_pairs = current_source_collisions
+            goal_attempt_rows.append(
+                {
+                    "attempt": attempt,
+                    "candidate_seed": candidate_seed,
+                    "source_reconstruction": reconstruction,
+                    "workspace_placement_succeeded": True,
+                    "goal_waypoint_cache": goal_waypoint_cache,
+                    "goal_certification_ref": "validation.goal_certification",
+                    "outcome": "accepted",
+                    "reason": None,
+                    "fresh_task_generation": generation_evidence,
+                }
+            )
+            break
+        except Exception as error:
+            if not _is_expected_placement_error(error):
+                raise
+            placement_rejections += 1
+            last_error = str(error) or type(error).__name__
+            goal_attempt_rows.append(
+                {
+                    "attempt": attempt,
+                    "candidate_seed": candidate_seed,
+                    "source_reconstruction": reconstruction,
+                    "workspace_placement_succeeded": False,
+                    "outcome": "placement_rejected",
+                    "reason": last_error,
+                    "fresh_task_generation": generation_evidence,
+                }
+            )
+
+    if (
+        goal_pose is None
+        or goal_collision_pairs is None
+        or accepted_source_collision_pairs is None
+    ):
+        raise RuntimeError(
+            "could not sample a waypoint-valid staging goal after "
+            f"{max_attempts} attempts; "
+            f"{_goal_sampling_failure_diagnostic(goal_attempt_rows)}"
+        )
+    selected_source_collision_set = frozenset(accepted_source_collision_pairs)
+    new_pairs = tuple(sorted(frozenset(goal_collision_pairs) - selected_source_collision_set))
+    if new_pairs:
+        raise RuntimeError("staged goal contains an unvalidated collision pair")
+    source_seed_selection = {
+        "schema": SOURCE_SEED_SELECTION_SCHEMA,
+        "logical_episode_seed": int(episode_seed),
+        "seed_derivation": "attempt1=episode_seed;fallback=(episode_seed*1000003+variation*9176+attempt*104729)%4294967295",
+        "max_attempts": int(source_max_attempts),
+        "attempts_used": int(selected_source_attempt),
+        "selected_source_seed": int(selected_source_seed),
+        "attempts": source_attempt_rows,
+    }
+    validation = {
+        "schema": STAGED_MOTION_PLAN_VALIDATION_SCHEMA,
+        "environment_role": "independent_disposable_staging",
+        "fresh_task_generation_protocol_id": DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
+        "selected_source_fresh_task_generation": (
+            selected_source_generation_evidence
+        ),
+        "source_certification_fresh_task_generation": certification_generation_evidence,
+        "source_seed": int(selected_source_seed),
+        "motion_source_protocol_schema": motion_source_protocol["schema"],
+        "motion_source_protocol_fingerprint": motion_source_protocol["fingerprint"],
+        "motion_source_profile": spatial_profile,
+        "resolved_spatial_root": selected_resolved_root,
+        "source_seed_selection": source_seed_selection,
+        "source_certification": source_certification,
+        "selected_source_reconstruction": selected_reconstruction,
+        "goal_candidate_attempts": goal_attempt_rows,
+        "formal_rollout_sample_or_restore": False,
+        "formal_source_binding_required": True,
+        "source_waypoint_validated": True,
+        "goal_waypoint_validated": True,
+        "goal_certification": goal_certification,
+        "waypoint_validation_api": "Task.validate",
+        "source_validation": "offline_exactly_one_Task.validate_after_reset_verify_instance_false",
+        "task_init_episode_called_by_candidate_sampler": False,
+        "task_init_episode_called_by_staging_reset": True,
+        "source_certification_and_exported_source_different_generations": True,
+        "accepted_candidate_reconstructed_A_and_B_same_instance": True,
+        "task_descriptions": selected_source["descriptions"],
+        "task_semantic_signature": selected_source["task_semantics"],
+        "task_semantic_fingerprint": _canonical_json_fingerprint(
+            selected_source["task_semantics"]
+        ),
+        "selected_source_fingerprint": selected_source_fingerprint,
+        "selected_source_task_object_velocity_summary": (
+            selected_source["velocity_summary"]
+        ),
+        "selected_source_robot_numeric_state": selected_source["robot_numeric_state"],
+        "selected_source_stable_grasp_state": selected_source["stable_grasp_state"],
+        "task_tree_state_schema": TASK_TREE_STATE_SCHEMA,
+        "source_task_tree_relative_state": selected_source["task_tree"],
+        "source_task_tree_object_count": len(selected_source["task_tree"]),
+        "source_task_tree_fingerprint": _canonical_json_fingerprint(
+            selected_source["task_tree"]
+        ),
+        "goal_task_tree_relative_state_preserved": task_tree_motion,
+        "goal_pre_validation_task_tree_state_preserved": (
+            goal_pre_validation_task_tree
+        ),
+        "goal_waypoint_validation_task_tree_state_preserved": (
+            goal_waypoint_validation_task_tree
+        ),
+        "source_low_dim_size": int(np.asarray(selected_source["low_dim_state"]).size),
+        "task_frame_rigid_motion": rigid_motion,
+        "candidate_isolation": "fresh_reset_false_same_selected_source_seed_no_restore",
+        "task_get_state_called_directly_by_candidate_sampler": False,
+        "task_restore_state_called_directly_by_candidate_sampler": False,
+        "open_microwave_limit_normalization_false_guard_possible": False,
+        "source_robot_external_collision_pairs": _stable_collision_pair_records(
+            selected_source_collision_set
+        ),
+        "goal_robot_external_collision_pairs": _stable_collision_pair_records(
+            goal_collision_pairs
+        ),
+        "goal_new_robot_external_collision_pairs": _stable_collision_pair_records(new_pairs),
+        "sampling_attempts": attempts_used,
+        "goal_sampling_max_attempts": int(max_attempts),
+        "selected_candidate_seed": candidate_seed,
+        "placement_rejections": placement_rejections,
+        "waypoint_rejections": waypoint_rejections,
+        "new_collision_pair_rejections": collision_rejections,
+    }
+    return StagedMotionPlan(
+        task_name=resolved_task_name,
+        source_pose=tuple(selected_source["root_pose"]),
+        goal_pose=tuple(goal_pose),
+        source_low_dim_state=tuple(selected_source["low_dim_state"]),
+        episode_seed=int(episode_seed),
+        variation=int(variation),
+        validation=validation,
+    )
 
 
 def _restore_sampling_configuration(
@@ -1133,26 +4290,133 @@ class ScenarioController:
 
     kind: Literal["static", "teleport_task", "smooth_task_motion"]
     trigger_fraction: float = 1.0 / 3.0
+    trigger_step: int | None = None
     total_steps: int = 10
-    max_attempts: int = 20
+    max_attempts: int = 100
     verify_instance: bool = True
+    motion_plan: StagedMotionPlan | None = None
     _teleported: bool = False
     _smooth_calls: int = 0
     _smooth_complete: bool = False
     _motion_source_pose: Any = None
     _motion_goal_pose: Any = None
     _instance_preservation: Any = None
+    _staged_source_bound: bool = False
+    _last_motion_policy_step: int | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.trigger_fraction <= 1.0:
             raise ValueError("trigger_fraction must lie in [0, 1]")
+        if self.trigger_step is not None and (
+            isinstance(self.trigger_step, bool)
+            or not isinstance(self.trigger_step, int)
+            or self.trigger_step < 0
+        ):
+            raise ValueError("trigger_step must be a non-negative integer or None")
         if self.total_steps < 1 or self.max_attempts < 1:
             raise ValueError("total_steps and max_attempts must be positive")
         if self.verify_instance is not True:
             raise ValueError("preserve-instance auditing cannot be disabled")
+        if self.motion_plan is not None:
+            if not isinstance(self.motion_plan, StagedMotionPlan):
+                raise TypeError("motion_plan must be a StagedMotionPlan")
+            self._motion_source_pose = np.asarray(
+                self.motion_plan.source_pose,
+                dtype=np.float64,
+            )
+            self._motion_goal_pose = np.asarray(
+                self.motion_plan.goal_pose,
+                dtype=np.float64,
+            )
+            self._instance_preservation = {
+                "motion_plan_fingerprint": self.motion_plan.fingerprint(),
+                "validation_fingerprint": _canonical_json_fingerprint(
+                    self.motion_plan.validation
+                ),
+            }
 
     def protocol_metadata(self) -> dict[str, Any]:
         """Return JSON-stable semantics shared by both evaluator frontends."""
+
+        if self.motion_plan is not None:
+            return {
+                "protocol_id": STAGED_VALIDATED_MOTION_PROTOCOL_ID,
+                "episode_instance_semantics": (
+                    "offline_certified_source_seed_strictly_reconstructed_by_reset_false"
+                ),
+                "goal_object": "task.boundary_root()",
+                "goal_sampling": "independent_disposable_staging_environment",
+                "goal_sampling_max_attempts": self.max_attempts,
+                "source_selection_max_attempts": DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS,
+                "fresh_task_generation_protocol_id": (
+                    DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
+                ),
+                "candidate_isolation": (
+                    "prestop_unload_if_present_stop_physics_fresh_task_"
+                    "reload_single_reset_verify_instance_false"
+                ),
+                "candidate_source_policy": (
+                    "every_candidate_reconstructs_selected_source_seed_A"
+                ),
+                "source_reconstruction_schema": SOURCE_RECONSTRUCTION_SCHEMA,
+                "source_reconstruction_tolerances": {
+                    "translation_m": SOURCE_RECONSTRUCTION_TRANSLATION_TOLERANCE_M,
+                    "rotation_rad": SOURCE_RECONSTRUCTION_ROTATION_TOLERANCE_RAD,
+                    "scalar_state": SOURCE_RECONSTRUCTION_SCALAR_TOLERANCE,
+                    "joint_position": SOURCE_RECONSTRUCTION_JOINT_TOLERANCE,
+                },
+                "quaternion_rotation_metric": QUATERNION_ROTATION_METRIC,
+                "task_object_velocity_role": (
+                    "finite_diagnostic_not_identity_comparison"
+                ),
+                "staging_waypoint_validation": (
+                    "A_seed_offline_via_exactly_one_explicit_Task.validate_then_discard;"
+                    "B_via_fresh_source_reconstruction_and_exactly_one_Task.validate"
+                ),
+                "task_tree_state_schema": TASK_TREE_STATE_SCHEMA,
+                "source_replay_task_tree_comparison": "all_objects_world",
+                "root_motion_task_tree_comparison": (
+                    "boundary_root_subtree_relative_else_world"
+                ),
+                "goal_validation_task_tree_comparison": "all_objects_world",
+                "formal_episode_initialization": (
+                    "prestop_unload_if_present_stop_physics_fresh_task_"
+                    "reload_then_selected_source_seed_variation_single_reset_verify_instance_false"
+                ),
+                "calls_task_validate_after_formal_reset": False,
+                "formal_intervention_sampling": False,
+                "formal_intervention_task_get_state": False,
+                "formal_intervention_task_restore_state": False,
+                "formal_rollout_receives": "immutable_numeric_A_B_poses_and_fingerprint",
+                "formal_intervention_state_audit_schema": (
+                    FORMAL_INTERVENTION_STATE_AUDIT_SCHEMA
+                ),
+                "formal_intervention_state_reference": (
+                    "current_policy_evolved_formal_state_immediately_before_"
+                    "each_root_command"
+                ),
+                "formal_intervention_task_tree_comparison": (
+                    "strict_1e-6_boundary_root_subtree_relative_else_world"
+                ),
+                "formal_intervention_semantic_guard": "exact",
+                "formal_intervention_registry_and_grasp_guard": (
+                    "same_python_identities_membership_and_parentage"
+                ),
+                "formal_intervention_collision_audit": (
+                    FORMAL_INTERVENTION_COLLISION_PAIR_POLICY
+                ),
+                "robot_collision_validation": (
+                    "reject_candidate_external_pairs_absent_at_source"
+                ),
+                "trigger_clock": "committed_policy_ticks",
+                "duplicate_policy_tick_motion": False,
+                "smooth_schedule": "one_fraction_per_unique_committed_policy_tick",
+                "smooth_fractions": "1_over_n_through_n_over_n",
+                "smooth_endpoint_validation": "final_goal_pose_reached",
+                "calls_task_init_episode_from_sampler": False,
+                "calls_scene_kidnap": False,
+                "calls_scene_move_task_smoothly": False,
+            }
 
         return {
             "protocol_id": PRESERVE_INSTANCE_MOTION_PROTOCOL_ID,
@@ -1224,6 +4488,192 @@ class ScenarioController:
             "smooth_endpoint_guaranteed": True,
         }
 
+    def resolved_trigger_step(self, horizon: int) -> int:
+        if horizon < 1:
+            raise ValueError("horizon must be positive")
+        if self.trigger_step is not None:
+            if self.trigger_step >= horizon:
+                raise ValueError("explicit trigger_step lies outside policy horizon")
+            return self.trigger_step
+        return min(
+            horizon - 1,
+            int(round(self.trigger_fraction * (horizon - 1))),
+        )
+
+    def bind_staged_source(
+        self,
+        task_environment: Any,
+        *,
+        episode_seed: int,
+        variation: int,
+        descriptions: Any = None,
+    ) -> dict[str, Any]:
+        """Bind formal reset(false) A to the independently certified source."""
+
+        if self.motion_plan is None:
+            return {"required": False, "matched": None}
+        if episode_seed != self.motion_plan.episode_seed:
+            raise RuntimeError("formal episode seed does not match staged motion plan")
+        if variation != self.motion_plan.variation:
+            raise RuntimeError("formal variation does not match staged motion plan")
+        scene = getattr(task_environment, "_scene", None)
+        task = getattr(scene, "task", None)
+        if task is None:
+            raise RuntimeError("formal RLBench scene task is unavailable")
+        get_name = getattr(task, "get_name", None)
+        formal_task_name = (
+            str(get_name())
+            if callable(get_name)
+            else type(task).__name__
+        )
+        if formal_task_name != self.motion_plan.task_name:
+            raise RuntimeError("formal task identity does not match staged motion plan")
+        validation = self.motion_plan.validation
+        from .v3_protocol import load_v3_motion_source_protocol, motion_source_profile
+
+        motion_source_protocol = load_v3_motion_source_protocol()
+        spatial_profile = motion_source_profile(
+            self.motion_plan.task_name,
+            motion_source_protocol,
+        )
+        if (
+            validation.get("motion_source_protocol_schema")
+            != motion_source_protocol["schema"]
+            or validation.get("motion_source_protocol_fingerprint")
+            != motion_source_protocol["fingerprint"]
+            or validation.get("motion_source_profile") != spatial_profile
+            or validation.get("resolved_spatial_root")
+            != _authenticate_motion_source_root(task, spatial_profile)
+        ):
+            raise RuntimeError("staged spatial motion-source profile is invalid")
+        if validation.get(
+            "fresh_task_generation_protocol_id"
+        ) != DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID:
+            raise RuntimeError("staged fresh task-generation protocol is invalid")
+        source_seed = validation.get("source_seed")
+        if isinstance(source_seed, bool) or not isinstance(source_seed, int):
+            raise RuntimeError("staged source seed is invalid")
+        selected_generation_evidence = _validate_fresh_task_generation_evidence(
+            validation.get("selected_source_fresh_task_generation"),
+            episode_seed=source_seed,
+            variation=variation,
+            task_name=formal_task_name,
+            verify_instance=False,
+        )
+        formal_generation_evidence = _validate_fresh_task_generation_evidence(
+            getattr(
+                task_environment,
+                "_dynamac_fresh_generation_evidence",
+                None,
+            ),
+            episode_seed=source_seed,
+            variation=variation,
+            task_name=formal_task_name,
+            verify_instance=False,
+        )
+        certification = validation.get("source_certification")
+        selected_reconstruction = validation.get("selected_source_reconstruction")
+        if (
+            not isinstance(certification, dict)
+            or certification.get("schema") != SOURCE_CERTIFICATION_SCHEMA
+            or certification.get("passed") is not True
+            or not isinstance(selected_reconstruction, dict)
+            or selected_reconstruction.get("schema") != SOURCE_RECONSTRUCTION_SCHEMA
+            or selected_reconstruction.get("passed") is not True
+        ):
+            raise RuntimeError("staged source certification proof is invalid")
+        expected_descriptions = validation.get("task_descriptions")
+        if descriptions is None or list(descriptions) != expected_descriptions:
+            raise RuntimeError("formal task descriptions do not match staged motion plan")
+        if validation.get("task_tree_state_schema") != TASK_TREE_STATE_SCHEMA:
+            raise RuntimeError("staged task-tree state schema is invalid")
+        if _waypoint_cache_evidence(task)["state"] != "none":
+            raise RuntimeError("formal reset(false) unexpectedly materialized waypoints")
+        expected_source = {
+            "task_name": self.motion_plan.task_name,
+            "root_pose": np.asarray(self.motion_plan.source_pose, dtype=np.float64),
+            "low_dim_state": np.asarray(
+                self.motion_plan.source_low_dim_state,
+                dtype=np.float64,
+            ),
+            "task_tree": validation.get("source_task_tree_relative_state"),
+            "task_semantics": validation.get("task_semantic_signature"),
+            "descriptions": expected_descriptions,
+            "robot_numeric_state": validation.get("selected_source_robot_numeric_state"),
+            "stable_grasp_state": validation.get("selected_source_stable_grasp_state"),
+            "robot_external_collision_pairs": validation.get(
+                "source_robot_external_collision_pairs"
+            ),
+            "velocity_summary": validation.get(
+                "selected_source_task_object_velocity_summary"
+            ),
+        }
+        formal_source = _source_state_snapshot(scene, descriptions)
+        formal_reconstruction = _source_reconstruction_audit(
+            expected_source,
+            formal_source,
+        )
+        if not formal_reconstruction["passed"]:
+            raise RuntimeError("formal source A did not reconstruct certified A")
+        selected_source_fingerprint = _staging_source_fingerprint(
+            task_name=self.motion_plan.task_name,
+            variation=self.motion_plan.variation,
+            root_pose=np.asarray(self.motion_plan.source_pose, dtype=np.float64),
+            low_dim_state=np.asarray(
+                self.motion_plan.source_low_dim_state,
+                dtype=np.float64,
+            ),
+            task_tree_state=expected_source["task_tree"],
+            semantic_signature=expected_source["task_semantics"],
+            descriptions=expected_descriptions,
+            collision_pair_records=expected_source["robot_external_collision_pairs"],
+        )
+        if selected_source_fingerprint != validation.get("selected_source_fingerprint"):
+            raise RuntimeError("staged selected-source fingerprint is invalid")
+        formal_source_fingerprint = _staging_source_fingerprint(
+            task_name=formal_task_name,
+            variation=variation,
+            root_pose=formal_source["root_pose"],
+            low_dim_state=formal_source["low_dim_state"],
+            task_tree_state=formal_source["task_tree"],
+            semantic_signature=formal_source["task_semantics"],
+            descriptions=list(descriptions),
+            collision_pair_records=formal_source["robot_external_collision_pairs"],
+        )
+        self._staged_source_bound = True
+        return {
+            "required": True,
+            "matched": True,
+            "formal_source_bound": True,
+            "source_seed": source_seed,
+            "root": formal_reconstruction["root"],
+            "low_dim_state": formal_reconstruction["low_dim_state"],
+            "deterministic_source_reconstruction": formal_reconstruction,
+            "formal_sampling_or_restore": False,
+            "formal_task_validate_calls": 0,
+            "formal_waypoint_cache_state": "none",
+            "staging_source_certification_reused": True,
+            "fresh_task_generation_protocol_id": (
+                DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
+            ),
+            "selected_source_fresh_task_generation": (
+                selected_generation_evidence
+            ),
+            "formal_source_fresh_task_generation": formal_generation_evidence,
+            "task_name": formal_task_name,
+            "task_semantics_matched": formal_reconstruction["exact_matches"]["task_semantics"],
+            "task_tree_matched": formal_reconstruction["task_tree"]["matched"],
+            "task_tree_state_schema": TASK_TREE_STATE_SCHEMA,
+            "task_tree_match": formal_reconstruction["task_tree"],
+            "task_descriptions_matched": formal_reconstruction["exact_matches"]["descriptions"],
+            "robot_external_collision_pairs_matched": (
+                formal_reconstruction["exact_matches"]["robot_external_collision_pairs"]
+            ),
+            "selected_source_fingerprint": selected_source_fingerprint,
+            "formal_source_fingerprint": formal_source_fingerprint,
+            "motion_plan_fingerprint": self.motion_plan.fingerprint(),
+        }
+
     def _ensure_motion_plan(self, scene: Any) -> None:
         if self._motion_goal_pose is not None:
             return
@@ -1238,20 +4688,44 @@ class ScenarioController:
     def apply(self, task_environment: Any, *, step: int, horizon: int) -> dict[str, Any]:
         if horizon < 1:
             raise ValueError("horizon must be positive")
-        trigger = min(horizon - 1, int(round(self.trigger_fraction * (horizon - 1))))
+        if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+            raise ValueError("committed policy step must be a non-negative integer")
+        trigger = self.resolved_trigger_step(horizon)
+        protocol = self.protocol_metadata()
+        event_protocol = (
+            {
+                "protocol_id": protocol["protocol_id"],
+                "metadata_fingerprint": _canonical_json_fingerprint(protocol),
+            }
+            if self.motion_plan is not None
+            else protocol
+        )
         event: dict[str, Any] = {
             "kind": self.kind,
             "step": step,
             "trigger_step": trigger,
             "applied": False,
-            "motion_protocol": self.protocol_metadata(),
+            "clock_domain": "committed_policy_ticks",
+            "motion_protocol": event_protocol,
         }
         if self.kind == "static" or step < trigger:
             return event
+        if self.motion_plan is not None and not self._staged_source_bound:
+            raise RuntimeError(
+                "staged motion plan must be bound immediately after formal reset"
+            )
         if self.kind == "teleport_task" and self._teleported:
             return event
         if self.kind == "smooth_task_motion" and self._smooth_complete:
             return event
+        if self._last_motion_policy_step == step:
+            event["duplicate_policy_tick_suppressed"] = True
+            return event
+        if (
+            self._last_motion_policy_step is not None
+            and step < self._last_motion_policy_step
+        ):
+            raise RuntimeError("committed policy clock moved backwards")
         scene = getattr(task_environment, "_scene", None)
         if scene is None:
             raise RuntimeError("author RLBench TaskEnvironment._scene is unavailable")
@@ -1259,10 +4733,31 @@ class ScenarioController:
         root = task.boundary_root()
         before_state = _task_low_dim_state(task)
         before_root = np.asarray(root.get_pose(), dtype=np.float64)
+        formal_state_before = (
+            _formal_intervention_state_snapshot(scene)
+            if self.motion_plan is not None
+            else None
+        )
+        if self.motion_plan is not None and self._last_motion_policy_step is None:
+            source_match = _pose_reproducibility_metrics(
+                self._motion_source_pose,
+                before_root,
+                translation_tolerance_m=ROOT_COMMAND_TRANSLATION_TOLERANCE_M,
+                rotation_tolerance_rad=ROOT_COMMAND_ROTATION_TOLERANCE_RAD,
+            )
+            if not source_match["preserved"]:
+                raise RuntimeError(
+                    "formal boundary root changed before staged intervention"
+                )
         if self.kind == "teleport_task":
             self._ensure_motion_plan(scene)
             commanded_pose = np.asarray(self._motion_goal_pose, dtype=np.float64)
             root.set_pose(commanded_pose)
+            if formal_state_before is not None:
+                event["formal_intervention_state_audit"] = (
+                    _formal_intervention_state_audit(scene, formal_state_before)
+                )
+            self._last_motion_policy_step = step
             self._teleported = True
             event["applied"] = True
             after_state = _task_low_dim_state(task)
@@ -1282,14 +4777,17 @@ class ScenarioController:
                 and event["actual_root_motion"]
                 and event["commanded_root_pose_reached"]
             )
-            event["instance_preservation"] = dict(self._instance_preservation)
+            if self.motion_plan is not None:
+                event["motion_plan_reference"] = dict(self._instance_preservation)
+            else:
+                event["instance_preservation"] = dict(self._instance_preservation)
             return event
         if self.kind == "smooth_task_motion":
             self._ensure_motion_plan(scene)
-            self._smooth_calls += 1
-            fraction = min(self._smooth_calls / float(self.total_steps), 1.0)
-            self._smooth_complete = self._smooth_calls >= self.total_steps
-            if self._smooth_complete:
+            next_smooth_calls = self._smooth_calls + 1
+            next_smooth_complete = next_smooth_calls >= self.total_steps
+            fraction = min(next_smooth_calls / float(self.total_steps), 1.0)
+            if next_smooth_complete:
                 # Use the sampled value verbatim at the endpoint; interpolation
                 # roundoff must not leave the task fractionally short of goal.
                 next_pose = np.asarray(self._motion_goal_pose, dtype=np.float64)
@@ -1300,6 +4798,13 @@ class ScenarioController:
                     fraction,
                 )
             root.set_pose(next_pose)
+            if formal_state_before is not None:
+                event["formal_intervention_state_audit"] = (
+                    _formal_intervention_state_audit(scene, formal_state_before)
+                )
+            self._last_motion_policy_step = step
+            self._smooth_calls = next_smooth_calls
+            self._smooth_complete = next_smooth_complete
             after_state = _task_low_dim_state(task)
             after_root = np.asarray(root.get_pose(), dtype=np.float64)
             application = _root_application_metrics(
@@ -1321,9 +4826,12 @@ class ScenarioController:
                         and goal_reached["goal_root_pose_reached"]
                     ),
                     "endpoint_fraction": fraction,
-                    "instance_preservation": dict(self._instance_preservation),
                 }
             )
+            if self.motion_plan is not None:
+                event["motion_plan_reference"] = dict(self._instance_preservation)
+            else:
+                event["instance_preservation"] = dict(self._instance_preservation)
             event.update(
                 _intervention_change(
                     before_state,

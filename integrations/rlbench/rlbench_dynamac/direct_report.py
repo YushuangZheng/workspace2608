@@ -1,23 +1,29 @@
-"""Build the RLBench Table II comparison from four direct evaluation files."""
+"""Build the authenticated V3 RLBench Table II comparison."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
+from .direct_policy import TRAINING_MANIFEST_SCHEMA_V3, V3_ADAPTER_PROTOCOL
+from .eval_set import GLOBAL_EVAL_SEED_START
 from .paper_comparison import (
     EXPECTED_LOCAL_CONFIG,
     EXPECTED_MODEL_SCHEMA_VERSION,
     EXPECTED_SELECTION_SEMANTICS_ID,
     EXPECTED_TAPAS_COMMIT,
+    LocalRun,
+    _valid_v3_static_protocol,
     expected_evaluation_protocol_id,
 )
+from .v3_protocol import resolve_authenticated_v3_trigger
 
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v2" / "table_ii"
+DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v3" / "table_ii"
 TASKS = (
     ("bimanual_put_bottle_in_fridge", "StoreBottle", 0.82),
     ("bimanual_handover_item", "HandOver", 0.97),
@@ -26,7 +32,7 @@ TASKS = (
 )
 
 
-def _validate_v2_identity(payload: dict[str, object], task: str, path: Path) -> None:
+def _validate_v3_identity(payload: dict[str, object], task: str, path: Path) -> None:
     identity = payload.get("model_identity")
     if not isinstance(identity, dict):
         raise ValueError(f"result model identity is missing: {path}")
@@ -37,13 +43,22 @@ def _validate_v2_identity(payload: dict[str, object], task: str, path: Path) -> 
         and identity.get("selection_semantics_id")
         == EXPECTED_SELECTION_SEMANTICS_ID
         and identity.get("tapas_reference_commit") == EXPECTED_TAPAS_COMMIT
+        and identity.get("training_manifest_schema")
+        == TRAINING_MANIFEST_SCHEMA_V3
+        and identity.get("training_adapter_protocol") == V3_ADAPTER_PROTOCOL
+        and bool(identity.get("checkpoint_trigger_audit_fingerprint"))
         and bool(identity.get("left_fingerprint"))
         and bool(identity.get("right_fingerprint"))
         and payload.get("evaluation_protocol_id")
-        == expected_evaluation_protocol_id(task)
+        == expected_evaluation_protocol_id(task, release="v3")
     )
+    if valid:
+        try:
+            resolve_authenticated_v3_trigger(identity, task=task)
+        except (KeyError, RuntimeError, TypeError, ValueError):
+            valid = False
     if not valid:
-        raise ValueError(f"result v2 protocol/model identity mismatch: {path}")
+        raise ValueError(f"result v3 protocol/model identity mismatch: {path}")
 
 
 def result_path(
@@ -84,14 +99,42 @@ def load_rows(
         actual_identity = {key: payload.get(key) for key in expected_identity}
         if actual_identity != expected_identity:
             raise ValueError(f"result identity mismatch: {path}")
-        _validate_v2_identity(payload, task, path)
+        _validate_v3_identity(payload, task, path)
         episode_results = payload.get("results")
         if not isinstance(episode_results, list) or len(episode_results) != episodes:
             raise ValueError(f"result episode count mismatch: {path}")
-        local_rate = float(payload["success_rate"])
-        successes = int(payload["successes"])
+        raw_rate = payload.get("success_rate")
+        raw_successes = payload.get("successes")
+        if (
+            not isinstance(raw_rate, (int, float))
+            or isinstance(raw_rate, bool)
+            or not math.isfinite(float(raw_rate))
+            or not 0.0 <= float(raw_rate) <= 1.0
+            or not isinstance(raw_successes, int)
+            or isinstance(raw_successes, bool)
+            or not 0 <= raw_successes <= episodes
+        ):
+            raise ValueError(f"result success totals are invalid: {path}")
+        local_rate = float(raw_rate)
+        successes = raw_successes
         if successes != sum(bool(item.get("success")) for item in episode_results):
             raise ValueError(f"result success count mismatch: {path}")
+        if abs(local_rate - successes / float(episodes)) > 1.0e-9:
+            raise ValueError(f"result success rate mismatch: {path}")
+        run = LocalRun(
+            path=path,
+            task=task,
+            scenario="static",
+            seed=seed,
+            episodes=episodes,
+            horizon=horizon,
+            variation=int(payload.get("variation", 0)),
+            successes=successes,
+            success_rate=local_rate,
+            payload=payload,
+        )
+        if not _valid_v3_static_protocol(run):
+            raise ValueError(f"result v3 static protocol evidence mismatch: {path}")
         termination_reasons = Counter(str(item.get("reason")) for item in episode_results)
         rows.append(
             {
@@ -119,7 +162,9 @@ def markdown(rows: Sequence[dict[str, object]], *, seed: int) -> str:
         "# DynaMAC RLBench Table II Comparison",
         "",
         f"Local static evaluation seed: `{seed}`. Paper values are from "
-        "Table II of arXiv:2607.22119v1.",
+        "Table II of arXiv:2607.22119v1. Every local row is authenticated "
+        "against the frozen V3 model, evaluator, trigger-evidence, committed-clock, "
+        "and final-settling protocols.",
         "",
         "| Task | Paper DynaMAC | Local implementation | Difference |",
         "|---|---:|---:|---:|",
@@ -166,7 +211,7 @@ def markdown(rows: Sequence[dict[str, object]], *, seed: int) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=GLOBAL_EVAL_SEED_START)
     parser.add_argument("--episodes", type=int, default=200)
     parser.add_argument("--horizon", type=int, default=1000)
     parser.add_argument(

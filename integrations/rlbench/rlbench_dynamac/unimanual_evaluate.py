@@ -1,11 +1,10 @@
 """Evaluate DynaMAC on the static and dynamic Table I RLBench tasks.
 
 The simulator process is Python 3.8 compatible and delegates policy math to
-the current Python 3.10 worker. Dynamic movement samples and moves only the
-current task's ``boundary_root`` while preserving the initialized episode;
-it never reinitializes task objects or success conditions. Triggering at one
-third of the fitted policy duration and ten smooth-motion calls are explicit
-local defaults because the paper does not publish those task-wise values.
+the current Python 3.10 worker. V3 dynamic movement is preregistered per task,
+samples and waypoint-validates its A/B poses in a disposable staging process,
+and applies the immutable B pose in the formal rollout on the committed-policy
+clock. The formal rollout never samples or restores a task configuration tree.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ import hashlib
 import importlib
 import json
 import os
-import random
 import select
 import subprocess
 import tempfile
@@ -23,19 +21,37 @@ from pathlib import Path
 
 import numpy as np
 
+from .eval_set import (
+    FIXED_EVAL_EPISODES,
+    GLOBAL_EVAL_SEED_START,
+    fixed_environment_plans,
+    validate_formal_artifact_paths,
+)
 from .records import atomic_json, reserve_output
 from .runtime import (
+    DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+    DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
     DiscreteGripperProtocol,
     PrimaryActionRetryBudget,
     ScenarioController,
     execute_joint_target_control,
+    final_settling_metadata,
+    initialize_fresh_task_generation,
+    run_final_settling,
+    stage_scenario_motion_plan,
+    staged_motion_plan_batch,
+)
+from .v3_protocol import (
+    load_v3_intervention_protocol,
+    load_v3_motion_source_protocol,
+    resolve_authenticated_v3_trigger,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v2"
-DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v2"
+DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
+DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v3"
 DEFAULT_POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", "python3.10"))
 TASKS = {
     "stack_wine": ("rlbench.tasks.stack_wine", "StackWine"),
@@ -48,8 +64,10 @@ SCENARIOS = {
     "smooth": "smooth_task_motion",
     "teleport": "teleport_task",
 }
-PROTOCOL_LABEL = "local_table_i_v2"
-DYNAMIC_EPISODE_ACCOUNTING_SCHEMA = "trigger-eligibility-smooth-prefix-v1"
+PROTOCOL_LABEL = "local_table_i_v3"
+DYNAMIC_EPISODE_ACCOUNTING_SCHEMA = (
+    "planned-denominator-trigger-completion-conditional-success-v3"
+)
 POLICY_CLOCK_SEMANTICS_ID = (
     "policy-tick-transaction-commit-on-primary-action-success-v1"
 )
@@ -68,13 +86,54 @@ def evaluation_protocol_id(max_primary_action_attempts):
     return GRIPPER_PROTOCOL.extend_evaluation_protocol_id(
         "rlbench-absolute-ee-ik-jacobian-sampling5-timeout200-"
         "noop-retry-same-policy-tick-fresh-observation-"
-        f"primary-attempt{attempts}-v4"
+        f"primary-attempt{attempts}-committed-dynamic-clock-"
+        "final-settle-up-to-raw10-staged34-deterministic-source-reset1-"
+        "formal-root-state-audit2-contact-delta-diagnostic-v3"
     )
 
 
 EVALUATION_PROTOCOL_ID = evaluation_protocol_id(
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
 )
+
+
+def _validate_v3_protocol_budgets(args):
+    """Fail before staging if any frozen V3 budget was overridden."""
+
+    protocol = load_v3_intervention_protocol()
+    motion_protocol = load_v3_motion_source_protocol()
+    if args.smooth_steps != protocol["smooth_steps"]:
+        raise RuntimeError(
+            "V3 smooth-step budget differs from the frozen intervention protocol"
+        )
+    if args.intervention_attempts != motion_protocol["goal_sampling_max_attempts"]:
+        raise RuntimeError(
+            "V3 goal-sampling budget differs from the frozen motion-source protocol"
+        )
+    if args.final_settling_steps != protocol["final_settling_physics_steps"]:
+        raise RuntimeError(
+            "V3 final-settling budget differs from the frozen intervention protocol"
+        )
+    return protocol
+
+
+def _authenticated_v3_dynamic_trigger(args, worker):
+    """Resolve the frozen per-task trigger from checkpoint-backed evidence."""
+
+    protocol = _validate_v3_protocol_budgets(args)
+    authentication = resolve_authenticated_v3_trigger(
+        worker.model_identity,
+        task=args.task,
+    )
+    authenticated_step = authentication["trigger_step"]
+    requested_step = getattr(args, "trigger_step", None)
+    if requested_step is not None and requested_step != authenticated_step:
+        raise RuntimeError(
+            "command-line trigger step differs from authenticated V3 preregistration"
+        )
+    if authenticated_step >= worker.policy_steps:
+        raise RuntimeError("authenticated V3 trigger lies outside the loaded policy clock")
+    return protocol, authentication
 
 
 def _prepare_low_dim_headless_scene(environment_module, *, enabled):
@@ -345,6 +404,9 @@ def _finalize_episode_intervention_status(
                 "intervention_eligible": False,
                 "intervention_reached": False,
                 "pre_intervention_terminal": False,
+                "pre_intervention_terminal_outcome": None,
+                "dynamic_condition_exercised": False,
+                "dynamic_condition_unexercised": None,
                 "intervention_effective": None,
                 "intervention_complete": None,
             }
@@ -365,16 +427,17 @@ def _finalize_episode_intervention_status(
     if preterminal:
         if applied:
             raise RuntimeError("pre-trigger episode cannot contain an intervention")
-        if row.get("success") is True:
-            raise RuntimeError(
-                "dynamic episode succeeded before its intervention trigger"
-            )
         row.update(
             {
                 "trigger_step": trigger_step,
                 "intervention_eligible": False,
                 "intervention_reached": False,
                 "pre_intervention_terminal": True,
+                "pre_intervention_terminal_outcome": (
+                    "success" if row.get("success") is True else "failure"
+                ),
+                "dynamic_condition_exercised": False,
+                "dynamic_condition_unexercised": True,
                 "intervention_effective": None,
                 "intervention_complete": None,
             }
@@ -418,7 +481,11 @@ def _finalize_episode_intervention_status(
         complete = count == smooth_steps
         if not complete:
             final_event_step = trigger_step + count - 1
-            if row.get("steps") not in {final_event_step, final_event_step + 1}:
+            clock_at_terminal = row.get("committed_policy_steps", row.get("steps"))
+            if clock_at_terminal not in {
+                final_event_step,
+                final_event_step + 1,
+            }:
                 raise RuntimeError(
                     "smooth intervention stopped despite reaching its next motion tick"
                 )
@@ -431,6 +498,9 @@ def _finalize_episode_intervention_status(
             "intervention_eligible": True,
             "intervention_reached": True,
             "pre_intervention_terminal": False,
+            "pre_intervention_terminal_outcome": None,
+            "dynamic_condition_exercised": True,
+            "dynamic_condition_unexercised": False,
             "intervention_effective": True,
             "intervention_complete": complete,
         }
@@ -515,18 +585,30 @@ class PolicyProcess:
                 self.process.kill()
 
 
-def _run_episode(task_environment, worker, args, episode):
-    random.seed(args.seed + episode)
-    np.random.seed(args.seed + episode)
-    task_environment.set_variation(args.variation)
-    _, observation = task_environment.reset()
-    worker.request("reset", observation)
+def _run_episode(
+    task_environment,
+    worker,
+    args,
+    episode,
+    motion_plan=None,
+    *,
+    descriptions=None,
+    observation=None,
+    fresh_task_generation=None,
+):
+    if descriptions is None or observation is None or not isinstance(
+        fresh_task_generation,
+        dict,
+    ):
+        raise RuntimeError("formal episode requires fresh task-generation input")
     controller = ScenarioController(
         SCENARIOS[args.scenario],
         trigger_fraction=args.trigger_fraction,
+        trigger_step=getattr(args, "trigger_step", None),
         total_steps=args.smooth_steps,
         max_attempts=args.intervention_attempts,
         verify_instance=True,
+        motion_plan=motion_plan,
     )
     invalid_actions = 0
     retry_budget = PrimaryActionRetryBudget(
@@ -540,11 +622,116 @@ def _run_episode(task_environment, worker, args, episode):
     trigger_step = (
         None
         if args.scenario == "static"
-        else _trigger_control_step(worker.policy_steps, args.trigger_fraction)
+        else (
+            controller.resolved_trigger_step(worker.policy_steps)
+            if callable(getattr(controller, "resolved_trigger_step", None))
+            else _trigger_control_step(worker.policy_steps, args.trigger_fraction)
+        )
     )
     trigger_reached = False
+    committed_policy_steps = 0
+    last_scenario_policy_step = None
+    bind_source = getattr(controller, "bind_staged_source", None)
+    source_binding = (
+        bind_source(
+            task_environment,
+            episode_seed=args.seed + episode,
+            variation=args.variation,
+            descriptions=descriptions,
+        )
+        if callable(bind_source)
+        else {"required": False, "matched": None}
+    )
+    if motion_plan is not None:
+        observation = task_environment.get_observation()
+        source_binding["formal_observation_refreshed_after_binding"] = True
+    else:
+        source_binding["formal_observation_refreshed_after_binding"] = False
+    # Bind the formal source before handing its first observation to policy.
+    worker.request("reset", observation)
+    final_settling_steps = getattr(
+        args,
+        "final_settling_steps",
+        DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
+    )
 
     def finish(row):
+        row.setdefault(
+            "final_settling",
+            {
+                **final_settling_metadata(final_settling_steps),
+                "attempted": False,
+                "available": True,
+                "steps_executed": 0,
+                "first_terminal_step": None,
+                "stop_reason": "not_entered",
+                "success": False,
+                "terminate": False,
+            },
+        )
+        row.setdefault("committed_policy_steps", committed_policy_steps)
+        row.setdefault("dynamic_clock_steps", committed_policy_steps)
+        row.setdefault("staged_source_binding", source_binding)
+        row.setdefault("fresh_task_generation", fresh_task_generation)
+        row.setdefault(
+            "motion_plan_fingerprint",
+            motion_plan.fingerprint() if motion_plan is not None else None,
+        )
+        row.setdefault(
+            "motion_plan_protocol_id",
+            motion_plan.metadata()["protocol_id"] if motion_plan is not None else None,
+        )
+        row.setdefault(
+            "motion_plan_evidence",
+            (
+                {
+                    "plan_fingerprint": motion_plan.fingerprint(),
+                    "source_waypoint_validated": motion_plan.validation.get(
+                        "source_waypoint_validated"
+                    ),
+                    "goal_waypoint_validated": motion_plan.validation.get(
+                        "goal_waypoint_validated"
+                    ),
+                    "formal_rollout_sample_or_restore": motion_plan.validation.get(
+                        "formal_rollout_sample_or_restore"
+                    ),
+                    "formal_source_bound": source_binding.get(
+                        "formal_source_bound"
+                    ),
+                    "formal_task_name_bound": source_binding.get("task_name"),
+                    "formal_task_semantics_matched": source_binding.get(
+                        "task_semantics_matched"
+                    ),
+                    "formal_task_tree_matched": source_binding.get(
+                        "task_tree_matched"
+                    ),
+                    "formal_deterministic_source_reconstruction_passed": (
+                        source_binding.get(
+                            "deterministic_source_reconstruction", {}
+                        ).get("passed")
+                    ),
+                    "formal_task_validate_calls": source_binding.get(
+                        "formal_task_validate_calls"
+                    ),
+                    "formal_observation_refreshed_after_binding": source_binding.get(
+                        "formal_observation_refreshed_after_binding"
+                    ),
+                    "formal_robot_external_collision_pairs_matched": (
+                        source_binding.get(
+                            "robot_external_collision_pairs_matched"
+                        )
+                    ),
+                    "selected_source_fingerprint": source_binding.get(
+                        "selected_source_fingerprint"
+                    ),
+                    "formal_source_fingerprint": source_binding.get(
+                        "formal_source_fingerprint"
+                    ),
+                }
+                if motion_plan is not None
+                else None
+            ),
+        )
         return _finalize_episode_intervention_status(
             row,
             scenario=args.scenario,
@@ -555,36 +742,48 @@ def _run_episode(task_environment, worker, args, episode):
 
     from rlbench.backend.exceptions import InvalidActionError
 
-    for step in range(args.horizon):
-        if trigger_step is not None and step >= trigger_step:
-            trigger_reached = True
-        event = controller.apply(
-            task_environment,
-            step=step,
-            horizon=worker.policy_steps,
-        )
-        expected_controller_trigger = _trigger_control_step(
-            worker.policy_steps,
-            args.trigger_fraction,
-        )
-        if event.get("trigger_step") != expected_controller_trigger:
-            raise RuntimeError("scenario controller returned an inconsistent trigger")
-        if event.get("applied"):
-            if trigger_step is None or step < trigger_step:
-                raise RuntimeError("scenario controller applied before the trigger")
-            observation = task_environment.get_observation()
-            event["policy_observation_refreshed"] = True
-            events.append(event)
+    for control_step in range(args.horizon):
+        if last_scenario_policy_step != committed_policy_steps:
+            if trigger_step is not None and committed_policy_steps >= trigger_step:
+                trigger_reached = True
+            event = controller.apply(
+                task_environment,
+                step=committed_policy_steps,
+                horizon=worker.policy_steps,
+            )
+            last_scenario_policy_step = committed_policy_steps
+            if event.get("trigger_step") != trigger_step and args.scenario != "static":
+                raise RuntimeError("scenario controller returned an inconsistent trigger")
+            if event.get("applied"):
+                if trigger_step is None or committed_policy_steps < trigger_step:
+                    raise RuntimeError("scenario controller applied before the trigger")
+                observation = task_environment.get_observation()
+                event["policy_observation_refreshed"] = True
+                events.append(event)
         response = worker.request("act", observation)
         action = response.get("action")
         if action is None:
+            settling = run_final_settling(
+                task_environment,
+                physics_steps=final_settling_steps,
+            )
+            if settling["success"]:
+                reason = "success_after_final_settling"
+            elif settling["terminate"]:
+                reason = "terminate_during_final_settling"
+            elif settling["available"]:
+                reason = "policy_complete_after_final_settling"
+            else:
+                reason = "policy_complete"
             return finish({
                 "episode": episode,
-                "success": False,
-                "steps": step,
-                "reason": "policy_complete",
+                "success": bool(settling["success"]),
+                "steps": control_step,
+                "control_attempts": control_step,
+                "reason": reason,
                 "invalid_actions": invalid_actions,
                 "interventions": events,
+                "final_settling": settling,
             })
         transaction_id = response.get("transaction_id")
         if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
@@ -608,7 +807,8 @@ def _run_episode(task_environment, worker, args, episode):
                 return finish({
                     "episode": episode,
                     "success": False,
-                    "steps": step + 1,
+                    "steps": control_step + 1,
+                    "control_attempts": control_step + 1,
                     "reason": "noop_failed",
                     "invalid_actions": invalid_actions,
                     "interventions": events,
@@ -620,8 +820,10 @@ def _run_episode(task_environment, worker, args, episode):
             commit = worker.request("commit", transaction_id=transaction_id)
             retry_budget.record_success()
             policy_complete = bool(commit.get("complete"))
+            committed_policy_steps += 1
         else:
             policy_complete = False
+        settling = None
         if reward > 0.0:
             reason = "success"
         elif terminate:
@@ -629,13 +831,25 @@ def _run_episode(task_environment, worker, args, episode):
         elif retry_exhausted:
             reason = "primary_action_retry_exhausted"
         elif policy_complete:
-            reason = "policy_complete"
+            settling = run_final_settling(
+                task_environment,
+                physics_steps=final_settling_steps,
+            )
+            if settling["success"]:
+                reason = "success_after_final_settling"
+            elif settling["terminate"]:
+                reason = "terminate_during_final_settling"
+            elif settling["available"]:
+                reason = "policy_complete_after_final_settling"
+            else:
+                reason = "policy_complete"
         else:
             continue
         return finish({
             "episode": episode,
-            "success": bool(reward > 0.0),
-            "steps": step + 1,
+            "success": bool(reward > 0.0 or (settling or {}).get("success")),
+            "steps": control_step + 1,
+            "control_attempts": control_step + 1,
             "reason": reason,
             "invalid_actions": invalid_actions,
             **(
@@ -644,18 +858,116 @@ def _run_episode(task_environment, worker, args, episode):
                 else {}
             ),
             "interventions": events,
+            **({"final_settling": settling} if settling is not None else {}),
         })
     return finish({
         "episode": episode,
         "success": False,
         "steps": args.horizon,
+        "control_attempts": args.horizon,
         "reason": "horizon",
         "invalid_actions": invalid_actions,
         "interventions": events,
     })
 
 
+def _stage_motion_plan_batch(args, task_class):
+    """Generate A/B plans in one disposable, persistent staging process."""
+
+    import rlbench.environment as environment_module
+    from rlbench.observation_config import ObservationConfig
+
+    observation_config = ObservationConfig()
+    observation_config.set_all(False)
+    observation_config.gripper_open = True
+    observation_config.gripper_pose = True
+    observation_config.task_low_dim_state = True
+    environment = environment_module.Environment(
+        action_mode=_make_action_mode(),
+        obs_config=observation_config,
+        headless=args.headless,
+    )
+    restore_scene, _ = _prepare_low_dim_headless_scene(
+        environment_module,
+        enabled=args.headless,
+    )
+    launched = False
+    plans = []
+    try:
+        environment.launch()
+        launched = True
+        variation_count = task_class(
+            environment._pyrep,
+            environment._robot,
+        ).variation_count()
+        if args.variation >= variation_count:
+            raise ValueError("variation is outside task variation count")
+        for episode in range(args.episodes):
+            plans.append(
+                stage_scenario_motion_plan(
+                    environment,
+                    task_class,
+                    task_name=args.task,
+                    episode_seed=args.seed + episode,
+                    variation=args.variation,
+                    max_attempts=args.intervention_attempts,
+                )
+            )
+            print(
+                f"staged {args.task} A/B {episode + 1}/{args.episodes}",
+                flush=True,
+            )
+    finally:
+        try:
+            if launched:
+                environment.shutdown()
+        finally:
+            restore_scene()
+    payload = staged_motion_plan_batch(
+        task_name=args.task,
+        base_seed=args.seed,
+        variations=[args.variation] * args.episodes,
+        plans=plans,
+    )
+    atomic_json(args.stage_motion_plans_output, payload)
+    return payload
+
+
+def _motion_plan_cache_path(args):
+    if getattr(args, "motion_plans", None) is not None:
+        return Path(args.motion_plans)
+    return DEFAULT_RESULTS_DIR / "motion_plans" / (
+        f"{args.task}_variation{args.variation}_seed{args.seed}_n{args.episodes}_v34.json"
+    )
+
+
+def _load_fixed_motion_plans(args):
+    """Read one preregistered batch; formal runs never generate or repair it."""
+
+    if args.eval_set_id is None:
+        raise RuntimeError("formal evaluation requires --eval-set-id")
+    if args.motion_plans is not None:
+        raise RuntimeError("--motion-plans is not allowed for fixed formal evaluation")
+    if args.seed != GLOBAL_EVAL_SEED_START or args.episodes != FIXED_EVAL_EPISODES:
+        raise RuntimeError(
+            "formal evaluation seed/episode count differs from the fixed eval set"
+        )
+    manifest, selected = fixed_environment_plans(args.eval_set_id, args.task)
+    payload = selected["payload"]
+    plans = selected["plans"]
+    if payload.get("variation_schedule") != [args.variation] * args.episodes:
+        raise RuntimeError("fixed eval-set variation schedule does not match")
+    if any(
+        plan.validation.get("goal_sampling_max_attempts")
+        != args.intervention_attempts
+        for plan in plans
+    ):
+        raise RuntimeError("fixed eval-set goal-sampling budget is inconsistent")
+    return manifest, selected
+
+
 def evaluate(args):
+    validate_formal_artifact_paths(output=args.output, models_dir=args.models_dir)
     with reserve_output(args.output):
         return _evaluate_reserved(args)
 
@@ -664,8 +976,13 @@ def _evaluate_reserved(args):
     import rlbench.environment as environment_module
     from rlbench.observation_config import ObservationConfig
 
+    # Reject noncanonical budgets before a staging child can create a cache.
+    _validate_v3_protocol_budgets(args)
     module_name, class_name = TASKS[args.task]
     task_class = getattr(importlib.import_module(module_name), class_name)
+    eval_set, selected_batch = _load_fixed_motion_plans(args)
+    motion_plan_payload = selected_batch["payload"]
+    motion_plans = selected_batch["plans"]
     observation_config = ObservationConfig()
     observation_config.set_all(False)
     observation_config.gripper_open = True
@@ -691,13 +1008,53 @@ def _evaluate_reserved(args):
             args.models_dir,
             timeout=args.policy_timeout,
         )
+        intervention_registry, trigger_authentication = (
+            _authenticated_v3_dynamic_trigger(args, worker)
+        )
+        args.trigger_step = (
+            None
+            if args.scenario == "static"
+            else trigger_authentication["trigger_step"]
+        )
         environment.launch()
         launched = True
-        task_environment = environment.get_task(task_class)
-        if args.variation >= task_environment.variation_count():
+        variation_count = task_class(
+            environment._pyrep,
+            environment._robot,
+        ).variation_count()
+        if args.variation >= variation_count:
             raise ValueError("variation is outside task variation count")
         for episode in range(args.episodes):
-            result = _run_episode(task_environment, worker, args, episode)
+            episode_motion_plan = (
+                motion_plans[episode]
+            )
+            reset_seed = (
+                episode_motion_plan.validation["source_seed"]
+                if episode_motion_plan is not None
+                else args.seed + episode
+            )
+            (
+                task_environment,
+                descriptions,
+                observation,
+                fresh_task_generation,
+            ) = initialize_fresh_task_generation(
+                environment,
+                task_class,
+                episode_seed=reset_seed,
+                variation=args.variation,
+                verify_instance=False,
+            )
+            result = _run_episode(
+                task_environment,
+                worker,
+                args,
+                episode,
+                motion_plan=episode_motion_plan,
+                descriptions=descriptions,
+                observation=observation,
+                fresh_task_generation=fresh_task_generation,
+            )
             results.append(result)
             successes = sum(item["success"] for item in results)
             print(
@@ -725,6 +1082,12 @@ def _evaluate_reserved(args):
     preterminal_by_episode = [
         item["pre_intervention_terminal"] is True for item in results
     ]
+    complete_by_episode = [
+        item["intervention_complete"] is True for item in results
+    ]
+    complete_results = [
+        item for item in results if item["intervention_complete"] is True
+    ]
     eligible_effective = [
         item["intervention_effective"] is True
         for item in results
@@ -741,22 +1104,40 @@ def _evaluate_reserved(args):
     motion_protocol = ScenarioController(
         SCENARIOS[args.scenario],
         trigger_fraction=args.trigger_fraction,
+        trigger_step=getattr(args, "trigger_step", None),
         total_steps=args.smooth_steps,
         max_attempts=args.intervention_attempts,
+        motion_plan=(motion_plans[0] if motion_plans else None),
     ).protocol_metadata()
     summary = {
-        "schema": "dynamac-table-i-evaluation-v2",
+        "schema": "dynamac-table-i-evaluation-v3",
         "protocol_label": PROTOCOL_LABEL,
         "paper_comparable": False,
         "task": args.task,
         "scenario": args.scenario,
         "episodes": args.episodes,
+        "episodes_requested": args.episodes,
+        "episodes_completed": len(results),
         "seed": args.seed,
         "variation": args.variation,
+        "variation_count": variation_count,
+        "variation_schedule": [args.variation] * args.episodes,
         "horizon": args.horizon,
         "evaluation_protocol_id": evaluation_protocol_id(
             args.max_primary_action_attempts
         ),
+        "fixed_eval_set": {
+            "evaluation_set_id": eval_set["payload"]["evaluation_set_id"],
+            "manifest_sha256": eval_set["manifest_sha256"],
+            "spec_sha256": eval_set["payload"]["spec"]["sha256"],
+            "selected_batch_sha256": eval_set["payload"][
+                "environment_plan_batches"
+            ][args.task]["sha256"],
+            "selected_batch_fingerprint": motion_plan_payload[
+                "batch_fingerprint"
+            ],
+            "formal_access": "canonical_id_read_only_no_generation",
+        },
         "controller": {
             "command": "absolute_world_end_effector_pose",
             "primary_ik": "jacobian",
@@ -773,6 +1154,11 @@ def _evaluate_reserved(args):
             ).metadata(),
             "policy_clock_rollback": True,
             "policy_clock_semantics_id": worker.policy_clock_semantics_id,
+            "dynamic_clock_semantics": "advance_only_after_policy_commit",
+            "formal_episode_initialization": DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
+            "final_settling": final_settling_metadata(
+                args.final_settling_steps
+            ),
             "gripper_protocol": GRIPPER_PROTOCOL.metadata(),
             "scene_launch": scene_launch,
             "rlbench_commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
@@ -781,6 +1167,36 @@ def _evaluate_reserved(args):
         "model_identity": worker.model_identity,
         "successes": successes,
         "success_rate": successes / float(args.episodes),
+        "episode_accounting": {
+            "schema": DYNAMIC_EPISODE_ACCOUNTING_SCHEMA,
+            "planned_episode_denominator": args.episodes,
+            "completed_episode_count": len(results),
+            "successes_in_planned_denominator": successes,
+            "success_rate_all_planned_episodes": successes / float(args.episodes),
+            "trigger_reached_count": sum(
+                item["intervention_reached"] is True for item in results
+            ),
+            "intervention_complete_count": sum(complete_by_episode),
+            "dynamic_condition_unexercised_count": sum(
+                item.get("dynamic_condition_unexercised") is True
+                for item in results
+            ),
+            "pre_trigger_success_count": sum(
+                item.get("pre_intervention_terminal") is True
+                and item.get("success") is True
+                for item in results
+            ),
+            "complete_intervention_subset_count": len(complete_results),
+            "successes_in_complete_intervention_subset": sum(
+                int(item["success"]) for item in complete_results
+            ),
+            "success_rate_in_complete_intervention_subset": (
+                sum(int(item["success"]) for item in complete_results)
+                / float(len(complete_results))
+                if complete_results
+                else None
+            ),
+        },
         "ik_execution_diagnostics": action_mode.arm_action_mode.diagnostics(),
         "gripper_protocol": GRIPPER_PROTOCOL.metadata(),
         "protocol": {
@@ -789,15 +1205,15 @@ def _evaluate_reserved(args):
             "comparison_scope": "diagnostic_against_paper_targets_not_protocol_exact",
             "dynamic_method": SCENARIOS[args.scenario],
             "motion_protocol": motion_protocol,
-            "trigger_fraction_of_nominal_policy_length": args.trigger_fraction,
+            "legacy_trigger_fraction_ignored": args.trigger_fraction,
             "trigger_reference_domain": (
-                "evaluator_control_ticks_including_failed_primary_actions"
+                "successfully_committed_policy_ticks"
             ),
             "fitted_policy_steps": worker.policy_steps,
-            "trigger_control_step": _trigger_control_step(
-                worker.policy_steps,
-                args.trigger_fraction,
-            ),
+            "trigger_policy_step": args.trigger_step,
+            "trigger_authentication": trigger_authentication,
+            "intervention_registry_schema": intervention_registry["schema"],
+            "intervention_registry_fingerprint": intervention_registry["fingerprint"],
             "smooth_motion_calls": args.smooth_steps,
             "intervention_max_attempts": args.intervention_attempts,
             "dynamic_episode_accounting_schema": (
@@ -807,15 +1223,36 @@ def _evaluate_reserved(args):
                 "retain_failure_with_null_intervention_effectiveness"
             ),
             "pre_intervention_success_policy": (
-                "fail_closed_unexercised_dynamic_condition"
+                "retain_success_in_planned_denominator_with_unexercised_condition"
             ),
             "smooth_terminal_progress_policy": (
                 "strict_effective_prefix_until_episode_terminal"
             ),
             "episodes_intervention_eligible": sum(eligible_by_episode),
             "episodes_pre_intervention_terminal": sum(preterminal_by_episode),
+            "episodes_dynamic_condition_unexercised": sum(
+                item.get("dynamic_condition_unexercised") is True
+                for item in results
+            ),
+            "pre_trigger_successes": sum(
+                item.get("pre_intervention_terminal") is True
+                and item.get("success") is True
+                for item in results
+            ),
+            "planned_episode_denominator": args.episodes,
+            "completed_episode_count": len(results),
             "episodes_with_intervention": sum(applied_by_episode),
             "episodes_with_effective_intervention": sum(effective_by_episode),
+            "episodes_with_complete_intervention": sum(complete_by_episode),
+            "successes_in_complete_intervention_subset": sum(
+                int(item["success"]) for item in complete_results
+            ),
+            "success_rate_in_complete_intervention_subset": (
+                sum(int(item["success"]) for item in complete_results)
+                / float(len(complete_results))
+                if complete_results
+                else None
+            ),
             "all_episodes_intervened": all(applied_by_episode),
             "all_interventions_effective": (
                 all(
@@ -834,15 +1271,67 @@ def _evaluate_reserved(args):
                 if args.scenario == "static"
                 else all(covered_by_episode)
             ),
-            "source": "project preserve-initialized-episode boundary-root motion",
+            "source": (
+                "frozen V3 task-specific trigger plus independently staged "
+                "waypoint-validated boundary-root motion"
+            ),
+            "staged_motion_plan_cache": (
+                {
+                    "schema": motion_plan_payload["schema"],
+                    "protocol_id": motion_plan_payload["protocol_id"],
+                    "batch_fingerprint": motion_plan_payload["batch_fingerprint"],
+                    "plan_fingerprints": [plan.fingerprint() for plan in motion_plans],
+                    "scenario_independent": True,
+                    "seed_domain": motion_plan_payload["seed_domain"],
+                    "goal_sampling_max_attempts": args.intervention_attempts,
+                    "source_selection_max_attempts": 20,
+                    "motion_source_protocol_schema": motion_plans[0].validation[
+                        "motion_source_protocol_schema"
+                    ],
+                    "motion_source_protocol_fingerprint": motion_plans[0].validation[
+                        "motion_source_protocol_fingerprint"
+                    ],
+                    "formal_dynamic_reset_verify_instance": False,
+                    "cache_key": {
+                        "task": args.task,
+                        "base_seed": args.seed,
+                        "episodes": args.episodes,
+                        "variation_schedule": motion_plan_payload[
+                            "variation_schedule"
+                        ],
+                    },
+                    "formal_access": "canonical_eval_set_read_only",
+                    "staging_shutdown_before_formal_launch": True,
+                    "fresh_task_generation_per_formal_episode": True,
+                }
+                if motion_plan_payload is not None
+                else None
+            ),
             "claim_boundary": (
                 "The live five-demonstration cohort, fixed variation, segmentation, "
-                "movement timing, and dynamic magnitude are explicit local defaults. "
-                "The paper's exact Table I datasets and task-wise DynaBench protocol "
-                "are unavailable, so these results are not paper-comparable."
+                "and dynamic displacement distribution remain explicit local choices. "
+                "V3 trigger ticks are preregistered and checkpoint-authenticated, but "
+                "the paper's exact Table I datasets and full DynaBench protocol remain "
+                "unavailable, so these results are not paper-comparable."
             ),
         },
         "results": results,
+        "fresh_task_generation": {
+            "required_per_formal_episode": True,
+            "all_episodes_recorded": all(
+                isinstance(item.get("fresh_task_generation"), dict)
+                for item in results
+            ),
+            "evidence": [item["fresh_task_generation"] for item in results],
+        },
+        "final_settling_protocol": final_settling_metadata(
+            args.final_settling_steps
+        ),
+        "motion_plan_batch_fingerprint": (
+            motion_plan_payload["batch_fingerprint"]
+            if motion_plan_payload is not None
+            else None
+        ),
     }
     atomic_json(args.output, summary)
     print(f"wrote {args.output}")
@@ -856,12 +1345,49 @@ def build_parser():
     parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
     parser.add_argument("--policy-python", type=Path, default=DEFAULT_POLICY_PYTHON)
     parser.add_argument("--episodes", type=int, default=200)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=GLOBAL_EVAL_SEED_START)
     parser.add_argument("--variation", type=int, default=0)
     parser.add_argument("--horizon", type=int, default=1000)
-    parser.add_argument("--trigger-fraction", type=float, default=1.0 / 3.0)
+    parser.add_argument(
+        "--trigger-fraction",
+        type=float,
+        default=1.0 / 3.0,
+        help=(
+            "Legacy audit value only; V3 uses the authenticated task-specific "
+            "absolute trigger tick."
+        ),
+    )
+    parser.add_argument(
+        "--trigger-step",
+        type=int,
+        default=None,
+        help="Explicit committed-policy trigger tick; V3 task profiles set this.",
+    )
     parser.add_argument("--smooth-steps", type=int, default=10)
-    parser.add_argument("--intervention-attempts", type=int, default=20)
+    parser.add_argument("--intervention-attempts", type=int, default=100)
+    parser.add_argument(
+        "--final-settling-steps",
+        type=int,
+        default=DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
+    )
+    parser.add_argument("--motion-plans", type=Path, default=None)
+    parser.add_argument(
+        "--eval-set-id",
+        default=None,
+        help="Canonical immutable evaluation-set ID (required for formal runs).",
+    )
+    parser.add_argument(
+        "--motion-plan-wait-timeout",
+        type=float,
+        default=86_400.0,
+        help="Seconds to wait when another evaluator is staging the shared cache.",
+    )
+    parser.add_argument(
+        "--stage-motion-plans-output",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--max-primary-action-attempts",
         type=int,
@@ -879,15 +1405,33 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.stage_motion_plans_output is not None:
+        _validate_v3_protocol_budgets(args)
+        if (
+            args.episodes < 1
+            or args.seed < 0
+            or args.variation < 0
+            or args.intervention_attempts < 1
+        ):
+            raise ValueError("staging episode parameters are invalid")
+        module_name, class_name = TASKS[args.task]
+        task_class = getattr(importlib.import_module(module_name), class_name)
+        with reserve_output(args.stage_motion_plans_output):
+            _stage_motion_plan_batch(args, task_class)
+        return 0
     if (
         args.episodes < 1
         or args.horizon < 1
         or args.smooth_steps < 1
         or args.max_primary_action_attempts < 1
+        or args.intervention_attempts < 1
+        or args.final_settling_steps < 0
     ):
         raise ValueError("episodes, horizon, and smooth steps must be positive")
     if args.seed < 0 or args.variation < 0:
         raise ValueError("seed and variation must be non-negative")
+    if args.motion_plan_wait_timeout <= 0.0:
+        raise ValueError("motion-plan wait timeout must be positive")
     if not 0.0 <= args.trigger_fraction <= 1.0:
         raise ValueError("trigger fraction must lie in [0, 1]")
     if args.output is None:

@@ -25,13 +25,16 @@ are intentionally omitted.
    especially need the task-specific velocity/gripper thresholds, stop
    clustering, endpoint exclusion and event-merging settings, and whether
    LiftTray and SweepDust used independent segmentation or the shared union. Our
-   HandOver model uses the six shared boundaries shown in your plot but still
-   reaches only 8/200, so its final selected-frame mask or compact configuration
-   would also help distinguish a cohort mismatch from an implementation
-   mismatch. For WipeDesk, was the complete back-and-forth wipe retained as one
-   skill, or were direction reversals separate boundaries? For SweepDust, an
-   aligned gripper trace would be particularly useful because our remaining error
-   is concentrated around contact alignment.
+   fixed V3 HandOver cohort reaches 171/200 static, 170/200 under the left-arm
+   coordination perturbation, 10/200 under the right-arm perturbation, and
+   167/200 under the environment teleport. SweepDust reaches 199/200 static but
+   39/200 under the environment teleport. Because the reported perturbation
+   protocol is unpublished, these dynamic values are non-comparable
+   diagnostics; final selected-frame masks and compact configurations would
+   help distinguish protocol/cohort differences from implementation effects.
+   For WipeDesk, was the complete back-and-forth wipe retained as one skill, or
+   were direction reversals separate boundaries? An aligned SweepDust gripper
+   trace would also help verify the contact-stage alignment.
 
 ## Important numerical details
 
@@ -43,18 +46,18 @@ are intentionally omitted.
    `tau_omega = 0.5` used for every task? Did
    any skill produce no frame under the strict condition
    `omega(f) > tau_omega`; if so, what did the implementation do? Did the
-   reported models use temporal-variance filtering before promoting the link
-   mask to skill level, and, if so, with what settings?
+   reported models use temporal-variance filtering? After the raw per-time-step
+   Equation (5) mask was computed, did the reported policy use a constant
+   skill-majority mask, use a strict majority only to enable the raw mask, or
+   read the raw mask directly at every time step? Local V3 freezes the second
+   interpretation and keeps temporal-variance filtering disabled.
 
 ## Exact-reproduction details
 
-4. **Independent-arm timing and controller configuration**
+4. **Controller and failed-action configuration**
 
-   When independently segmented arms had different mean skill durations, did
-   each arm retain its own schedule on the shared continuous clock, with the
-   earlier-completing arm holding its final command, or were the schedules
-   resynchronized? Which exact absolute-EE action-mode constructor, collision
-   settings, IK fallback parameters, and gripper actuation velocity were used?
+   Which exact absolute-EE action-mode constructor, collision settings, IK
+   fallback parameters, and gripper actuation velocity were used?
    In particular, did evaluation use the demonstration generator's `0.04`
    gripper velocity or the public discrete action mode's `0.2`? When a primary
    command raised `InvalidAction`, did the reported evaluator terminate,
@@ -64,7 +67,9 @@ are intentionally omitted.
    established, did the fixed skill schedule continue, or was there any
    contact-conditioned phase hold or semantic re-grasp? Our local limit of
    three attempts applies only to `InvalidAction`; it is not assumed to be a
-   DynaMAC grasp-retry mechanism.
+   DynaMAC grasp-retry mechanism. Did the reported evaluator include any final
+   physics settling after both policy arms completed, and if so, for how many
+   steps and with what terminal checks?
 
 5. **Experiment manifest**
 
