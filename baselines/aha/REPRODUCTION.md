@@ -39,6 +39,8 @@ files in the ignored RLBench checkout with the versions bundled by AHA:
 The environment lives at `/data/yukun/miniconda3/envs/dynamac-aha` and uses
 Python 3.10, PyRep 4.1.0.3, RLBench 1.2.0, and FailGen 0.0.1.
 
+From `/data/yukun/essay2608/baselines/aha`:
+
 ```bash
 source /data/yukun/miniconda3/etc/profile.d/conda.sh
 conda create -n dynamac-aha python=3.10 pip -y

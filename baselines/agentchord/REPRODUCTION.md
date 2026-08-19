@@ -23,6 +23,8 @@ measurements. No AgentChord success-rate number has been produced locally.
 The environment lives under the yukun Conda installation:
 `/data/yukun/miniconda3/envs/dynamac-agentchord`.
 
+From `/data/yukun/essay2608/baselines/agentchord`:
+
 ```bash
 source /data/yukun/miniconda3/etc/profile.d/conda.sh
 conda create -n dynamac-agentchord python=3.10 pip -y

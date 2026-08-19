@@ -1,6 +1,7 @@
 {
   "schema": "dynamac-baseline-preflight-v1",
   "checked_at": "2026-08-19T22:54:00+08:00",
+  "snapshot_scope": "Preflight state at checked_at; this file is not a live evaluation-status tracker.",
   "source_commit_matches_manifest": true,
   "checkpoint_index_and_safetensors": "pass",
   "checkpoint_shards": 4,
@@ -20,5 +21,5 @@
     "wrist_camera_present": true,
     "reset_set_init_state_and_one_dummy_step": "pass"
   },
-  "quantitative_evaluation": "waiting_for_idle_gpus"
+  "quantitative_evaluation_status_at_preflight": "not_started_waiting_for_idle_gpus"
 }

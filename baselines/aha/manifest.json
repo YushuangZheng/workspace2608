@@ -8,6 +8,18 @@
   "paper_title": "AHA: A Vision-Language-Model for Detecting and Reasoning Over Failures in Robotic Manipulation",
   "paper_url": "https://openreview.net/forum?id=JVkdSi7Ekg",
   "local_paper": "../../papers/AHA.pdf",
+  "simulator_dependencies": {
+    "pyrep": {
+      "url": "https://github.com/stepjam/PyRep.git",
+      "commit": "8f420be8064b1970aae18a9cfbc978dfb15747ef"
+    },
+    "rlbench": {
+      "url": "https://github.com/MohitShridhar/RLBench.git",
+      "resolved_from_branch": "peract",
+      "commit": "ad991951bc53e4f3b73b803a75cf4b7d55295cf7",
+      "post_checkout_adapter": "The official AHA update.py replaces six RLBench files; see REPRODUCTION.md."
+    }
+  },
   "official_checkpoint": null,
   "first_target": "Optional one-task FailGen smoke test",
   "reproduction_boundary": "Paper-level evaluation blocked by missing released checkpoint, data, and inference path; full training exceeds compute budget."

@@ -2,8 +2,8 @@
 
 The official release is fixed at commit `0d39c0591566ddaf997be5822f3dead8e08501aa`.
 AHA is retained primarily as a failure-generation and evaluation-protocol
-reference. A one-task FailGen smoke test may be run after the checkpoint-based
-baselines are complete.
+reference. Its bounded one-task FailGen smoke test has been completed
+independently of the checkpoint-based baseline evaluations.
 
 An exact paper reproduction is currently blocked upstream: the final AHA model
 checkpoint, AHA train/test dataset download, and inference program that creates
