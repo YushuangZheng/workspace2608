@@ -1,0 +1,29 @@
+{
+  "schema": "racer-paper-table-i-v1",
+  "paper": "RACER: Rich Language-Guided Failure Recovery Policies for Imitation Learning",
+  "paper_url": "https://arxiv.org/abs/2409.14674",
+  "source": "Table I",
+  "metric": "success_rate_percent",
+  "aggregation": "mean_and_standard_deviation_over_5_random_seeds",
+  "episodes_per_task_per_seed": 25,
+  "model": "RACER (Ours), rich instructions, without human intervention",
+  "tasks": {
+    "place_cups": {
+      "display_name": "Place Cups",
+      "mean": 6.4,
+      "std": 4.1
+    },
+    "place_wine_at_rack_location": {
+      "display_name": "Place Wine",
+      "mean": 98.4,
+      "std": 2.0
+    },
+    "sweep_to_dustpan_of_size": {
+      "display_name": "Sweep to Dustpan",
+      "mean": 84.0,
+      "std": 0.0
+    }
+  },
+  "three_task_unweighted_mean": 62.93333333333333,
+  "comparison_warning": "The local release contains one actor checkpoint, so its 25-episode task rates are not a five-seed estimate and must not be reported as an exact reproduction of the paper mean and standard deviation."
+}

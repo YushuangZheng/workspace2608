@@ -1,0 +1,17 @@
+{
+  "schema": "dynamac-baseline-source-v1",
+  "method": "Guardian-FailCoT",
+  "upstream_url": "https://github.com/paulpacaud/Guardian-FailCot.git",
+  "upstream_commit": "4a37cee9cf186fa7bdca2155ce7c25d9e1e08e38",
+  "upstream_branch": "main",
+  "code_license": "MIT",
+  "paper_title": "Scaling Cross-Environment Failure Reasoning Data for Vision-Language Robotic Manipulation",
+  "paper_url": "https://arxiv.org/abs/2512.01946",
+  "local_paper": "../../papers/Guardian-FailCoT.pdf",
+  "official_checkpoint": "paulpacaud/guardian-thinking@ebad73bb2171d98be883bed614bde01f9386a8a9",
+  "checkpoint_license": "Apache-2.0",
+  "official_ood_dataset": "paulpacaud/Guardian-FailCot-OOD-datasets",
+  "official_ood_dataset_revision": "bd2b24224e4da833a8d42ca694d839622e54bb48",
+  "first_target": "Paper Table II OOD checkpoint evaluation",
+  "reproduction_boundary": "Direct non-SLURM launch of the unmodified official evaluator."
+}

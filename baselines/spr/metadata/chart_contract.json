@@ -1,0 +1,30 @@
+{
+  "schema": "dynamac-chart-contract-v1",
+  "analytical_question": "How does the released SPR libero_10 checkpoint perform across the ten LIBERO-Long tasks, and is its 500-episode aggregate consistent with the paper's 82.8% SPR point value?",
+  "takeaway_policy": "Do not state a directional takeaway until all 500 episodes pass independent validation; the chart should expose task variation, the aggregate Wilson interval, and the paper benchmark.",
+  "family": "Uncertainty & Benchmark",
+  "variant": "horizontal task dot plot plus aggregate interval and vertical benchmark reference",
+  "data_sufficiency": {
+    "expected_rows": 10,
+    "episodes_per_task": 50,
+    "aggregate_episodes": 500,
+    "fallback": "Refuse to render if any task has fewer or more than 50 independently validated episodes."
+  },
+  "renderer": "static Matplotlib",
+  "palette_policy": "single-root preferred",
+  "colors": {
+    "task_points": "#4C78A8",
+    "aggregate_point_and_interval": "#1F4E79",
+    "paper_reference": "#555555",
+    "grid": "#D9DEE5",
+    "text": "#202124"
+  },
+  "non_color_distinction": "Circular task markers, a diamond aggregate marker with a horizontal Wilson interval, and a dashed vertical paper reference line with direct labels.",
+  "scale": "0-100% linear x-axis",
+  "outputs": [
+    "baselines/spr/results/libero10_full/spr_libero10_task_rates.png",
+    "baselines/spr/results/libero10_full/spr_libero10_task_rates.svg"
+  ],
+  "final_qa": "Open the final PNG and inspect labels, interval caps, benchmark placement, clipping, and legibility. Do not generate or ship the figure before the 500-episode validator passes.",
+  "comparison_scope": "Use only the paper's separately trained SPR/Ours LIBERO-Long value of 82.8%. Exclude Ours* 85.4%, because the public libero_10 checkpoint is not identified as the joint all-suite checkpoint."
+}

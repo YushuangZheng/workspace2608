@@ -1,0 +1,15 @@
+{
+  "schema": "dynamac-baseline-source-v1",
+  "method": "SPR",
+  "upstream_url": "https://github.com/TingjunDai/SPRVLA.git",
+  "upstream_commit": "d57e4b81ebdcacea574b68be29d61ba04cdc7051",
+  "upstream_branch": "main",
+  "code_license": "Apache-2.0",
+  "paper_title": "See, Plan, Rewind: Progress-Aware Vision-Language-Action Models for Robust Robotic Manipulation",
+  "paper_url": "https://arxiv.org/abs/2603.09292",
+  "local_paper": "../../papers/SPR.pdf",
+  "official_checkpoint": "SPRVLA/libero_10@b5838d84d462abd41a45c2b3e7258fa11ec0ed0f",
+  "checkpoint_license": "MIT",
+  "first_target": "LIBERO-Long one task, then ten tasks",
+  "reproduction_boundary": "Checkpoint evaluation only; full training data and recipe are unavailable."
+}

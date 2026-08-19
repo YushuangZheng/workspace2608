@@ -1,0 +1,25 @@
+{
+  "schema": "dynamac-baseline-checkpoint-v1",
+  "repository": "SPRVLA/libero_10",
+  "revision": "b5838d84d462abd41a45c2b3e7258fa11ec0ed0f",
+  "local_path": "../checkpoints/libero_10",
+  "parser_tokenizer_dependency": {
+    "repository": "Qwen/Qwen2-7B",
+    "revision": "453ed1575b739b5b03ce3758b23befdb0967f40e",
+    "reason": "The released SPRVLAParser hard-codes this tokenizer instead of using the tokenizer bundled with the checkpoint."
+  },
+  "index": {
+    "file": "model.safetensors.index.json",
+    "declared_tensor_count": 614,
+    "declared_total_size_bytes": 16238835616,
+    "unique_shards": 4,
+    "missing_shards": []
+  },
+  "safetensors_validation": "All four shards opened successfully and exposed 614 indexed tensor keys.",
+  "sha256": {
+    "model-00001-of-00004.safetensors": "3018e03c3aa447a7ea7f5ae9f2c040adb53bbad26ef2a8c09193a94a51cfd0e3",
+    "model-00002-of-00004.safetensors": "cbd9341c4a3383b0706f3b4d5568a872ea7ad4b509ab7d97e8fd9817bfc71893",
+    "model-00003-of-00004.safetensors": "b3020e090f89840fff4c20282d1b3fd49a56c5a7bde83e3d3a5a893af934f421",
+    "model-00004-of-00004.safetensors": "cf7825558672c3486fdf9b422a40e2b08986616c9926ab464df14c86e9e803bf"
+  }
+}

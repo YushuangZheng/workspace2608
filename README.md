@@ -117,6 +117,12 @@ environment intervention implementation.
   tests.
 - [`integrations/rlbench/`](integrations/rlbench/): pinned-source metadata,
   RLBench adapters, task profiles, training/evaluation commands, and tests.
+- [`baselines/`](baselines/): isolated, upstream-pinned reproductions of
+  FAIL-Detect, RACER, SPR, AgentChord, Guardian/FailCoT, and AHA. Only
+  provenance, environment manifests, wrapper scripts, and comparison metadata
+  are tracked; upstream sources and generated artifacts remain local.
+- [`papers/`](papers/): local reference-paper library. Its tracked index records
+  canonical sources and checksums, while PDF files remain excluded from Git.
 
 ## Local releases and artifacts
 

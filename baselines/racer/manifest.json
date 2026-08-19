@@ -1,0 +1,99 @@
+{
+  "schema": "dynamac-baseline-source-v2",
+  "method": "RACER",
+  "upstream_url": "https://github.com/sled-group/RACER.git",
+  "upstream_commit": "df8cb2beec2e2061392ef0c4be93bda916dfd51e",
+  "upstream_branch": "main",
+  "code_license": "NOASSERTION",
+  "paper_title": "RACER: Rich Language-Guided Failure Recovery Policies for Imitation Learning",
+  "paper_url": "https://arxiv.org/abs/2409.14674",
+  "local_paper": "../../papers/RACER.pdf",
+  "open_llava": {
+    "url": "https://github.com/rich-language-failure-recovery/Open-LLaVA-NeXT.git",
+    "branch": "racer_llava",
+    "commit": "cff008a5cc15d153e89314fe778251a2a8fbd271"
+  },
+  "submodules": {
+    "libs/PyRep": "231a1ac6b0a179cff53c1d403d379260b9f05f2f",
+    "libs/RLbench": "84cd2691742001b1ad66ee195c6e95aa42d1248a",
+    "libs/YARR": "d17ed930d2f0768cd89d82aafef81822fd056109",
+    "libs/peract_colab/peract_colab": "3d1e573aa688e5989a82e3c5ac93d83f0f37accb",
+    "racer/peract": "5c2988edb961d67d7a921cbbc638f69947debff8"
+  },
+  "huggingface_artifacts": {
+    "actor": {
+      "repo": "Yinpei/racer-visuomotor-policy-rich",
+      "revision": "3d387f2627fac0c3988905cb70850afd873124f0",
+      "file": "model_17.pth",
+      "bytes": 147540672
+    },
+    "rich_llava_lora": {
+      "repo": "Yinpei/racer-llava-llama3-lora-rich",
+      "revision": "fa2f84f609d1c0861e3b7b7a7544c4ae5406f920",
+      "files": {
+        "adapter_model.safetensors": 708925520,
+        "non_lora_trainables.bin": 41961648
+      }
+    },
+    "llava_base": {
+      "repo": "lmms-lab/llama3-llava-next-8b",
+      "revision": "6d6dcb8d7948364bebef9c11aba6b0e6c8835391",
+      "files": {
+        "model-00001-of-00004.safetensors": 4976706872,
+        "model-00002-of-00004.safetensors": 4999802616,
+        "model-00003-of-00004.safetensors": 4915916080,
+        "model-00004-of-00004.safetensors": 1817174536
+      }
+    },
+    "t5_encoder": {
+      "repo": "google-t5/t5-11b",
+      "revision": "90f37703b3334dfe9d2b009bfcbfbf1ac9d28ea3",
+      "selected_files_only": true,
+      "file": "pytorch_model.bin",
+      "bytes": 45229452544
+    },
+    "vision_tower": {
+      "repo": "openai/clip-vit-large-patch14-336",
+      "revision": "ce19dc912ca5cd21c8a653c79e251e808ccabcd1"
+    },
+    "clip_text_encoder": {
+      "code_repo": "https://github.com/openai/CLIP.git",
+      "code_commit": "d05afc436d78f1c48dc0dbf8e5980a9d471f35f6",
+      "model": "RN50",
+      "bytes": 255827503,
+      "sha256": "afeb0e10f9e5a86da6080e35cf09123aca3b358a0c3e3b6c78a7b63bc04b6762"
+    }
+  },
+  "rlbench_test_subset": {
+    "source_folder_id": "0B2LlLwoO3nfZfnJnSmNHTXZycUtFN0k3Y3o2SjlvWUg1WHRkU1Y2OE1wdkN6V1BkRGF6MG8",
+    "resource_key": "0-4V4AQmv6RCytSv0_ua2HKg",
+    "episodes_per_task": 25,
+    "archives": {
+      "place_cups": {
+        "google_drive_id": "101hCOcy0_0drJYoTlHCSlkePlcVLgm0f",
+        "bytes": 2203219604
+      },
+      "place_wine_at_rack_location": {
+        "google_drive_id": "1gGc2ZTgoOrVawvgniTGyO-Xh2VgmTt7A",
+        "bytes": 1123730116
+      },
+      "sweep_to_dustpan_of_size": {
+        "google_drive_id": "1vZjqaAWAlGPOhuDA-GQXLhkcjVDK_C2R",
+        "bytes": 676934405
+      }
+    }
+  },
+  "environments": {
+    "actor": "/data/yukun/miniconda3/envs/dynamac-racer",
+    "llava_and_language_services": "/data/yukun/miniconda3/envs/dynamac-racer-llava"
+  },
+  "user_space_xvfb": {
+    "ubuntu_package": "xvfb=2:21.1.4-2ubuntu1.7~22.04.16",
+    "deb_sha256": "f857020815dd091b4331cc45b37550a92480178c2931c76b486af2202e4271ec",
+    "binary_sha256": "cf71d78eab8321f7c568271053af449f966a75422140117ea1f244bf72a7e81e",
+    "note": "The conda Xvfb builds tested here did not expose a usable GLX visual; the Ubuntu-matched package is extracted without sudo."
+  },
+  "first_target": "Three-task, 75-episode released-checkpoint evaluation",
+  "paper_reference": "paper_reference.json",
+  "reproduction_boundary": "The paper reports five-seed means and standard deviations, while the release provides one actor checkpoint."
+}

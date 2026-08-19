@@ -1,0 +1,14 @@
+{
+  "schema": "dynamac-baseline-source-v1",
+  "method": "AHA",
+  "upstream_url": "https://github.com/NVlabs/AHA.git",
+  "upstream_commit": "0d39c0591566ddaf997be5822f3dead8e08501aa",
+  "upstream_branch": "main",
+  "code_license": "NVIDIA non-commercial research license",
+  "paper_title": "AHA: A Vision-Language-Model for Detecting and Reasoning Over Failures in Robotic Manipulation",
+  "paper_url": "https://openreview.net/forum?id=JVkdSi7Ekg",
+  "local_paper": "../../papers/AHA.pdf",
+  "official_checkpoint": null,
+  "first_target": "Optional one-task FailGen smoke test",
+  "reproduction_boundary": "Paper-level evaluation blocked by missing released checkpoint, data, and inference path; full training exceeds compute budget."
+}

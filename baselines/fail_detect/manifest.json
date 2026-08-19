@@ -1,0 +1,14 @@
+{
+  "schema": "dynamac-baseline-source-v1",
+  "method": "FAIL-Detect",
+  "upstream_url": "https://github.com/CXU-TRI/FAIL-Detect.git",
+  "upstream_commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed",
+  "upstream_branch": "main",
+  "code_license": "CC-BY-NC-4.0",
+  "paper_title": "Can We Detect Failures Without Failure Data? Uncertainty-Aware Runtime Failure Detection for Imitation Learning Policies",
+  "paper_url": "https://www.roboticsproceedings.org/rss21/p073.pdf",
+  "local_paper": "../../papers/FAIL-Detect.pdf",
+  "official_checkpoint": null,
+  "first_target": "Robomimic Transport with flow-matching policy",
+  "reproduction_boundary": "No released checkpoint; released code and paper protocol are not identical."
+}

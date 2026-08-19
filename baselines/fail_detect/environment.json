@@ -1,0 +1,42 @@
+{
+  "schema": "dynamac-baseline-environment-v1",
+  "environment_name": "dynamac-fail-detect",
+  "prefix": "/data/yukun/miniconda3/envs/dynamac-fail-detect",
+  "validated_on": "2026-08-19",
+  "python": "3.9.18",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "packages": {
+    "torch": "1.12.1",
+    "torchvision": "0.13.1",
+    "pytorch3d": "0.7.0",
+    "cuda_runtime": "11.6",
+    "numpy": "1.23.3",
+    "numba": "0.53.1",
+    "scipy": "1.9.1",
+    "robomimic": "0.2.0",
+    "robosuite": "1.2.0",
+    "free-mujoco-py": "2.1.6",
+    "mujoco": "2.3.1.post1",
+    "dm-control": "1.0.9",
+    "ray": "2.2.0",
+    "hydra-core": "1.2.0",
+    "imagecodecs": "2022.9.26",
+    "multiprocess": "0.70.13",
+    "dill": "0.3.5.1"
+  },
+  "validation": {
+    "pip_check": "passed",
+    "official_imports": "passed",
+    "transport_flow_hydra_compose": "passed",
+    "transport_flow_policy_parameters": 308292372,
+    "transport_flow_policy_cuda_allocated_bytes": 1239120896,
+    "rtx4090_cuda_tensor": "passed",
+    "training": "blocked_missing_author_documented_dataset"
+  },
+  "compatibility_notes": [
+    "MuJoCo was pinned to 2.3.1.post1 because dm-control 1.0.9 has an unbounded lower-only requirement and the 2026 resolver selects a source-only release.",
+    "patchelf is installed inside the user conda environment.",
+    "The missing diffusion_policy/config path is a symlink to the released configs_robomimic directory.",
+    "The official Robosuite dependency resolves numba 0.53.1 even though the conda YAML initially requests numba 0.56.4."
+  ]
+}

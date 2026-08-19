@@ -16,13 +16,28 @@ dist/
 /RoboDojo/
 /CoppeliaSim_Edu_V4_1_0_Ubuntu20_04/
 
+# External baseline sources and local reproduction artifacts. Track only the
+# surrounding provenance, environment manifests, configs, and wrapper scripts.
+/baselines/*/upstream/
+/baselines/*/data/
+/baselines/*/datasets/
+/baselines/*/checkpoints/
+/baselines/*/results/
+/baselines/*/runtime/
+/baselines/*/env/
+/baselines/*/envs/
+/baselines/*/.conda/
+
 # Reference papers and demonstration bundles stay local.
 /DynaMAC.pdf
 /MiDiGaP.pdf
+/papers/*.pdf
 /data/
 
 # Local experiment outputs
 outputs/
+/output/
+/tmp/
 integrations/rlbench/models/
 integrations/rlbench/results/
 *.log
@@ -35,5 +50,8 @@ integrations/rlbench/data/**
 
 # Local tooling
 .venv/
+**/.env
+**/.env.*
+!**/.env.example
 .DS_Store
 ESSAY2608_FILE_TREE_*.json

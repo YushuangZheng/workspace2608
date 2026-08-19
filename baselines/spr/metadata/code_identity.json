@@ -1,0 +1,12 @@
+{
+  "schema": "dynamac-baseline-code-identity-v1",
+  "captured_at": "2026-08-19T22:59:00+08:00",
+  "upstream_commit": "d57e4b81ebdcacea574b68be29d61ba04cdc7051",
+  "upstream_worktree_clean": true,
+  "sha256": {
+    "upstream/experiments/libero/run_libero_eval_vllm.py": "f8785337c4711f5f40fe5961a788f06587f366117d252b89c60b6fec1c90f4fb",
+    "upstream/experiments/libero/sprvla.py": "72f2da77c1d2a3145765221fa3b22dae569a7d715a48fa46a4876be93dc80681",
+    "scripts/run_libero10_task0.sh": "1876c30d16030db41e811c4360df20365681b6bbead4fa2d40bffe7e24275e41",
+    "scripts/run_libero10_tasks1to9.sh": "c0239e331560e44d3842c8e3d02d6dd069ab83aef06dbdd70d467aa640ea57a0"
+  }
+}

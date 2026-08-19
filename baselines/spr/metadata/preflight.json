@@ -1,0 +1,24 @@
+{
+  "schema": "dynamac-baseline-preflight-v1",
+  "checked_at": "2026-08-19T22:54:00+08:00",
+  "source_commit_matches_manifest": true,
+  "checkpoint_index_and_safetensors": "pass",
+  "checkpoint_shards": 4,
+  "checkpoint_tensor_keys": 614,
+  "official_cli_import_and_argument_parser": "pass",
+  "parser_tokenizer_offline_cache": "pass",
+  "libero_10_task_0": {
+    "name": "LIVING_ROOM_SCENE2_put_both_the_alphabet_soup_and_the_tomato_sauce_in_the_basket",
+    "description": "put both the alphabet soup and the tomato sauce in the basket",
+    "fixed_initial_states": 50,
+    "initial_state_shape": [50, 123]
+  },
+  "headless_simulator": {
+    "status": "pass",
+    "backend": "EGL",
+    "agentview_shape": [256, 256, 3],
+    "wrist_camera_present": true,
+    "reset_set_init_state_and_one_dummy_step": "pass"
+  },
+  "quantitative_evaluation": "waiting_for_idle_gpus"
+}

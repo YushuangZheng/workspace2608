@@ -1,0 +1,36 @@
+{
+  "schema": "dynamac-baseline-environment-v1",
+  "environment": "/data/yukun/miniconda3/envs/dynamac-spr",
+  "python": "3.11.15",
+  "packages": {
+    "accelerate": "1.14.0",
+    "bddl": "1.0.1",
+    "cupy-cuda12x": "13.6.0",
+    "gym": "0.25.2",
+    "libero": "0.1.0",
+    "mujoco": "2.3.7",
+    "numpy": "1.26.4",
+    "opencv-python-headless": "4.11.0.86",
+    "robosuite": "1.4.0",
+    "tensorflow-cpu": "2.15.1",
+    "torch": "2.6.0+cu124",
+    "torchvision": "0.21.0+cu124",
+    "transformers": "4.52.1",
+    "vllm": "0.8.5"
+  },
+  "official_readme_pins": {
+    "python": "3.11",
+    "transformers": "4.52.1",
+    "vllm": "0.8.5"
+  },
+  "compatibility_repairs": [
+    "Added tensorflow-cpu because experiments/libero/libero_utils.py imports TensorFlow but the top-level README does not install it.",
+    "Added the LIBERO simulator runtime dependencies omitted by experiments/LIBERO/setup.py.",
+    "Pinned NumPy 1.26.4 and OpenCV 4.11.0.86 for the Python 3.11-compatible LIBERO stack.",
+    "Set LIBERO_CONFIG_PATH inside baselines/spr/runtime to avoid the upstream first-import interactive prompt."
+  ],
+  "known_metadata_conflicts_not_used_by_evaluation": [
+    "pyproject.toml declares transformers 4.52.3 while the official evaluation README explicitly requires 4.52.1; the README pin is used.",
+    "Training-only beaker, wandb, and Google packages request newer protobuf than vLLM 0.8.5; checkpoint evaluation uses vLLM's protobuf 4.25.9."
+  ]
+}
