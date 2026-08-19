@@ -1,0 +1,195 @@
+{
+  "schema": "dynamac-rlbench-sealed-evaluation-manifest-v2",
+  "protocol_id": "rlbench-v4-task-scoped-eval-set-v2",
+  "evaluation_set_id": "rlbench_eval_v2",
+  "spec": {
+    "sha256": "b723211ee743e248a1db272a4b48356d986435def11e325d5d69b8f8ffa9f84b",
+    "fingerprint": "70956811a108a6d141b77d5a778f98c564c3ef2f153adc96cb1e2c1511505669"
+  },
+  "legacy_source_manifest": {
+    "evaluation_set_id": "rlbench_fixed_v1",
+    "manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+    "manifest_fingerprint": "92b98c4951bb0dcf6ce7b807e4ec3ba8cbd7d1baa44f8f929e4862bbd1e71295",
+    "access": "canonical_read_only_external_reference"
+  },
+  "composite_training_identity": {
+    "schema": "dynamac-rlbench-composite-training-identity-v2",
+    "legacy_non_store": {
+      "applies_to_tasks": [
+        "bimanual_handover_item",
+        "bimanual_handover_item_dynamic",
+        "bimanual_lift_tray",
+        "bimanual_sweep_to_dustpan",
+        "open_microwave",
+        "place_cups",
+        "stack_wine",
+        "wipe_desk"
+      ],
+      "excluded_tasks": [
+        "bimanual_put_bottle_in_fridge"
+      ],
+      "source_evaluation_set_id": "rlbench_fixed_v1",
+      "source_artifact_path": "training_split_manifest.json",
+      "source_manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+      "sha256": "c355651bd2f6c76d91874a8bb582d7409ebf981088e402589fafbeba70c0caf2",
+      "fingerprint": "d2a4803a1d727bdeeecf8acf027a50eb817a76999554d830db69235e4696bb16"
+    },
+    "store_bottle_v4": {
+      "schema": "dynamac-rlbench-store-bottle-eval-binding-v4",
+      "task": "bimanual_put_bottle_in_fridge",
+      "collection_manifest": {
+        "path": "data/v4/store_bottle/collection_manifest.json",
+        "sha256": "8b205d2190494e66a7f1083bb00fcc3572619f0e88cdf3f5748726344754668c",
+        "fingerprint": "ed05b3df094f1aac4c2658bd236bc0fe457437e45c8668ebee3f67119044b4ef"
+      },
+      "demonstrations": [
+        {
+          "episode": 0,
+          "seed": 4104000000,
+          "variation": 0,
+          "path": "data/v4/store_bottle/all_variations/episodes/episode0/low_dim_obs.pkl",
+          "bytes": 144649,
+          "sha256": "28d2c3098d78683c4227df3f579ac49ecfb0849f77bb9705146b76219bcb8e9f"
+        },
+        {
+          "episode": 1,
+          "seed": 4104000001,
+          "variation": 0,
+          "path": "data/v4/store_bottle/all_variations/episodes/episode1/low_dim_obs.pkl",
+          "bytes": 182006,
+          "sha256": "4773414debde4e6688aa3b5c76f86d4ca1bd7c9ef140dc6fcbe7acf3b7c5f685"
+        },
+        {
+          "episode": 2,
+          "seed": 4104000002,
+          "variation": 0,
+          "path": "data/v4/store_bottle/all_variations/episodes/episode2/low_dim_obs.pkl",
+          "bytes": 155485,
+          "sha256": "2e2a9faf448377f90ad27f49b55523a980876478b2a3a81a7e7069d4955a8b96"
+        },
+        {
+          "episode": 3,
+          "seed": 4104000003,
+          "variation": 0,
+          "path": "data/v4/store_bottle/all_variations/episodes/episode3/low_dim_obs.pkl",
+          "bytes": 162273,
+          "sha256": "4d8764e9f11dfaed714959a8b5a63d322994ccbcc6bcc99b6fdf63ce5390f843"
+        },
+        {
+          "episode": 4,
+          "seed": 4104000004,
+          "variation": 0,
+          "path": "data/v4/store_bottle/all_variations/episodes/episode4/low_dim_obs.pkl",
+          "bytes": 169303,
+          "sha256": "88bb176ea27554b04e5292f636552b6259f8492976292a6dd3ea48e76a7576f4"
+        }
+      ],
+      "model_release_manifest": {
+        "path": "models/v4/release_manifest.json",
+        "sha256": "528973ee7b2d5715f84e501eaca065efce95dedf0112326b3bb19aad6e0ac49b",
+        "fingerprint": "ab32634c38f4a53479e43c89fd9d42e3fa5988a122d0b7bd961c502b330f2995"
+      },
+      "evaluation_seed_range": [
+        2608000000,
+        2608000199
+      ],
+      "training_evaluation_seed_ranges_disjoint": true,
+      "fingerprint": "27ef734824f8c46c1196b034b74b6b070d2a910b277c75140d2d430a45510e5f"
+    },
+    "fingerprint": "7a6aa431f73aa952909b4ee51d2303d407aa90808d2e687b498a7e4777e3002a"
+  },
+  "environment_plan_batches": {
+    "stack_wine": {
+      "artifact_origin": "reused_legacy",
+      "source_evaluation_set_id": "rlbench_fixed_v1",
+      "source_artifact_path": "plans/environment/stack_wine_a_b_n200.json",
+      "source_manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+      "sha256": "59f0233100f4453f04a64b43c7e74d5897fce8c664695e3a34eb8d8fcd660e69",
+      "batch_schema": "dynamac-rlbench-staged-motion-plan-batch-v3.4",
+      "protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "batch_fingerprint": "473e1d00b0142c4e0ae4675252a0109d2433d832bd1d8f9c92704c80e447619b"
+    },
+    "place_cups": {
+      "artifact_origin": "reused_legacy",
+      "source_evaluation_set_id": "rlbench_fixed_v1",
+      "source_artifact_path": "plans/environment/place_cups_a_b_n200.json",
+      "source_manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+      "sha256": "844f91bdb03bb23d9b72898f8ab3b984d1bfaf7597f25ca8de6aeecc6e31fc2a",
+      "batch_schema": "dynamac-rlbench-staged-motion-plan-batch-v3.4",
+      "protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "batch_fingerprint": "0676cad27b48922a5c788b1ebb46ae57aa5e8b568b2a83264d53104cc9db34b0"
+    },
+    "open_microwave": {
+      "artifact_origin": "reused_legacy",
+      "source_evaluation_set_id": "rlbench_fixed_v1",
+      "source_artifact_path": "plans/environment/open_microwave_a_b_n200.json",
+      "source_manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+      "sha256": "e57a850750cf4ce2c2ff96dde0b7f92a5838fd9bdc71edb25accd51ed85a9fbc",
+      "batch_schema": "dynamac-rlbench-staged-motion-plan-batch-v3.4",
+      "protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "batch_fingerprint": "f79257b21677d7d01bcdd9c1fc577cfd95a5db236e9dbf7f95193acb315fc07f"
+    },
+    "wipe_desk": {
+      "artifact_origin": "reused_legacy",
+      "source_evaluation_set_id": "rlbench_fixed_v1",
+      "source_artifact_path": "plans/environment/wipe_desk_a_b_n200.json",
+      "source_manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+      "sha256": "261c07acc7499b32994cb048ef46bdd91b91e3a8b57788f67dd2182c379f455f",
+      "batch_schema": "dynamac-rlbench-staged-motion-plan-batch-v3.4",
+      "protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "batch_fingerprint": "c55f0914eb98a38e8f4edf91e0d527dc01d744c0466e69c40a7af8906fd415b5"
+    },
+    "bimanual_put_bottle_in_fridge": {
+      "artifact_origin": "regenerated_v2",
+      "artifact_path": "plans/environment/bimanual_put_bottle_in_fridge_a_b_n200.json",
+      "sha256": "647772b2dcd270d380d0d899c21ab1f7c34155927da78c0927c0a400c3ace4a2",
+      "batch_schema": "dynamac-rlbench-task-scoped-motion-plan-batch-v2",
+      "protocol_id": "rlbench-task-scoped-staged-motion-plan-envelope-v2",
+      "batch_fingerprint": "a7a7e6f87e814beea838f9740062510e9f766d66d0fac955077ca1c21b4f965b",
+      "task_identity_fingerprint": "d3d3fa393f4bdf8d43fe079eeb3b4b1e9588951133c659a58eeece99a0985194",
+      "runtime_loader": "store-bottle-multi-entity-motion-plan-batch-v4"
+    },
+    "bimanual_handover_item": {
+      "artifact_origin": "reused_legacy",
+      "source_evaluation_set_id": "rlbench_fixed_v1",
+      "source_artifact_path": "plans/environment/bimanual_handover_item_a_b_n200.json",
+      "source_manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+      "sha256": "782d2fa6b158580a0d8f14234bd24ce9068b072ab7e3edf61c1ad83369aff33b",
+      "batch_schema": "dynamac-rlbench-staged-motion-plan-batch-v3.4",
+      "protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "batch_fingerprint": "b564806c58e2e7aed3bc629a7ac53aee6af40c9119d4e4113be0a0a045b0e317"
+    },
+    "bimanual_lift_tray": {
+      "artifact_origin": "regenerated_v2",
+      "artifact_path": "plans/environment/bimanual_lift_tray_a_b_n200.json",
+      "sha256": "e0c2bda66151127cfafe7eae6bb008ccf5426c9bb7fee906b1f684015e04e107",
+      "batch_schema": "dynamac-rlbench-task-scoped-motion-plan-batch-v2",
+      "protocol_id": "rlbench-task-scoped-staged-motion-plan-envelope-v2",
+      "batch_fingerprint": "f640d6429d1ba50821c69ee9ab3f97b0db71fe392ede3860a62dbcf2802efed7",
+      "task_identity_fingerprint": "7eb33e76f8d8c2cc04cb09a8eb3f8861cfedde070fa1cb8265592794e1261043",
+      "runtime_loader": "lift-tray-source-relative-motion-plan-batch-v4"
+    },
+    "bimanual_sweep_to_dustpan": {
+      "artifact_origin": "reused_legacy",
+      "source_evaluation_set_id": "rlbench_fixed_v1",
+      "source_artifact_path": "plans/environment/bimanual_sweep_to_dustpan_a_b_n200.json",
+      "source_manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+      "sha256": "4b1021ef63b576db4c49132fff1866a507e17b5c4f9b20b8399d0a3f2bf7d06f",
+      "batch_schema": "dynamac-rlbench-staged-motion-plan-batch-v3.4",
+      "protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "batch_fingerprint": "a1c1c58f18ab8a3369145e7cc3c83cad6699c028d4b0a12364fd9bb4e05cd86f"
+    }
+  },
+  "coordination_source_batch": {
+    "artifact_origin": "reused_legacy",
+    "source_evaluation_set_id": "rlbench_fixed_v1",
+    "source_artifact_path": "initializations/coordination/bimanual_handover_item_dynamic_a_only_n200.json",
+    "source_manifest_sha256": "bf9e10070d100a8dfbe95c0eb9cafed2a4565d2b568dbe6ba57eaa227b40779c",
+    "sha256": "6d192b5fc881792a0363ad35ebadee19434f683f3a541f41528c7fe8cf091e8c",
+    "batch_schema": "dynamac-rlbench-staged-source-plan-batch-v1",
+    "protocol_id": "rlbench-deterministic-source-a-only-v1",
+    "batch_fingerprint": "7a57f189e6b4e16559bce8d5f7c5865bfea1e9aac380bd0c83afb5c54aa69a92"
+  },
+  "sealed_without_evaluation_results": true,
+  "fingerprint": "e64700f9cbcdfcf0a48a04ae852b86c45a8f64c90dbddd00ef86d218625447d9"
+}
