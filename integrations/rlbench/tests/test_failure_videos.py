@@ -70,6 +70,43 @@ def test_source_selection_accepts_only_original_failures(tmp_path):
         failure_videos._load_source(path, "bimanual_handover_item", (3,))
 
 
+def test_source_selection_can_require_original_successes(tmp_path):
+    path = tmp_path / "source.json"
+    path.write_text(json.dumps(_source_payload(success=True)), encoding="utf-8")
+
+    _payload, rows, _digest, _resolved = failure_videos._load_source(
+        path,
+        "bimanual_handover_item",
+        (3,),
+        expected_success=True,
+    )
+
+    assert rows[3]["success"] is True
+    path.write_text(json.dumps(_source_payload(success=False)), encoding="utf-8")
+    with pytest.raises(ValueError, match="expected a successful row"):
+        failure_videos._load_source(
+            path,
+            "bimanual_handover_item",
+            (3,),
+            expected_success=True,
+        )
+
+
+def test_source_selection_rejects_dynamic_row_before_intervention(tmp_path):
+    payload = _source_payload(success=False)
+    payload["scenario"] = "teleport"
+    payload["results"][0]["scenario_events"] = []
+    path = tmp_path / "source.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="did not exercise"):
+        failure_videos._load_source(
+            path,
+            "bimanual_handover_item",
+            (3,),
+        )
+
+
 def test_sealed_replay_batch_binds_source_identity_and_episode(monkeypatch):
     class Plan:
         variation = 2
@@ -273,13 +310,14 @@ def test_replay_is_publishable_only_when_model_matches_and_it_still_fails():
     confirmation = failure_videos._validate_replay(original, replay, identity, dict(identity))
     assert confirmation == {
         "replay_confirmed_failure": True,
+        "expected_outcome": "failure",
         "same_reason": True,
         "same_steps": True,
         "same_invalid_actions": True,
     }
 
     successful_replay = dict(replay, success=True, reason="success")
-    with pytest.raises(RuntimeError, match="succeeded during replay"):
+    with pytest.raises(RuntimeError, match="successful during replay"):
         failure_videos._validate_replay(original, successful_replay, identity, dict(identity))
     with pytest.raises(RuntimeError, match="model identity"):
         failure_videos._validate_replay(original, replay, identity, {"fingerprint": "different"})
@@ -290,6 +328,41 @@ def test_replay_is_publishable_only_when_model_matches_and_it_still_fails():
             dict(replay, invalid_actions=1),
             identity,
             dict(identity),
+        )
+
+
+def test_success_replay_is_publishable_only_when_it_remains_successful():
+    identity = {"manifest_authenticated": True, "fingerprint": "abc"}
+    original = {
+        "episode": 7,
+        "success": True,
+        "reason": "success",
+        "steps": 100,
+        "invalid_actions": 0,
+    }
+
+    confirmation = failure_videos._validate_replay(
+        original,
+        dict(original),
+        identity,
+        dict(identity),
+        expected_success=True,
+    )
+
+    assert confirmation == {
+        "replay_confirmed_success": True,
+        "expected_outcome": "success",
+        "same_reason": True,
+        "same_steps": True,
+        "same_invalid_actions": True,
+    }
+    with pytest.raises(RuntimeError, match="failed during replay"):
+        failure_videos._validate_replay(
+            original,
+            dict(original, success=False, reason="policy_complete"),
+            identity,
+            dict(identity),
+            expected_success=True,
         )
 
 
@@ -560,3 +633,330 @@ def test_output_keys_are_cell_specific_and_path_safe():
     assert failure_videos._validate_output_key("table_iii_hand_left") == ("table_iii_hand_left")
     with pytest.raises(ValueError, match="output-key"):
         failure_videos._validate_output_key("../escape")
+
+
+def test_replay_attempt_protocol_is_bounded_and_auditable():
+    protocol = failure_videos._replay_attempt_protocol(20)
+
+    assert protocol == {
+        "protocol_id": failure_videos.REPLAY_ATTEMPT_PROTOCOL_ID,
+        "max_replay_attempts_per_episode": 20,
+        "attempt_ordinals_are_one_based": True,
+        "fresh_task_generation_per_attempt": True,
+        "seed_variation_plan_and_controller_unchanged_between_attempts": True,
+        "retryable_completed_result_mismatches": [
+            "outcome",
+            "source_condition",
+            "invalid_actions",
+        ],
+        "candidate_traversal": "episode_major_in_caller_order",
+        "exceptions_fail_closed": True,
+        "first_matching_attempt_only": True,
+        "one_video_per_source_episode": True,
+        "source_evaluation_immutable": True,
+        "replays_are_video_confirmation_not_evaluation": True,
+    }
+    with pytest.raises(ValueError, match="must be positive"):
+        failure_videos._replay_attempt_protocol(0)
+    with pytest.raises(TypeError, match="must be an integer"):
+        failure_videos._replay_attempt_protocol(True)
+
+
+def test_replay_attempt_assessment_retries_only_three_completed_mismatches():
+    original = {
+        "episode": 7,
+        "success": False,
+        "invalid_actions": 0,
+    }
+    static_source = {"task": "bimanual_handover_item", "scenario": "static"}
+
+    confirmed = failure_videos._assess_replay_attempt(
+        original,
+        dict(original),
+        static_source,
+        expected_success=False,
+    )
+    assert confirmed == {
+        "replay_confirmed_outcome": True,
+        "source_condition_reproduced": True,
+        "same_invalid_actions": True,
+        "confirmed_for_publication": True,
+        "disposition": "published_first_match",
+    }
+
+    outcome = failure_videos._assess_replay_attempt(
+        original,
+        dict(original, success=True),
+        static_source,
+        expected_success=False,
+    )
+    assert outcome["confirmed_for_publication"] is False
+    assert outcome["disposition"] == "discarded_outcome_mismatch"
+
+    condition = failure_videos._assess_replay_attempt(
+        original,
+        dict(original, scenario_events=[]),
+        {"task": "bimanual_handover_item", "scenario": "teleport"},
+        expected_success=False,
+    )
+    assert condition["confirmed_for_publication"] is False
+    assert condition["disposition"] == "discarded_source_condition_mismatch"
+
+    invalid_actions = failure_videos._assess_replay_attempt(
+        original,
+        dict(original, invalid_actions=1),
+        static_source,
+        expected_success=False,
+    )
+    assert invalid_actions["confirmed_for_publication"] is False
+    assert invalid_actions["disposition"] == "discarded_invalid_actions_mismatch"
+
+    with pytest.raises(RuntimeError, match="episode identity"):
+        failure_videos._assess_replay_attempt(
+            original,
+            dict(original, episode=8),
+            static_source,
+            expected_success=False,
+        )
+
+
+def test_bounded_replay_attempts_stop_at_first_match_and_preserve_ordinals():
+    seen = []
+
+    def runner(ordinal):
+        seen.append(ordinal)
+        return {
+            "replay_attempt_ordinal": ordinal,
+            "confirmed_for_publication": ordinal == 3,
+        }
+
+    accepted, records = failure_videos._run_bounded_replay_attempts(5, runner)
+
+    assert seen == [1, 2, 3]
+    assert [record["replay_attempt_ordinal"] for record in records] == [1, 2, 3]
+    assert accepted is records[-1]
+
+
+def test_bounded_replay_attempts_exhaust_and_exceptions_fail_closed():
+    accepted, records = failure_videos._run_bounded_replay_attempts(
+        2,
+        lambda ordinal: {
+            "replay_attempt_ordinal": ordinal,
+            "confirmed_for_publication": False,
+        },
+    )
+    assert accepted is None
+    assert [record["replay_attempt_ordinal"] for record in records] == [1, 2]
+
+    seen = []
+
+    def raises_on_second(ordinal):
+        seen.append(ordinal)
+        if ordinal == 2:
+            raise RuntimeError("infrastructure failure")
+        return {
+            "replay_attempt_ordinal": ordinal,
+            "confirmed_for_publication": False,
+        }
+
+    with pytest.raises(RuntimeError, match="infrastructure failure"):
+        failure_videos._run_bounded_replay_attempts(5, raises_on_second)
+    assert seen == [1, 2]
+
+
+def test_replay_attempt_cli_defaults_to_one_and_filename_records_ordinal():
+    args = failure_videos.build_parser().parse_args(
+        ["--task", "wipe_desk", "--episode", "3"]
+    )
+    assert args.max_replay_attempts_per_episode == 1
+    assert (
+        failure_videos._replay_output_stem(3, 2_608_000_003, 12)
+        == "episode_003_seed_2608000003_attempt_012"
+    )
+
+
+def test_record_replays_same_fixed_episode_fresh_until_first_match(
+    monkeypatch,
+    tmp_path,
+):
+    identity = {"manifest_authenticated": True, "fingerprint": "model"}
+    original = {
+        "episode": 7,
+        "success": True,
+        "reason": "success",
+        "steps": 5,
+        "invalid_actions": 0,
+    }
+    source = {
+        "task": "bimanual_handover_item",
+        "scenario": "static",
+        "seed": 100,
+        "model_identity": identity,
+        "fixed_eval_set": {"evaluation_set_id": "fixed-v3"},
+    }
+
+    class Plan:
+        variation = 2
+
+        @staticmethod
+        def fingerprint():
+            return "sealed-plan"
+
+    class Environment:
+        def __init__(self):
+            self.launched = False
+            self.shutdown_called = False
+
+        def launch(self):
+            self.launched = True
+
+        def shutdown(self):
+            self.shutdown_called = True
+
+    class Worker:
+        model_identity = identity
+
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class Recorder:
+        def __init__(self, path, **_kwargs):
+            self.path = path
+            self.used_cameras = ("front", "overhead")
+            self.frame_shape = (360, 1280, 3)
+            self.frames = 6
+
+        def capture(self, _observation):
+            return None
+
+        def close(self):
+            self.path.write_bytes(b"audited-video")
+
+        def abort(self):
+            return None
+
+    environment = Environment()
+    worker = Worker()
+    fresh_calls = []
+    replay_calls = []
+
+    monkeypatch.setattr(
+        failure_videos,
+        "_load_source",
+        lambda *_args, **_kwargs: (
+            source,
+            {7: original},
+            "source-sha",
+            tmp_path / "source.json",
+        ),
+    )
+    monkeypatch.setattr(
+        failure_videos,
+        "_require_current_evaluator_protocol",
+        lambda *_args: "evaluator-v3",
+    )
+    monkeypatch.setattr(
+        failure_videos,
+        "_load_sealed_replay_batch",
+        lambda *_args: {"family": "bimanual"},
+    )
+    monkeypatch.setattr(
+        failure_videos,
+        "_source_protocol_budgets",
+        lambda *_args: dict(RUNNER_BUDGETS),
+    )
+    monkeypatch.setattr(
+        failure_videos,
+        "_runtime_components",
+        lambda *_args: (environment, worker, object),
+    )
+    monkeypatch.setattr(
+        failure_videos,
+        "_authenticated_replay_trigger",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        failure_videos,
+        "_sealed_episode_plan",
+        lambda *_args: (Plan(), 2, 1234),
+    )
+
+    def fresh_generation(_environment, _task_class, **kwargs):
+        fresh_calls.append((kwargs["episode_seed"], kwargs["variation"]))
+        return object(), ["description"], object(), {
+            "episode_seed": kwargs["episode_seed"],
+            "variation": kwargs["variation"],
+        }
+
+    def run_episode(*_args, **_kwargs):
+        replay_calls.append(len(replay_calls) + 1)
+        return {
+            "episode": 7,
+            "success": len(replay_calls) == 2,
+            "reason": "success" if len(replay_calls) == 2 else "policy_complete",
+            "steps": 5,
+            "invalid_actions": 0,
+        }
+
+    monkeypatch.setattr(
+        failure_videos,
+        "initialize_fresh_task_generation",
+        fresh_generation,
+    )
+    monkeypatch.setattr(failure_videos, "_run_selected_episode", run_episode)
+    monkeypatch.setattr(
+        failure_videos,
+        "_validate_replay_plan",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(failure_videos, "ObservationRecorder", Recorder)
+
+    args = SimpleNamespace(
+        task="bimanual_handover_item",
+        episode=[7],
+        expected_outcome="success",
+        minimum_confirmed=1,
+        max_replay_attempts_per_episode=3,
+        source_result=tmp_path / "source.json",
+        output_root=tmp_path / "videos",
+        output_key="handover_success",
+        cameras=("front", "overhead"),
+        fps=12,
+        ffmpeg=tmp_path / "ffmpeg",
+        resolution=(640, 360),
+    )
+
+    target = failure_videos.record(args)
+
+    assert fresh_calls == [(1234, 2), (1234, 2)]
+    assert replay_calls == [1, 2]
+    manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+    assert [row["replay_attempt_ordinal"] for row in manifest["attempts"]] == [1, 2]
+    assert [row["disposition"] for row in manifest["attempts"]] == [
+        "discarded_outcome_mismatch",
+        "published_first_match",
+    ]
+    assert manifest["episodes"][0]["replay_attempt_ordinal"] == 2
+    assert manifest["episodes"][0]["replay_attempt_disposition"] == (
+        "published_first_match"
+    )
+    assert manifest["candidate_episode_order"] == [7]
+    assert manifest["replay_attempt_protocol"][
+        "max_replay_attempts_per_episode"
+    ] == 3
+    assert [path.name for path in target.glob("*.mp4")] == [
+        "episode_007_seed_107_attempt_002.mp4"
+    ]
+    sidecar = json.loads(
+        (target / manifest["episodes"][0]["metadata"]).read_text(encoding="utf-8")
+    )
+    assert sidecar["replay_attempt_ordinal"] == 2
+    assert sidecar["replay_attempt_disposition"] == "published_first_match"
+    assert manifest["episodes"][0]["metadata_sha256"] == failure_videos._sha256(
+        target / manifest["episodes"][0]["metadata"]
+    )
+    assert worker.closed is True
+    assert environment.shutdown_called is True

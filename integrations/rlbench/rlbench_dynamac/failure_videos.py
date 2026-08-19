@@ -1,10 +1,11 @@
-"""Replay and record audited failures without changing policy semantics.
+"""Replay and record audited trajectories without changing policy semantics.
 
 Existing evaluation files contain low-dimensional episode records only.  This
-tool replays explicitly selected failed episodes with the same evaluator,
-model, seed, variation and controller, while enabling RGB observations solely
-for video capture.  A replay is published only when it is still a failure and
-the loaded model identity exactly matches the source evaluation.
+tool replays explicitly selected successful or failed episodes with the same
+evaluator, model, seed, variation and controller, while enabling RGB
+observations solely for video capture.  A replay is published only when its
+outcome still matches the selected source row and the loaded model identity
+exactly matches the source evaluation.
 
 The simulator side remains Python 3.8 compatible.  Frames are passed directly
 to the system ``ffmpeg`` executable, so OpenCV and imageio are not required in
@@ -81,7 +82,10 @@ COORDINATION_SCHEMAS = {
 }
 SCENARIOS = {"static", "smooth", "teleport"}
 DEFAULT_CAMERAS = ("front", "overhead")
-SCHEMA = "dynamac-confirmed-failure-videos-v1"
+SCHEMA = "dynamac-confirmed-trajectory-videos-v1"
+REPLAY_ATTEMPT_PROTOCOL_ID = (
+    "same-sealed-source-episode-fresh-replay-bounded-first-match-v1"
+)
 
 
 def _sha256(path):
@@ -148,7 +152,7 @@ def _source_policy_task(payload):
     return payload.get("policy_task_alias") or payload.get("task")
 
 
-def _load_source(path, task, episode_indices):
+def _load_source(path, task, episode_indices, *, expected_success=False):
     source_path = Path(path).resolve()
     raw = source_path.read_bytes()
     payload = json.loads(raw.decode("utf-8"))
@@ -188,8 +192,17 @@ def _load_source(path, task, episode_indices):
         if episode not in by_episode:
             raise ValueError(f"episode {episode} is absent from the source evaluation")
         row = by_episode[episode]
-        if bool(row.get("success")):
-            raise ValueError(f"episode {episode} was successful in the source evaluation")
+        if bool(row.get("success")) is not bool(expected_success):
+            expected = "successful" if expected_success else "failed"
+            actual = "successful" if bool(row.get("success")) else "failed"
+            raise ValueError(
+                f"episode {episode} was {actual} in the source evaluation; "
+                f"expected a {expected} row"
+            )
+        if not _protocol_effective(payload, row):
+            raise ValueError(
+                f"episode {episode} did not exercise the source scenario"
+            )
         selected[episode] = row
     return payload, selected, hashlib.sha256(raw).hexdigest(), source_path
 
@@ -523,30 +536,46 @@ def _protocol_effective(source, replay):
     )
 
 
-def _validate_replay(original, replay, source_identity, loaded_identity, source=None):
+def _validate_replay(
+    original,
+    replay,
+    source_identity,
+    loaded_identity,
+    source=None,
+    *,
+    expected_success=False,
+):
     if loaded_identity != source_identity:
         raise RuntimeError("loaded model identity differs from the source evaluation")
-    if bool(original.get("success")):
-        raise ValueError("the selected source row is not a failure")
-    if bool(replay.get("success")):
+    if bool(original.get("success")) is not bool(expected_success):
+        expected = "success" if expected_success else "failure"
+        raise ValueError(f"the selected source row is not a {expected}")
+    if bool(replay.get("success")) is not bool(expected_success):
+        expected = "successful" if expected_success else "failed"
+        actual = "successful" if bool(replay.get("success")) else "failed"
         raise RuntimeError(
-            f"episode {original.get('episode')} succeeded during replay; "
-            "no failure video will be published"
+            f"episode {original.get('episode')} was {actual} during replay; "
+            f"expected it to remain {expected}"
         )
     if replay.get("episode") != original.get("episode"):
         raise RuntimeError("replay episode identity differs from the source row")
     if int(replay.get("invalid_actions", 0)) != int(original.get("invalid_actions", 0)):
         raise RuntimeError(
             f"episode {original.get('episode')} changed its invalid-action count; "
-            "no failure video will be published"
+            "no trajectory video will be published"
         )
     if source is not None and not _protocol_effective(source, replay):
         raise RuntimeError(
             f"episode {original.get('episode')} did not reproduce the source "
-            "condition; no failure video will be published"
+            "condition; no trajectory video will be published"
         )
     confirmation = {
-        "replay_confirmed_failure": True,
+        (
+            "replay_confirmed_success"
+            if expected_success
+            else "replay_confirmed_failure"
+        ): True,
+        "expected_outcome": "success" if expected_success else "failure",
         "same_reason": replay.get("reason") == original.get("reason"),
         "same_steps": replay.get("steps") == original.get("steps"),
         "same_invalid_actions": True,
@@ -848,8 +877,105 @@ def _validate_output_key(value):
     return value
 
 
+def _validate_max_replay_attempts(value):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("--max-replay-attempts-per-episode must be an integer")
+    if value < 1:
+        raise ValueError("--max-replay-attempts-per-episode must be positive")
+    return value
+
+
+def _replay_attempt_protocol(maximum_attempts):
+    maximum_attempts = _validate_max_replay_attempts(maximum_attempts)
+    return {
+        "protocol_id": REPLAY_ATTEMPT_PROTOCOL_ID,
+        "max_replay_attempts_per_episode": maximum_attempts,
+        "attempt_ordinals_are_one_based": True,
+        "fresh_task_generation_per_attempt": True,
+        "seed_variation_plan_and_controller_unchanged_between_attempts": True,
+        "retryable_completed_result_mismatches": [
+            "outcome",
+            "source_condition",
+            "invalid_actions",
+        ],
+        "candidate_traversal": "episode_major_in_caller_order",
+        "exceptions_fail_closed": True,
+        "first_matching_attempt_only": True,
+        "one_video_per_source_episode": True,
+        "source_evaluation_immutable": True,
+        "replays_are_video_confirmation_not_evaluation": True,
+    }
+
+
+def _replay_output_stem(episode, episode_seed, attempt_ordinal):
+    return (
+        f"episode_{episode:03d}_seed_{episode_seed:03d}_"
+        f"attempt_{attempt_ordinal:03d}"
+    )
+
+
+def _assess_replay_attempt(original, replay, source, *, expected_success):
+    """Classify only the three completed-result mismatches as retryable."""
+
+    if replay.get("episode") != original.get("episode"):
+        raise RuntimeError("replay episode identity differs from the source row")
+    if bool(original.get("success")) is not bool(expected_success):
+        expected = "success" if expected_success else "failure"
+        raise ValueError(f"the selected source row is not a {expected}")
+
+    outcome_matched = bool(replay.get("success")) is bool(expected_success)
+    condition_reproduced = _protocol_effective(source, replay)
+    invalid_actions_matched = int(replay.get("invalid_actions", 0)) == int(
+        original.get("invalid_actions", 0)
+    )
+    confirmed = bool(
+        outcome_matched and condition_reproduced and invalid_actions_matched
+    )
+    if confirmed:
+        disposition = "published_first_match"
+    elif not outcome_matched:
+        disposition = "discarded_outcome_mismatch"
+    elif not condition_reproduced:
+        disposition = "discarded_source_condition_mismatch"
+    else:
+        disposition = "discarded_invalid_actions_mismatch"
+    return {
+        "replay_confirmed_outcome": outcome_matched,
+        "source_condition_reproduced": condition_reproduced,
+        "same_invalid_actions": invalid_actions_matched,
+        "confirmed_for_publication": confirmed,
+        "disposition": disposition,
+    }
+
+
+def _run_bounded_replay_attempts(maximum_attempts, runner):
+    """Run a source episode until its first match or its fixed bound."""
+
+    maximum_attempts = _validate_max_replay_attempts(maximum_attempts)
+    records = []
+    for ordinal in range(1, maximum_attempts + 1):
+        record = runner(ordinal)
+        if not isinstance(record, dict):
+            raise TypeError("replay attempt runner must return a dictionary")
+        if record.get("replay_attempt_ordinal") != ordinal:
+            raise RuntimeError("replay attempt ordinal is inconsistent")
+        if not isinstance(record.get("confirmed_for_publication"), bool):
+            raise RuntimeError("replay attempt publication decision is missing")
+        records.append(record)
+        if record["confirmed_for_publication"]:
+            return record, records
+    return None, records
+
+
 def record(args):
     episodes = _normalize_episode_indices(args.episode)
+    expected_success = args.expected_outcome == "success"
+    expected_outcome = "success" if expected_success else "failure"
+    schema = SCHEMA
+    maximum_attempts = _validate_max_replay_attempts(
+        getattr(args, "max_replay_attempts_per_episode", 1)
+    )
+    attempt_protocol = _replay_attempt_protocol(maximum_attempts)
     minimum_confirmed = len(episodes) if args.minimum_confirmed is None else args.minimum_confirmed
     if minimum_confirmed < 1 or minimum_confirmed > len(episodes):
         raise ValueError("--minimum-confirmed must be between one and the number of candidates")
@@ -860,6 +986,7 @@ def record(args):
         source_path,
         args.task,
         episodes,
+        expected_success=expected_success,
     )
     replay_protocol_id = _require_current_evaluator_protocol(source, args.task)
     replay_batch = _load_sealed_replay_batch(source, args.task)
@@ -867,7 +994,7 @@ def record(args):
     output_key = _validate_output_key(args.output_key or _default_output_key(source, args.task))
     target = Path(args.output_root).resolve() / output_key
     if target.exists():
-        raise FileExistsError(f"refusing to overwrite failure videos: {target}")
+        raise FileExistsError(f"refusing to overwrite trajectory videos: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{output_key}.staging-", dir=str(target.parent)))
     environment = worker = None
@@ -893,165 +1020,199 @@ def record(args):
                 originals[episode],
                 episode,
             )
-            (
-                task_environment,
-                descriptions,
-                observation,
-                fresh_task_generation,
-            ) = initialize_fresh_task_generation(
-                environment,
-                task_class,
-                episode_seed=formal_reset_seed,
-                variation=variation,
-                verify_instance=False,
-            )
-            stem = f"episode_{episode:03d}_seed_{episode_seed:03d}"
-            video_path = staging / f"{stem}.mp4"
-            recorder = ObservationRecorder(
-                video_path,
-                cameras=args.cameras,
-                fps=args.fps,
-                ffmpeg=args.ffmpeg,
-            )
-            proxy = RecordingTaskEnvironment(task_environment, recorder)
-            try:
-                recorder.capture(observation)
-                staged_source_binding = None
-                if replay_batch["family"] == "coordination":
-                    staged_source_binding = bind_staged_source_plan(
-                        proxy,
-                        motion_plan,
-                        descriptions=descriptions,
-                        fresh_task_generation=fresh_task_generation,
-                    )
-                    observation = proxy.get_observation()
-                replay = _run_selected_episode(
-                    proxy,
-                    worker,
-                    args.task,
-                    source,
+            plan_fingerprint = motion_plan.fingerprint()
+
+            def run_attempt(attempt_ordinal):
+                (
+                    task_environment,
+                    descriptions,
+                    observation,
+                    fresh_task_generation,
+                ) = initialize_fresh_task_generation(
+                    environment,
+                    task_class,
+                    episode_seed=formal_reset_seed,
+                    variation=variation,
+                    verify_instance=False,
+                )
+                stem = _replay_output_stem(
                     episode,
-                    motion_plan=motion_plan,
-                    trigger_step=trigger_step,
-                    descriptions=descriptions,
-                    observation=observation,
-                    fresh_task_generation=fresh_task_generation,
-                    staged_source_binding=staged_source_binding,
-                    budgets=budgets,
+                    episode_seed,
+                    attempt_ordinal,
                 )
-                _validate_replay_plan(replay_batch, replay, motion_plan)
-                recorder.close()
-            except Exception:
-                recorder.abort()
-                raise
-            attempt = {
-                "episode": episode,
-                "episode_seed": episode_seed,
-                "formal_reset_seed": formal_reset_seed,
-                "variation": variation,
-                "sealed_plan_fingerprint": motion_plan.fingerprint(),
-                "original_result": originals[episode],
-                "replay_result": replay,
-                "replay_confirmed_failure": not bool(replay.get("success")),
-                "source_condition_reproduced": _protocol_effective(source, replay),
-                "same_invalid_actions": int(replay.get("invalid_actions", 0))
-                == int(originals[episode].get("invalid_actions", 0)),
-            }
-            attempts.append(attempt)
-            if (
-                bool(replay.get("success"))
-                or not attempt["source_condition_reproduced"]
-                or not attempt["same_invalid_actions"]
-            ):
-                video_path.unlink()
-                if bool(replay.get("success")):
-                    reason = "replay succeeded"
-                elif not attempt["source_condition_reproduced"]:
-                    reason = "source condition was not reproduced"
-                else:
-                    reason = "invalid-action count differed from the source row"
-                print(
-                    f"{args.task} episode {episode}: {reason}; "
-                    "discarded from the failure-video set",
-                    flush=True,
+                video_path = staging / f"{stem}.mp4"
+                recorder = ObservationRecorder(
+                    video_path,
+                    cameras=args.cameras,
+                    fps=args.fps,
+                    ffmpeg=args.ffmpeg,
                 )
-                continue
-            confirmation = _validate_replay(
-                originals[episode],
-                replay,
-                source["model_identity"],
-                worker.model_identity,
-                source,
-            )
-            sidecar = {
-                "schema": SCHEMA,
-                "task": args.task,
-                "source_task": source.get("task"),
-                "scenario": source["scenario"],
-                "episode": episode,
-                "episode_seed": episode_seed,
-                "formal_reset_seed": formal_reset_seed,
-                "variation": variation,
-                "sealed_plan_fingerprint": motion_plan.fingerprint(),
-                "fixed_eval_set": source["fixed_eval_set"],
-                "source_result": str(resolved_source),
-                "source_result_sha256": source_sha,
-                "evaluation_protocol_id": replay_protocol_id,
-                "source_protocol": (
-                    source.get("coordination_protocol")
-                    or source.get("scenario_protocol")
-                    or source.get("protocol")
-                ),
-                "model_identity": worker.model_identity,
-                "original_result": originals[episode],
-                "replay_result": replay,
-                **confirmation,
-                "video": {
-                    "file": video_path.name,
-                    "sha256": _sha256(video_path),
-                    "requested_cameras": list(args.cameras),
-                    "used_cameras": list(recorder.used_cameras),
-                    "layout": "horizontal_left_to_right",
-                    "source_resolution": list(args.resolution),
-                    "encoded_resolution": [
-                        recorder.frame_shape[1],
-                        recorder.frame_shape[0],
-                    ],
-                    "fps": args.fps,
-                    "frames": recorder.frames,
-                    "codec": "H.264/yuv420p",
-                },
-                "policy_inputs_unchanged": True,
-                "capture_granularity": "returned_high_level_observations",
-            }
-            sidecar_path = staging / f"{stem}.json"
-            atomic_json(sidecar_path, sidecar)
-            manifest_rows.append(
-                {
+                proxy = RecordingTaskEnvironment(task_environment, recorder)
+                try:
+                    recorder.capture(observation)
+                    staged_source_binding = None
+                    if replay_batch["family"] == "coordination":
+                        staged_source_binding = bind_staged_source_plan(
+                            proxy,
+                            motion_plan,
+                            descriptions=descriptions,
+                            fresh_task_generation=fresh_task_generation,
+                        )
+                        observation = proxy.get_observation()
+                    replay = _run_selected_episode(
+                        proxy,
+                        worker,
+                        args.task,
+                        source,
+                        episode,
+                        motion_plan=motion_plan,
+                        trigger_step=trigger_step,
+                        descriptions=descriptions,
+                        observation=observation,
+                        fresh_task_generation=fresh_task_generation,
+                        staged_source_binding=staged_source_binding,
+                        budgets=budgets,
+                    )
+                    _validate_replay_plan(replay_batch, replay, motion_plan)
+                    recorder.close()
+                except Exception:
+                    recorder.abort()
+                    raise
+
+                assessment = _assess_replay_attempt(
+                    originals[episode],
+                    replay,
+                    source,
+                    expected_success=expected_success,
+                )
+                attempt = {
                     "episode": episode,
                     "episode_seed": episode_seed,
                     "formal_reset_seed": formal_reset_seed,
                     "variation": variation,
-                    "sealed_plan_fingerprint": motion_plan.fingerprint(),
-                    "video": video_path.name,
-                    "video_sha256": sidecar["video"]["sha256"],
-                    "metadata": sidecar_path.name,
-                    "replay_confirmed_failure": True,
+                    "sealed_plan_fingerprint": plan_fingerprint,
+                    "replay_attempt_ordinal": attempt_ordinal,
+                    "original_result": originals[episode],
+                    "replay_result": replay,
+                    "expected_outcome": expected_outcome,
+                    **assessment,
                 }
+                if not attempt["confirmed_for_publication"]:
+                    video_path.unlink()
+                    reason = {
+                        "discarded_outcome_mismatch": (
+                            "replay outcome did not match the source row"
+                        ),
+                        "discarded_source_condition_mismatch": (
+                            "source condition was not reproduced"
+                        ),
+                        "discarded_invalid_actions_mismatch": (
+                            "invalid-action count differed from the source row"
+                        ),
+                    }[attempt["disposition"]]
+                    print(
+                        f"{args.task} episode {episode} attempt "
+                        f"{attempt_ordinal}/{maximum_attempts}: {reason}; "
+                        "discarded from the trajectory-video set",
+                        flush=True,
+                    )
+                    return attempt
+
+                confirmation = _validate_replay(
+                    originals[episode],
+                    replay,
+                    source["model_identity"],
+                    worker.model_identity,
+                    source,
+                    expected_success=expected_success,
+                )
+                sidecar = {
+                    "schema": schema,
+                    "task": args.task,
+                    "source_task": source.get("task"),
+                    "scenario": source["scenario"],
+                    "episode": episode,
+                    "episode_seed": episode_seed,
+                    "formal_reset_seed": formal_reset_seed,
+                    "variation": variation,
+                    "sealed_plan_fingerprint": plan_fingerprint,
+                    "replay_attempt_ordinal": attempt_ordinal,
+                    "replay_attempt_disposition": attempt["disposition"],
+                    "confirmed_for_publication": True,
+                    "replay_attempt_protocol": attempt_protocol,
+                    "fixed_eval_set": source["fixed_eval_set"],
+                    "source_result": str(resolved_source),
+                    "source_result_sha256": source_sha,
+                    "evaluation_protocol_id": replay_protocol_id,
+                    "source_protocol": (
+                        source.get("coordination_protocol")
+                        or source.get("scenario_protocol")
+                        or source.get("protocol")
+                    ),
+                    "model_identity": worker.model_identity,
+                    "original_result": originals[episode],
+                    "replay_result": replay,
+                    **confirmation,
+                    "video": {
+                        "file": video_path.name,
+                        "sha256": _sha256(video_path),
+                        "requested_cameras": list(args.cameras),
+                        "used_cameras": list(recorder.used_cameras),
+                        "layout": "horizontal_left_to_right",
+                        "source_resolution": list(args.resolution),
+                        "encoded_resolution": [
+                            recorder.frame_shape[1],
+                            recorder.frame_shape[0],
+                        ],
+                        "fps": args.fps,
+                        "frames": recorder.frames,
+                        "codec": "H.264/yuv420p",
+                    },
+                    "policy_inputs_unchanged": True,
+                    "capture_granularity": "returned_high_level_observations",
+                }
+                sidecar_path = staging / f"{stem}.json"
+                atomic_json(sidecar_path, sidecar)
+                manifest_rows.append(
+                    {
+                        "episode": episode,
+                        "episode_seed": episode_seed,
+                        "formal_reset_seed": formal_reset_seed,
+                        "variation": variation,
+                        "sealed_plan_fingerprint": plan_fingerprint,
+                        "replay_attempt_ordinal": attempt_ordinal,
+                        "replay_attempt_disposition": attempt["disposition"],
+                        "confirmed_for_publication": True,
+                        "video": video_path.name,
+                        "video_sha256": sidecar["video"]["sha256"],
+                        "metadata": sidecar_path.name,
+                        "metadata_sha256": _sha256(sidecar_path),
+                        "expected_outcome": expected_outcome,
+                        "replay_confirmed_outcome": True,
+                    }
+                )
+                print(
+                    f"{args.task} episode {episode} attempt "
+                    f"{attempt_ordinal}/{maximum_attempts}: confirmed "
+                    f"{expected_outcome}, wrote {recorder.frames} frames",
+                    flush=True,
+                )
+                return attempt
+
+            _accepted, episode_attempts = _run_bounded_replay_attempts(
+                maximum_attempts,
+                run_attempt,
             )
-            print(
-                f"{args.task} episode {episode}: confirmed failure, wrote {recorder.frames} frames",
-                flush=True,
-            )
+            attempts.extend(episode_attempts)
             if len(manifest_rows) == minimum_confirmed:
                 break
         if len(manifest_rows) < minimum_confirmed:
             raise RuntimeError(
                 f"only {len(manifest_rows)} of {minimum_confirmed} required "
-                "failure replays were confirmed; nothing will be published"
+                f"{expected_outcome} replays were confirmed; nothing will be published"
             )
         manifest = {
-            "schema": SCHEMA,
+            "schema": schema,
             "task": args.task,
             "source_task": source.get("task"),
             "scenario": source["scenario"],
@@ -1068,7 +1229,10 @@ def record(args):
             ),
             "policy_controller_semantics": "identical_to_source_evaluator",
             "policy_inputs_unchanged": True,
-            "required_confirmed_failures": minimum_confirmed,
+            "expected_outcome": expected_outcome,
+            "required_confirmed_trajectories": minimum_confirmed,
+            "candidate_episode_order": list(episodes),
+            "replay_attempt_protocol": attempt_protocol,
             "attempts": attempts,
             "episodes": manifest_rows,
         }
@@ -1096,12 +1260,31 @@ def build_parser():
         help="Exact source-evaluation episode index; repeat for multiple videos.",
     )
     parser.add_argument(
+        "--expected-outcome",
+        choices=("failure", "success"),
+        default="failure",
+        help=(
+            "Required source and replay outcome. Defaults to failure for "
+            "backward compatibility."
+        ),
+    )
+    parser.add_argument(
         "--minimum-confirmed",
         type=int,
         default=None,
         help=(
-            "Publish after this many candidates replay as failures. By default, "
-            "every selected episode must remain a failure."
+            "Publish after this many candidates reproduce the requested outcome. "
+            "By default, every selected episode must match."
+        ),
+    )
+    parser.add_argument(
+        "--max-replay-attempts-per-episode",
+        type=int,
+        default=1,
+        help=(
+            "Bounded fresh replays of each fixed source episode. Only completed "
+            "outcome, source-condition, or invalid-action mismatches are retried; "
+            "all exceptions fail closed."
         ),
     )
     parser.add_argument("--source-result", type=Path, default=None)
@@ -1145,6 +1328,7 @@ def main(argv=None):
         raise ValueError("fps and resolution must be positive")
     if args.policy_timeout <= 0.0:
         raise ValueError("policy timeout must be positive")
+    _validate_max_replay_attempts(args.max_replay_attempts_per_episode)
     if not args.ffmpeg.is_file():
         raise FileNotFoundError(f"ffmpeg executable is unavailable: {args.ffmpeg}")
     return 0 if record(args) else 1
