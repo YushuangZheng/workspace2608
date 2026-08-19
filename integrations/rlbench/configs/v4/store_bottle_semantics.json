@@ -1,0 +1,92 @@
+{
+  "schema": "rlbench-store-bottle-semantic-scene-v4",
+  "semantic_version": "store_bottle_clean_v4",
+  "release": {
+    "name": "v4",
+    "training_data_root": "integrations/rlbench/data/v4/store_bottle",
+    "models_root": "integrations/rlbench/models/v4",
+    "evaluation_set_id": "rlbench_eval_v2",
+    "other_task_models": "inherit_v3_byte_for_byte_and_record_in_release_manifest"
+  },
+  "task": {
+    "task_name": "bimanual_put_bottle_in_fridge",
+    "paper_task_name": "StoreBottle",
+    "module": "integrations.rlbench.rlbench_dynamac.store_bottle_live_v4",
+    "class_name": "BimanualPutBottleInFridgeSemanticV4",
+    "legacy_ttm_task_name": "bimanual_put_bottle_in_fridge",
+    "legacy_ttm_path": "RLBench/rlbench/task_ttms/bimanual_put_bottle_in_fridge.ttm",
+    "legacy_ttm_sha256": "845ac4c0f68a809fb33c06a5d2a57a92a6964315ecc43acb488d4618613505ae"
+  },
+  "observation": {
+    "source_expression": "BimanualPutBottleInFridgeSemanticV4.get_low_dim_state: [bottle, fridge_base as fridge]",
+    "source_status": "STORE_BOTTLE_SEMANTIC_V4_LIVE_TASK_EXACT",
+    "pose_chunks": [
+      {
+        "name": "bottle",
+        "role": "operated_object",
+        "scene_object_name": "bottle"
+      },
+      {
+        "name": "fridge",
+        "role": "physical_environment_reference",
+        "scene_object_name": "fridge_base"
+      }
+    ]
+  },
+  "entity_groups": {
+    "bottle": {
+      "semantic_root_name": "bottle_root",
+      "scene_root_name": "fridge_root",
+      "scene_root_type": "SHAPE",
+      "frame_name": "bottle",
+      "frame_object_name": "bottle",
+      "parents": {
+        "fridge_root": "bimanual_put_bottle_in_fridge",
+        "bottle": "fridge_root",
+        "bottle_visual": "bottle",
+        "cap_visual": "bottle",
+        "label": "bottle",
+        "waypoint4": "bottle",
+        "waypoint5": "bottle",
+        "waypoint6": "waypoint5"
+      }
+    },
+    "fridge": {
+      "semantic_root_name": "fridge_root",
+      "scene_root_name": "fridge_base",
+      "scene_root_type": "SHAPE",
+      "frame_name": "fridge",
+      "frame_object_name": "fridge_base",
+      "parents": {
+        "fridge_base": "bimanual_put_bottle_in_fridge",
+        "fridge_base_visual": "fridge_base",
+        "bottom_joint": "fridge_base",
+        "door_bottom": "bottom_joint",
+        "door_bottom_visual": "door_bottom",
+        "top_joint": "fridge_base",
+        "door_top": "top_joint",
+        "door_top_visual": "door_top",
+        "shelf0": "fridge_base",
+        "shelf1": "shelf0",
+        "shelf2": "shelf0",
+        "success": "fridge_base",
+        "waypoint0": "fridge_base",
+        "waypoint1": "waypoint0",
+        "waypoint2": "waypoint0",
+        "waypoint3": "fridge_base",
+        "waypoint7": "fridge_base",
+        "waypoint8": "waypoint7"
+      }
+    }
+  },
+  "legacy_compatibility": {
+    "legacy_class_unchanged": "BimanualPutBottleInFridge",
+    "legacy_low_dim_frames": [
+      "bottle",
+      "fridge_root"
+    ],
+    "legacy_boundary_root_unchanged": "fridge_root",
+    "semantic_v4_must_not_infer_dynamic_entities_from_boundary_root": true,
+    "sealed_v1_artifacts_remain_read_only": true
+  }
+}

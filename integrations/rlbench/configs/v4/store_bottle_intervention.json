@@ -1,0 +1,62 @@
+{
+  "schema": "rlbench-dynamac-store-bottle-intervention-v4",
+  "release": "v4",
+  "task": "bimanual_put_bottle_in_fridge",
+  "formal_scenarios": [
+    "static",
+    "teleport"
+  ],
+  "clock": "successfully_committed_policy_ticks",
+  "application_timing": "before_requesting_policy_action_at_global_tick",
+  "triggers": {
+    "bottle": {
+      "arm": "left",
+      "frame": "bottle",
+      "skill_label": 0,
+      "local_tick": 60,
+      "global_tick": 60,
+      "expected_gripper_state": "open",
+      "interaction_event": "left gripper approaching the bottle before grasp"
+    },
+    "fridge": {
+      "arm": "right",
+      "frame": "fridge",
+      "skill_label": 0,
+      "local_tick": 45,
+      "global_tick": 45,
+      "expected_gripper_state": "open",
+      "interaction_event": "right gripper approaching the fridge handle before door grasp"
+    }
+  },
+  "teleport": {
+    "applications_per_moved_entity": 1,
+    "entities_trigger_independently": true,
+    "observation_refreshed_before_policy_action": true
+  },
+  "final_settling_physics_steps": 10,
+  "evidence": {
+    "training_manifest_path": "integrations/rlbench/models/v4/bimanual_put_bottle_in_fridge/training.json",
+    "training_manifest_sha256": "46ed3b974abcc635114db12c1ba738edef0a09c00692694e7a9c49cbb82c9525",
+    "training_identity_fingerprint": "45c6aaad0ab9df4610a8332f092d44b83df7ab5a6a40d0683380eacf286de4dc",
+    "collection_manifest_path": "integrations/rlbench/data/v4/store_bottle/collection_manifest.json",
+    "collection_manifest_sha256": "8b205d2190494e66a7f1083bb00fcc3572619f0e88cdf3f5748726344754668c",
+    "checkpoint_skill0_duration": {
+      "left": 115,
+      "right": 113
+    },
+    "expert_first_gripper_close_indices": {
+      "left": [96, 140, 123, 127, 93],
+      "right": [93, 138, 120, 125, 90]
+    },
+    "expert_projected_trigger_indices": {
+      "bottle": [50, 73, 64, 66, 48],
+      "fridge": [37, 55, 48, 50, 36]
+    },
+    "expert_gripper_open_at_all_projected_triggers": true,
+    "selection_authority": "manual_pre_interaction_skill_semantics_from_v4_checkpoint_and_five_static_expert_demonstrations",
+    "integer_ticks_authoritative": true,
+    "policy_evaluation_results_read": false,
+    "result_based_retuning_forbidden": true,
+    "legacy_v3_profile_unchanged": true
+  }
+}

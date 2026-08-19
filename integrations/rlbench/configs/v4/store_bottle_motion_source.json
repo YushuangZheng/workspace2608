@@ -1,0 +1,90 @@
+{
+  "schema": "rlbench-dynamac-store-bottle-motion-source-v4",
+  "release": "v4",
+  "task": "bimanual_put_bottle_in_fridge",
+  "task_semantics": {
+    "schema": "rlbench-store-bottle-semantic-scene-v4",
+    "semantic_version": "store_bottle_clean_v4",
+    "semantic_config_path": "integrations/rlbench/configs/v4/store_bottle_semantics.json",
+    "semantic_config_sha256": "39e2fd5cb0237cc2322cae8aab17678f457f01c2eb307d7e6d19570be19c1658",
+    "task_class": "integrations.rlbench.rlbench_dynamac.store_bottle_live_v4.BimanualPutBottleInFridgeSemanticV4",
+    "low_dim_frames": [
+      "bottle",
+      "fridge"
+    ],
+    "independent_roots": {
+      "bottle": "fridge_root",
+      "fridge": "fridge_base"
+    }
+  },
+  "source_selection_max_attempts": 20,
+  "goal_sampling_max_attempts": 100,
+  "episode_mode_schedule": {
+    "formula": "episode_index_mod_3",
+    "mapping": {
+      "0": "bottle_only",
+      "1": "fridge_only",
+      "2": "both"
+    },
+    "formal_n200_counts": {
+      "bottle_only": 67,
+      "fridge_only": 67,
+      "both": 66
+    }
+  },
+  "entities": {
+    "bottle": {
+      "frame": "bottle",
+      "root": "fridge_root",
+      "translation": {
+        "reference": "entity_source_A_root",
+        "frame": "world_xy",
+        "radial_min_m": 0.03,
+        "radial_max_m": 0.1,
+        "z_delta_m": 0.0
+      },
+      "rotation": {
+        "composition": "world_z_yaw_left_multiply_source_quaternion",
+        "yaw_delta_abs_max_rad": 0.1,
+        "roll_pitch": "unchanged_from_source_A"
+      },
+      "candidate_seed_salt": 1013904223
+    },
+    "fridge": {
+      "frame": "fridge",
+      "root": "fridge_base",
+      "translation": {
+        "reference": "entity_source_A_root",
+        "frame": "world_xy",
+        "radial_min_m": 0.02,
+        "radial_max_m": 0.05,
+        "z_delta_m": 0.0
+      },
+      "rotation": {
+        "composition": "world_z_yaw_left_multiply_source_quaternion",
+        "yaw_delta_abs_max_rad": 0.05,
+        "roll_pitch": "unchanged_from_source_A"
+      },
+      "candidate_seed_salt": 2654435761
+    }
+  },
+  "candidate_generation": {
+    "protocol_id": "store-bottle-independent-entity-source-relative-candidate-v4",
+    "attempt_seed": "(logical_episode_seed*1000003 + variation*9176 + attempt*7919) % 4294967295",
+    "entity_seed": "(attempt_seed*1664525 + entity_salt) % 4294967295",
+    "distribution": "radius_uniform_angle_uniform_yaw_delta_uniform_per_moved_entity",
+    "acceptance": [
+      "task_validate_all_waypoints",
+      "workspace_fit_for_bottle_frame_and_source_local_envelope_for_fixed_fridge_fixture",
+      "no_new_robot_collision_pairs",
+      "minimum_paired_arm_waypoint_distance",
+      "minimum_bottle_to_fridge_door_sweep_proxy_clearance"
+    ],
+    "minimum_paired_arm_waypoint_distance_m": 0.18,
+    "minimum_bottle_to_fridge_door_sweep_proxy_clearance_m": 0.2,
+    "selection_authority": "scene_validity_only",
+    "policy_result_fields_read": false,
+    "result_based_candidate_selection_forbidden": true
+  },
+  "runtime_loader": "store-bottle-multi-entity-motion-plan-batch-v4"
+}

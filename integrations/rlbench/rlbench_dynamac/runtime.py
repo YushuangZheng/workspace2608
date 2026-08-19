@@ -399,6 +399,10 @@ def _validate_fresh_task_generation_evidence(
 # identical to the demonstration.
 DEMONSTRATION_GRIPPER_ACTUATION_VELOCITY = 0.04
 DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS = 3
+IK_SAMPLING_TRIALS = 100
+IK_SAMPLING_MAX_CONFIGS = 5
+IK_SAMPLING_MAX_TIME_MS = 10
+IK_JOINT_LIMIT_ATOL = 1.0e-9
 
 
 @dataclass
@@ -440,6 +444,198 @@ class PrimaryActionRetryBudget:
             "exhaustion_reason": "primary_action_retry_exhausted",
             "counter_reset": "after_successful_primary_action_commit",
         }
+
+
+def initialize_ik_solver_diagnostics() -> dict[str, Any]:
+    """Return compact counters shared by the uni- and bimanual IK modes."""
+
+    return {
+        "jacobian_failures": 0,
+        "jacobian_candidate_rejections": 0,
+        "sampling_fallback_successes": 0,
+        "sampling_fallback_failures": 0,
+        "sampling_candidates_evaluated": 0,
+        "candidate_rejections_nonfinite": 0,
+        "candidate_rejections_joint_limits": 0,
+        "candidate_rejections_shape": 0,
+        "selected_via_jacobian": 0,
+        "selected_via_sampling": 0,
+        "selected_joint_delta_l2_max": 0.0,
+    }
+
+
+def _increment_ik_diagnostic(
+    diagnostics: dict[str, Any], key: str, amount: int = 1
+) -> None:
+    diagnostics[key] = int(diagnostics.get(key, 0)) + amount
+
+
+def _record_ik_candidate_rejection(
+    diagnostics: dict[str, Any], reason: str
+) -> None:
+    _increment_ik_diagnostic(diagnostics, f"candidate_rejections_{reason}")
+
+
+def _joint_limit_specification(
+    arm: Any, current_joints: Array
+) -> tuple[tuple[bool, float, float], ...]:
+    cyclics, intervals = arm.get_joint_intervals()
+    if len(cyclics) != current_joints.size or len(intervals) != current_joints.size:
+        raise ValueError("joint interval count does not match current joint state")
+
+    limits = []
+    for cyclic, interval in zip(cyclics, intervals):
+        if bool(cyclic):
+            limits.append((True, -math.inf, math.inf))
+            continue
+        values = np.asarray(interval, dtype=np.float64)
+        if values.shape != (2,) or not np.all(np.isfinite(values)):
+            raise ValueError("non-cyclic joint interval must be two finite values")
+        lower = float(values[0])
+        span = float(values[1])
+        upper = lower + span
+        if span < 0.0 or not math.isfinite(upper):
+            raise ValueError("non-cyclic joint interval range must be non-negative")
+        limits.append((False, lower, upper))
+    return tuple(limits)
+
+
+def _validated_ik_candidate(
+    candidate: Any,
+    *,
+    current_joints: Array,
+    limits: tuple[tuple[bool, float, float], ...],
+) -> tuple[Array | None, str | None]:
+    try:
+        joints = np.asarray(candidate, dtype=np.float64)
+    except (TypeError, ValueError):
+        return None, "shape"
+    if joints.shape != current_joints.shape:
+        return None, "shape"
+    if not np.all(np.isfinite(joints)):
+        return None, "nonfinite"
+    for value, (cyclic, lower, upper) in zip(joints, limits):
+        if cyclic:
+            continue
+        if value < lower - IK_JOINT_LIMIT_ATOL or value > upper + IK_JOINT_LIMIT_ATOL:
+            return None, "joint_limits"
+    return joints.copy(), None
+
+
+def solve_absolute_ee_ik_with_sampling_fallback(
+    arm: Any,
+    target: Array,
+    *,
+    diagnostics: dict[str, Any],
+    ik_error: type[Exception],
+    configuration_error: type[Exception],
+    invalid_action_error: type[Exception],
+    error_message: str,
+) -> Array:
+    """Solve one absolute EE target with a validated, collision-aware fallback.
+
+    Jacobian IK remains the local first choice and has no PyRep collision-check
+    option.  If it fails or returns an invalid joint vector, sampling explicitly
+    enables collision checking.  All returned configurations are checked for
+    shape, finite values, and non-cyclic joint limits before the valid solution
+    nearest to the current joint state is selected.
+    """
+
+    target = np.asarray(target, dtype=np.float64)
+    current_joints = np.asarray(arm.get_joint_positions(), dtype=np.float64)
+    if current_joints.ndim != 1 or not np.all(np.isfinite(current_joints)):
+        raise invalid_action_error(error_message)
+    try:
+        limits = _joint_limit_specification(arm, current_joints)
+    except (TypeError, ValueError) as exc:
+        raise invalid_action_error(error_message) from exc
+
+    try:
+        jacobian_result = arm.solve_ik_via_jacobian(
+            target[:3], quaternion=target[3:], relative_to=None
+        )
+    except ik_error:
+        _increment_ik_diagnostic(diagnostics, "jacobian_failures")
+    else:
+        candidate, rejection = _validated_ik_candidate(
+            jacobian_result,
+            current_joints=current_joints,
+            limits=limits,
+        )
+        if candidate is not None:
+            _increment_ik_diagnostic(diagnostics, "selected_via_jacobian")
+            delta = float(np.linalg.norm(candidate - current_joints))
+            diagnostics["selected_joint_delta_l2_max"] = max(
+                float(diagnostics.get("selected_joint_delta_l2_max", 0.0)),
+                delta,
+            )
+            return candidate
+        _increment_ik_diagnostic(diagnostics, "jacobian_candidate_rejections")
+        _record_ik_candidate_rejection(diagnostics, str(rejection))
+
+    try:
+        sampling_result = arm.solve_ik_via_sampling(
+            target[:3],
+            quaternion=target[3:],
+            ignore_collisions=False,
+            trials=IK_SAMPLING_TRIALS,
+            max_configs=IK_SAMPLING_MAX_CONFIGS,
+            max_time_ms=IK_SAMPLING_MAX_TIME_MS,
+            relative_to=None,
+        )
+    except configuration_error as exc:
+        _increment_ik_diagnostic(diagnostics, "sampling_fallback_failures")
+        raise invalid_action_error(error_message) from exc
+
+    if isinstance(sampling_result, np.ndarray):
+        if sampling_result.ndim == 2:
+            candidates = tuple(sampling_result)
+        elif sampling_result.ndim == 1 and sampling_result.size:
+            candidates = (sampling_result,)
+        elif sampling_result.size == 0:
+            candidates = ()
+        else:
+            candidates = (sampling_result,)
+    else:
+        try:
+            values = tuple(sampling_result)
+        except TypeError:
+            candidates = (sampling_result,)
+        else:
+            if values and all(np.asarray(value).ndim == 0 for value in values):
+                candidates = (values,)
+            else:
+                candidates = values
+
+    valid_candidates = []
+    for raw_candidate in candidates:
+        _increment_ik_diagnostic(diagnostics, "sampling_candidates_evaluated")
+        candidate, rejection = _validated_ik_candidate(
+            raw_candidate,
+            current_joints=current_joints,
+            limits=limits,
+        )
+        if candidate is None:
+            _record_ik_candidate_rejection(diagnostics, str(rejection))
+            continue
+        valid_candidates.append(candidate)
+
+    if not valid_candidates:
+        _increment_ik_diagnostic(diagnostics, "sampling_fallback_failures")
+        raise invalid_action_error(error_message)
+
+    selected = min(
+        valid_candidates,
+        key=lambda candidate: float(np.linalg.norm(candidate - current_joints)),
+    )
+    _increment_ik_diagnostic(diagnostics, "sampling_fallback_successes")
+    _increment_ik_diagnostic(diagnostics, "selected_via_sampling")
+    delta = float(np.linalg.norm(selected - current_joints))
+    diagnostics["selected_joint_delta_l2_max"] = max(
+        float(diagnostics.get("selected_joint_delta_l2_max", 0.0)),
+        delta,
+    )
+    return selected.copy()
 
 
 def final_settling_metadata(
@@ -1881,6 +2077,106 @@ def _workspace_boundary_contains_root(scene: Any, root: Any) -> bool:
         )
         for boundary in boundaries
     )
+
+
+def _workspace_boundary_accepts_current_root(scene: Any, root: Any) -> bool:
+    """Check an explicitly commanded root pose against the RLBench workspace.
+
+    ``SpawnBoundary.sample`` chooses both the pose and placement.  V4 LiftTray
+    instead preregisters B as a source-relative transform, so staging needs the
+    same bounding-box admission check without asking the sampler to replace B.
+    This mirrors the pinned fork's ``BoundaryObject.add`` geometry and does not
+    mutate its private contained-object ledger.
+    """
+
+    workspace = getattr(scene, "_workspace_boundary", None)
+    boundaries = getattr(workspace, "_boundaries", None)
+    if not isinstance(boundaries, list) or not boundaries:
+        raise RuntimeError("RLBench workspace placement audit is unavailable")
+    is_model = getattr(root, "is_model", None)
+    if not callable(is_model):
+        raise RuntimeError("RLBench boundary-root model query is unavailable")
+    bounds_getter = (
+        getattr(root, "get_model_bounding_box", None)
+        if bool(is_model())
+        else getattr(root, "get_bounding_box", None)
+    )
+    if not callable(bounds_getter):
+        raise RuntimeError("RLBench boundary-root bounding box is unavailable")
+    bounds = np.asarray(bounds_getter(), dtype=np.float64)
+    if bounds.shape != (6,) or not np.all(np.isfinite(bounds)):
+        raise RuntimeError("RLBench boundary-root bounding box is invalid")
+    points = np.asarray(
+        [
+            [x, y, z]
+            for x in (bounds[0], bounds[1])
+            for y in (bounds[2], bounds[3])
+            for z in (bounds[4], bounds[5])
+        ],
+        dtype=np.float64,
+    )
+    for entry in boundaries:
+        boundary_object = getattr(entry, "_boundary", None)
+        boundary_box = getattr(entry, "_boundary_bbox", None)
+        if boundary_object is None or boundary_box is None:
+            raise RuntimeError("RLBench workspace boundary internals are unavailable")
+        orientation = np.asarray(
+            root.get_orientation(boundary_object),
+            dtype=np.float64,
+        )
+        position = np.asarray(
+            root.get_position(boundary_object),
+            dtype=np.float64,
+        )
+        if (
+            orientation.shape != (3,)
+            or position.shape != (3,)
+            or not np.all(np.isfinite(orientation))
+            or not np.all(np.isfinite(position))
+        ):
+            raise RuntimeError("RLBench boundary-relative root pose is invalid")
+        rx, ry, rz = orientation
+        rotation_x = np.asarray(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, math.cos(rx), -math.sin(rx)],
+                [0.0, math.sin(rx), math.cos(rx)],
+            ]
+        )
+        rotation_y = np.asarray(
+            [
+                [math.cos(ry), 0.0, math.sin(ry)],
+                [0.0, 1.0, 0.0],
+                [-math.sin(ry), 0.0, math.cos(ry)],
+            ]
+        )
+        rotation_z = np.asarray(
+            [
+                [math.cos(rz), -math.sin(rz), 0.0],
+                [math.sin(rz), math.cos(rz), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        # Match the row-vector convention used by pinned SpawnBoundary.
+        rotated = np.dot(points, np.dot(rotation_z, np.dot(rotation_y, rotation_x)))
+        minimum = np.amin(rotated, axis=0) + position
+        maximum = np.amax(rotated, axis=0) + position
+        within_xy = bool(
+            minimum[0] > float(boundary_box.min_x)
+            and maximum[0] < float(boundary_box.max_x)
+            and minimum[1] > float(boundary_box.min_y)
+            and maximum[1] < float(boundary_box.max_y)
+        )
+        within_z = bool(
+            getattr(entry, "_is_plane", False)
+            or (
+                minimum[2] > float(boundary_box.min_z)
+                and maximum[2] < float(boundary_box.max_z)
+            )
+        )
+        if within_xy and within_z:
+            return True
+    return False
 
 
 def _workspace_source_placement_succeeded(scene: Any, task: Any) -> bool:
@@ -3509,6 +3805,7 @@ def stage_scenario_motion_plan(
     task_name: str | None = None,
     max_attempts: int = 100,
     source_max_attempts: int = DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS,
+    goal_candidate_sampler: Any = None,
 ) -> StagedMotionPlan:
     """Certify deterministic A offline, then sample B from fresh A rebuilds."""
 
@@ -3518,6 +3815,8 @@ def stage_scenario_motion_plan(
         raise ValueError("source selection max attempts must be positive")
     if source_max_attempts != DEFAULT_SOURCE_SELECTION_MAX_ATTEMPTS:
         raise ValueError("source selection max attempts differ from frozen protocol")
+    if goal_candidate_sampler is not None and not callable(goal_candidate_sampler):
+        raise TypeError("goal candidate sampler must be callable or None")
     from .v3_protocol import load_v3_motion_source_protocol, motion_source_profile
 
     motion_source_protocol = load_v3_motion_source_protocol()
@@ -3739,15 +4038,43 @@ def stage_scenario_motion_plan(
         np.random.seed(candidate_seed)
         workspace_boundary.clear()
         try:
-            root.set_orientation(initial_orientation)
-            workspace_boundary.sample(
-                root,
-                min_rotation=min_rotation,
-                max_rotation=max_rotation,
-            )
-            if not _workspace_boundary_contains_root(scene, root):
+            if goal_candidate_sampler is None:
+                root.set_orientation(initial_orientation)
+                workspace_boundary.sample(
+                    root,
+                    min_rotation=min_rotation,
+                    max_rotation=max_rotation,
+                )
+                placement_succeeded = _workspace_boundary_contains_root(
+                    scene,
+                    root,
+                )
+                candidate = np.asarray(root.get_pose(), dtype=np.float64).copy()
+            else:
+                candidate = np.asarray(
+                    goal_candidate_sampler(
+                        np.asarray(current_source_pose, dtype=np.float64).copy(),
+                        candidate_seed,
+                    ),
+                    dtype=np.float64,
+                )
+                if candidate.shape != (7,) or not np.all(np.isfinite(candidate)):
+                    raise RuntimeError(
+                        "explicit goal candidate sampler returned an invalid root pose"
+                    )
+                root.set_pose(candidate)
+                candidate = np.asarray(root.get_pose(), dtype=np.float64).copy()
+                placement_succeeded = _workspace_boundary_accepts_current_root(
+                    scene,
+                    root,
+                )
+            if not placement_succeeded:
                 placement_rejections += 1
-                last_error = "workspace sampler did not record a successful goal"
+                last_error = (
+                    "workspace sampler did not record a successful goal"
+                    if goal_candidate_sampler is None
+                    else "goal candidate does not fit the workspace boundary"
+                )
                 goal_attempt_rows.append(
                     {
                         "attempt": attempt,
@@ -3760,7 +4087,6 @@ def stage_scenario_motion_plan(
                     }
                 )
                 continue
-            candidate = np.asarray(root.get_pose(), dtype=np.float64).copy()
             if candidate.shape != (7,) or not np.all(np.isfinite(candidate)):
                 raise RuntimeError("workspace sampler returned an invalid root pose")
             if not _root_motion_metrics(
@@ -4320,6 +4646,17 @@ class ScenarioController:
         if self.motion_plan is not None:
             if not isinstance(self.motion_plan, StagedMotionPlan):
                 raise TypeError("motion_plan must be a StagedMotionPlan")
+            if self.motion_plan.validation.get("v4_lift_tray") is not None:
+                from .v4_dynamic_protocol import (
+                    V4_LIFT_TRIGGER_STEP,
+                    validate_v4_lift_motion_plan,
+                )
+
+                validate_v4_lift_motion_plan(self.motion_plan)
+                if self.kind == "smooth_task_motion":
+                    raise ValueError("V4 LiftTray supports only static and teleport")
+                if self.kind != "static" and self.trigger_step != V4_LIFT_TRIGGER_STEP:
+                    raise ValueError("V4 LiftTray teleport trigger must be tick 35")
             self._motion_source_pose = np.asarray(
                 self.motion_plan.source_pose,
                 dtype=np.float64,
@@ -4339,6 +4676,39 @@ class ScenarioController:
         """Return JSON-stable semantics shared by both evaluator frontends."""
 
         if self.motion_plan is not None:
+            plan_validation = getattr(self.motion_plan, "validation", {})
+            v4_lift = (
+                plan_validation.get("v4_lift_tray")
+                if isinstance(plan_validation, dict)
+                else None
+            )
+            if v4_lift is not None:
+                from .v4_dynamic_protocol import V4_LIFT_MOTION_PROTOCOL_ID
+
+                return {
+                    "protocol_id": V4_LIFT_MOTION_PROTOCOL_ID,
+                    "release": "v4",
+                    "task": "bimanual_lift_tray",
+                    "episode_instance_semantics": (
+                        "offline_certified_source_seed_strictly_reconstructed_by_reset_false"
+                    ),
+                    "goal_object": "task.boundary_root()",
+                    "goal_sampling": (
+                        "source_relative_world_xy_radial_candidate_scene_validity_only"
+                    ),
+                    "translation_radius_m": [0.03, 0.08],
+                    "z_delta_m": 0.0,
+                    "yaw_delta_abs_max_rad": 0.10,
+                    "roll_pitch": "unchanged_from_source_A",
+                    "formal_scenarios": ["static", "teleport"],
+                    "trigger_clock": "committed_policy_ticks",
+                    "trigger_step": 35,
+                    "formal_intervention_sampling": False,
+                    "formal_intervention_task_get_state": False,
+                    "formal_intervention_task_restore_state": False,
+                    "result_based_candidate_selection": False,
+                    "task_scoped_plan_evidence": dict(v4_lift),
+                }
             return {
                 "protocol_id": STAGED_VALIDATED_MOTION_PROTOCOL_ID,
                 "episode_instance_semantics": (
@@ -4529,6 +4899,10 @@ class ScenarioController:
         if formal_task_name != self.motion_plan.task_name:
             raise RuntimeError("formal task identity does not match staged motion plan")
         validation = self.motion_plan.validation
+        if validation.get("v4_lift_tray") is not None:
+            from .v4_dynamic_protocol import validate_v4_lift_motion_plan
+
+            validate_v4_lift_motion_plan(self.motion_plan)
         from .v3_protocol import load_v3_motion_source_protocol, motion_source_profile
 
         motion_source_protocol = load_v3_motion_source_protocol()

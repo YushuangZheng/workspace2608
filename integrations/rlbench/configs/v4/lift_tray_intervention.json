@@ -1,0 +1,32 @@
+{
+  "schema": "rlbench-dynamac-lift-tray-intervention-v4",
+  "release": "v4",
+  "task": "bimanual_lift_tray",
+  "formal_scenarios": [
+    "static",
+    "teleport"
+  ],
+  "trigger": {
+    "clock": "successfully_committed_policy_ticks",
+    "skill_label": 0,
+    "local_tick": 35,
+    "global_tick": 35,
+    "application_timing": "before_requesting_policy_action_at_global_tick",
+    "interaction_event": "both open grippers approaching the tray before either grasp",
+    "expected_gripper_states": {
+      "left": "open",
+      "right": "open"
+    }
+  },
+  "teleport": {
+    "applications_per_episode": 1,
+    "observation_refreshed_before_policy_action": true
+  },
+  "final_settling_physics_steps": 10,
+  "provenance": {
+    "selection_authority": "manual_pre_interaction_skill_semantics",
+    "integer_ticks_authoritative": true,
+    "result_based_retuning_forbidden": true,
+    "legacy_v3_profile_unchanged": true
+  }
+}

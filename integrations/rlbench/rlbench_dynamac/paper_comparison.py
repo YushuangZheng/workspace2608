@@ -21,7 +21,9 @@ from typing import Any
 
 from essay2608.policy import DynaMACConfig
 
-from .direct_evaluate import evaluation_protocol_id as bimanual_evaluation_protocol_id
+from .direct_evaluate import (
+    legacy_v3_evaluation_protocol_id as bimanual_evaluation_protocol_id,
+)
 from .direct_policy import (
     TRAINING_MANIFEST_SCHEMA_V3,
     V3_ADAPTER_PROTOCOL,
@@ -73,7 +75,7 @@ from .unimanual_evaluate import (
     LOW_DIM_HEADLESS_SCENE_PROTOCOL_ID,
 )
 from .unimanual_evaluate import (
-    evaluation_protocol_id as unimanual_evaluation_protocol_id,
+    legacy_v3_evaluation_protocol_id as unimanual_evaluation_protocol_id,
 )
 from .v3_protocol import (
     V3_SELECTION_SEMANTICS_ID,

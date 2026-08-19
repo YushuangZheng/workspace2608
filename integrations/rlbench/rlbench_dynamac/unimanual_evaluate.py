@@ -21,11 +21,23 @@ from pathlib import Path
 
 import numpy as np
 
+from .direct_evaluate import (
+    _commit_formal_result_with_optional_v4_videos,
+    _finalize_v4_video_cell,
+    _prepare_v4_video_cell,
+    _run_episode_with_optional_v4_video,
+    _v4_video_capture_enabled,
+    _v4_video_cell,
+)
 from .eval_set import (
     FIXED_EVAL_EPISODES,
     GLOBAL_EVAL_SEED_START,
     fixed_environment_plans,
     validate_formal_artifact_paths,
+)
+from .evaluation_videos import (
+    DEFAULT_OUTPUT_ROOT as DEFAULT_V4_EVALUATION_VIDEO_ROOT,
+    LightweightCaptureConfig,
 )
 from .records import atomic_json, reserve_output
 from .runtime import (
@@ -33,12 +45,17 @@ from .runtime import (
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
     DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
     DiscreteGripperProtocol,
+    IK_SAMPLING_MAX_CONFIGS,
+    IK_SAMPLING_MAX_TIME_MS,
+    IK_SAMPLING_TRIALS,
     PrimaryActionRetryBudget,
     ScenarioController,
     execute_joint_target_control,
     final_settling_metadata,
     initialize_fresh_task_generation,
+    initialize_ik_solver_diagnostics,
     run_final_settling,
+    solve_absolute_ee_ik_with_sampling_fallback,
     stage_scenario_motion_plan,
     staged_motion_plan_batch,
 )
@@ -79,9 +96,23 @@ EXPECTED_UNIMANUAL_BASE_SCENE_SHA256 = (
     "66e1cfa0a6ee5a5e635917d23ce1b5f8ba7159ee1a5326588d798030b972306a"
 )
 EXPECTED_UNIMANUAL_BASE_VISION_SENSOR_COUNT = 10
+V4_VIDEO_PAPER_TARGETS = {
+    ("stack_wine", "static"): 1.00,
+    ("stack_wine", "smooth"): 1.00,
+    ("stack_wine", "teleport"): 1.00,
+    ("place_cups", "static"): 0.99,
+    ("place_cups", "smooth"): 0.97,
+    ("place_cups", "teleport"): 0.99,
+    ("open_microwave", "static"): 0.99,
+    ("open_microwave", "smooth"): 0.99,
+    ("open_microwave", "teleport"): 0.97,
+    ("wipe_desk", "static"): 1.00,
+    ("wipe_desk", "smooth"): 0.66,
+    ("wipe_desk", "teleport"): 0.69,
+}
 
 
-def evaluation_protocol_id(max_primary_action_attempts):
+def legacy_v3_evaluation_protocol_id(max_primary_action_attempts):
     attempts = PrimaryActionRetryBudget(max_primary_action_attempts).max_attempts
     return GRIPPER_PROTOCOL.extend_evaluation_protocol_id(
         "rlbench-absolute-ee-ik-jacobian-sampling5-timeout200-"
@@ -92,6 +123,21 @@ def evaluation_protocol_id(max_primary_action_attempts):
     )
 
 
+def evaluation_protocol_id(max_primary_action_attempts):
+    attempts = PrimaryActionRetryBudget(max_primary_action_attempts).max_attempts
+    return GRIPPER_PROTOCOL.extend_evaluation_protocol_id(
+        "rlbench-absolute-ee-ik-jacobian-then-collision-aware-sampling5-"
+        "nearest-current-q-finite-joint-limits-timeout200-"
+        "noop-retry-same-policy-tick-fresh-observation-"
+        f"primary-attempt{attempts}-committed-dynamic-clock-"
+        "final-settle-up-to-raw10-staged34-deterministic-source-reset1-"
+        "formal-root-state-audit2-contact-delta-diagnostic-v4"
+    )
+
+
+LEGACY_V3_EVALUATION_PROTOCOL_ID = legacy_v3_evaluation_protocol_id(
+    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
+)
 EVALUATION_PROTOCOL_ID = evaluation_protocol_id(
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
 )
@@ -136,7 +182,12 @@ def _authenticated_v3_dynamic_trigger(args, worker):
     return protocol, authentication
 
 
-def _prepare_low_dim_headless_scene(environment_module, *, enabled):
+def _prepare_low_dim_headless_scene(
+    environment_module,
+    *,
+    enabled,
+    camera_observations_requested=False,
+):
     """Prepare a render-free copy of the pinned RLBench base scene.
 
     The pinned fork constructs ``ObservationConfig.camera_configs`` as an empty
@@ -162,7 +213,7 @@ def _prepare_low_dim_headless_scene(environment_module, *, enabled):
         "protocol_id": LOW_DIM_HEADLESS_SCENE_PROTOCOL_ID,
         "applied": False,
         "scope": "all_base_scene_vision_sensors",
-        "camera_observations_requested": False,
+        "camera_observations_requested": bool(camera_observations_requested),
         "task_model_loaded_during_rewrite": False,
         "populated_scene_steps_before_patch": 0,
         "physics_modified": False,
@@ -273,45 +324,31 @@ def _make_action_mode():
 
     class AbsoluteEndEffectorIK(ArmActionMode):
         def __init__(self):
-            self._execution_diagnostics = {
-                "jacobian_failures": 0,
-                "sampling_fallback_successes": 0,
-                "sampling_fallback_failures": 0,
-                "joint_target_reached": 0,
-                "joint_target_stopped": 0,
-                "joint_target_timeouts": 0,
-            }
+            self._execution_diagnostics = initialize_ik_solver_diagnostics()
+            self._execution_diagnostics.update(
+                {
+                    "joint_target_reached": 0,
+                    "joint_target_stopped": 0,
+                    "joint_target_timeouts": 0,
+                }
+            )
 
         def diagnostics(self):
             return dict(self._execution_diagnostics)
 
         def _solve(self, arm, target):
-            try:
-                return arm.solve_ik_via_jacobian(
-                    target[:3], quaternion=target[3:], relative_to=None
-                )
-            except IKError:
-                self._execution_diagnostics["jacobian_failures"] += 1
-                try:
-                    result = arm.solve_ik_via_sampling(
-                        target[:3],
-                        quaternion=target[3:],
-                        ignore_collisions=True,
-                        trials=100,
-                        max_configs=5,
-                        max_time_ms=10,
-                        relative_to=None,
-                    )[0]
-                    self._execution_diagnostics["sampling_fallback_successes"] += 1
-                    return result
-                except ConfigurationError as exc:
-                    self._execution_diagnostics["sampling_fallback_failures"] += 1
-                    raise InvalidActionError(
-                        "unimanual absolute end-effector IK failed"
-                    ) from exc
+            return solve_absolute_ee_ik_with_sampling_fallback(
+                arm,
+                target,
+                diagnostics=self._execution_diagnostics,
+                ik_error=IKError,
+                configuration_error=ConfigurationError,
+                invalid_action_error=InvalidActionError,
+                error_message="unimanual absolute end-effector IK failed",
+            )
 
         def action(self, scene, action, ignore_collisions=True):
-            del ignore_collisions
+            del ignore_collisions  # V4 collision policy is frozen in the IK helper
             assert_action_shape(action, (7,))
             target = np.asarray(action, dtype=np.float64)
             assert_unit_quaternion(target[3:])
@@ -973,6 +1010,7 @@ def evaluate(args):
 
 
 def _evaluate_reserved(args):
+    video_capture_enabled = _v4_video_capture_enabled(args)
     import rlbench.environment as environment_module
     from rlbench.observation_config import ObservationConfig
 
@@ -988,6 +1026,33 @@ def _evaluate_reserved(args):
     observation_config.gripper_open = True
     observation_config.gripper_pose = True
     observation_config.task_low_dim_state = True
+    video_capture_config = (
+        LightweightCaptureConfig() if video_capture_enabled else None
+    )
+    video_cell_dir = None
+    video_cell_key = None
+    episode_videos = []
+    if video_capture_enabled:
+        from rlbench.observation_config import CameraConfig
+
+        observation_config.camera_configs = {
+            video_capture_config.camera: CameraConfig(
+                rgb=True,
+                depth=False,
+                point_cloud=False,
+                mask=False,
+            )
+        }
+        video_cell_dir, video_cell_key = _v4_video_cell(
+            getattr(
+                args,
+                "v4_evaluation_video_root",
+                DEFAULT_V4_EVALUATION_VIDEO_ROOT,
+            ),
+            args.task,
+            args.scenario,
+        )
+        video_cell_dir = _prepare_v4_video_cell(video_cell_dir)
     action_mode = _make_action_mode()
     environment = environment_module.Environment(
         action_mode=action_mode,
@@ -997,6 +1062,7 @@ def _evaluate_reserved(args):
     restore_scene, scene_launch = _prepare_low_dim_headless_scene(
         environment_module,
         enabled=args.headless,
+        camera_observations_requested=video_capture_enabled,
     )
     worker = None
     results = []
@@ -1045,17 +1111,32 @@ def _evaluate_reserved(args):
                 variation=args.variation,
                 verify_instance=False,
             )
-            result = _run_episode(
+            def run_formal_episode(formal_task_environment):
+                return _run_episode(
+                    formal_task_environment,
+                    worker,
+                    args,
+                    episode,
+                    motion_plan=episode_motion_plan,
+                    descriptions=descriptions,
+                    observation=observation,
+                    fresh_task_generation=fresh_task_generation,
+                )
+
+            result, episode_video = _run_episode_with_optional_v4_video(
                 task_environment,
-                worker,
-                args,
-                episode,
-                motion_plan=episode_motion_plan,
-                descriptions=descriptions,
-                observation=observation,
-                fresh_task_generation=fresh_task_generation,
+                observation,
+                enabled=video_capture_enabled,
+                cell_dir=video_cell_dir,
+                cell_key=video_cell_key,
+                episode=episode,
+                episode_seed=args.seed + episode,
+                run_episode=run_formal_episode,
+                capture_config=video_capture_config,
             )
             results.append(result)
+            if episode_video is not None:
+                episode_videos.append(episode_video)
             successes = sum(item["success"] for item in results)
             print(
                 f"{args.task} {args.scenario} episode {episode + 1}/{args.episodes}: "
@@ -1141,11 +1222,15 @@ def _evaluate_reserved(args):
         "controller": {
             "command": "absolute_world_end_effector_pose",
             "primary_ik": "jacobian",
+            "primary_ik_collision_check": False,
             "fallback_ik": "sampling",
-            "sampling_trials": 100,
-            "sampling_max_configs": 5,
-            "sampling_max_time_ms": 10,
-            "sampling_ignore_collisions": True,
+            "sampling_trials": IK_SAMPLING_TRIALS,
+            "sampling_max_configs": IK_SAMPLING_MAX_CONFIGS,
+            "sampling_max_time_ms": IK_SAMPLING_MAX_TIME_MS,
+            "sampling_ignore_collisions": False,
+            "sampling_collision_check_scope": "candidate_configuration",
+            "sampling_candidate_selection": "nearest_current_joint_l2",
+            "ik_candidate_validation": "shape_finite_noncyclic_joint_limits",
             "joint_target_max_steps": 200,
             "failed_action": "abort_policy_target_then_current_pose_current_gripper_noop",
             "failed_action_next_tick": "retry_same_policy_tick_from_fresh_observation",
@@ -1333,7 +1418,46 @@ def _evaluate_reserved(args):
             else None
         ),
     }
-    atomic_json(args.output, summary)
+    if video_capture_enabled:
+        video_capture_metadata = {
+            "release": "v4",
+            "cell_key": video_cell_key,
+            "cell_dir": str(video_cell_dir),
+            "episodes_recorded": len(episode_videos),
+            "capture_config": dict(video_capture_config.audit()),
+            "paper_success_rate": V4_VIDEO_PAPER_TARGETS[
+                (args.task, args.scenario)
+            ],
+        }
+
+        def finalize_videos():
+            return _finalize_v4_video_cell(
+                video_cell_dir,
+                episode_videos,
+                cell_key=video_cell_key,
+                successes=successes,
+                episodes=args.episodes,
+                paper_success_rate=V4_VIDEO_PAPER_TARGETS[
+                    (args.task, args.scenario)
+                ],
+                cell_metadata={
+                    "evaluator": "unimanual_evaluate",
+                    "task": args.task,
+                    "scenario": args.scenario,
+                    "variation": args.variation,
+                    "formal_result": str(args.output),
+                },
+            )
+    else:
+        video_capture_metadata = None
+        finalize_videos = None
+    _commit_formal_result_with_optional_v4_videos(
+        args.output,
+        summary,
+        enabled=video_capture_enabled,
+        capture_metadata=video_capture_metadata,
+        finalize_videos=finalize_videos,
+    )
     print(f"wrote {args.output}")
     return 0
 
@@ -1393,6 +1517,26 @@ def build_parser():
         type=int,
         default=DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
         help="Maximum primary InvalidAction attempts for one policy clock tick.",
+    )
+    parser.add_argument(
+        "--release",
+        choices=("v3", "v4"),
+        default="v3",
+        help="Evaluation release gate; V4 requires formal episode video capture.",
+    )
+    parser.add_argument(
+        "--record-v4-evaluation-videos",
+        action="store_true",
+        help=(
+            "Stream front RGB from the actual formal V4 episodes and retain "
+            "the fixed outcome-stratified sample; disabled by default for V3."
+        ),
+    )
+    parser.add_argument(
+        "--v4-evaluation-video-root",
+        type=Path,
+        default=DEFAULT_V4_EVALUATION_VIDEO_ROOT,
+        help="Root for V4 formal evaluation video cells.",
     )
     parser.add_argument("--policy-timeout", type=float, default=120.0)
     display = parser.add_mutually_exclusive_group()

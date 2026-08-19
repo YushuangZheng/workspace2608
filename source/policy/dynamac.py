@@ -41,6 +41,9 @@ Array = np.ndarray
 IDENTITY_POSE = np.asarray([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=np.float64)
 MODEL_SCHEMA_VERSION = 13
 TAPAS_REFERENCE_COMMIT = "52e35214b9baa7b190b87196c36b9e98f4006149"
+QUATERNION_BATCH_GAUGE_PROTOCOL_ID = (
+    "per-timestep-sign-invariant-markley-anchor-temporal-continuity-v2"
+)
 RIEPY_MANIFOLD_REGULARIZATION = 1.0e-6
 SELECTION_SEMANTICS_ID = (
     "eq5_skill_majority_mask_before_eq6_time_state_position3d_unimodal_v1"
@@ -118,32 +121,41 @@ def _normalize_pose_trajectory(poses: Array) -> Array:
 
 
 def _prepare_pose_batch(trajectories: Array) -> Array:
-    """Make trajectories continuous and choose a shared ``q/-q`` gauge.
+    """Make trajectories continuous and choose a shared per-time ``q/-q`` gauge.
 
-    TAPAS-GMM uses the standard-arccos logarithmic map on :math:`S^3`, so
-    antipodal quaternions for one :math:`SO(3)` orientation cannot be mixed in
-    statistics. After TAPAS-style temporal sign continuity, the principal Markley
-    eigenvector at the first time step provides a sign-invariant anchor. Any
-    demonstration with the opposite sign has its full quaternion curve multiplied
-    by ``-1``. This does not change physical poses, transforms, or commands.
+    Each demonstration first receives TAPAS-style temporal sign continuity.  A
+    single whole-trajectory sign chosen at the first sample is nevertheless
+    insufficient when physically equivalent demonstrations take different paths
+    through :math:`SO(3)`: their continuous :math:`S^3` lifts can start in one
+    shared hemisphere and finish in opposite hemispheres.  Mixing those antipodes
+    makes the standard-arccos logarithmic map learn an orientation that no
+    demonstration contains.
+
+    At every time step, use the sign-invariant principal Markley eigenvector as a
+    shared anchor and align every sample to its hemisphere.  The anchor itself is
+    kept temporally continuous, so its arbitrary eigenvector sign cannot create a
+    learned mean jump.  Only quaternion representatives change; physical poses,
+    transforms, and commands do not.
     """
 
     values = _as_float_array(trajectories)
     if values.ndim != 3 or values.shape[-1] != 7 or values.shape[0] == 0 or values.shape[1] == 0:
         raise ValueError("pose batch must be nonempty with shape [N, T, 7]")
     result = np.stack([_normalize_pose_trajectory(item) for item in values])
-    first_quaternions = result[:, 0, 3:7]
-    accumulator = np.einsum("ni,nj->ij", first_quaternions, first_quaternions)
-    _, eigenvectors = np.linalg.eigh(accumulator)
-    anchor = eigenvectors[:, -1]
-    # The Markley eigenvector also has an arbitrary sign. Anchor it to the first
-    # demonstration so canonical inputs are unchanged and LAPACK's choice of sign
-    # cannot affect the result.
-    if float(np.dot(anchor, first_quaternions[0])) < 0.0:
-        anchor *= -1.0
-    for demo_index, quaternion in enumerate(first_quaternions):
-        if float(np.dot(anchor, quaternion)) < 0.0:
-            result[demo_index, :, 3:7] *= -1.0
+    previous_anchor: Array | None = None
+    for time_index in range(result.shape[1]):
+        quaternions = result[:, time_index, 3:7]
+        accumulator = np.einsum("ni,nj->ij", quaternions, quaternions)
+        _, eigenvectors = np.linalg.eigh(accumulator)
+        anchor = eigenvectors[:, -1]
+        # Markley eigenvectors have an arbitrary sign.  The first anchor follows
+        # the first demonstration; subsequent anchors follow the previous anchor.
+        reference = quaternions[0] if previous_anchor is None else previous_anchor
+        if float(np.dot(anchor, reference)) < 0.0:
+            anchor *= -1.0
+        opposite = np.einsum("ni,i->n", quaternions, anchor) < 0.0
+        result[opposite, time_index, 3:7] = -result[opposite, time_index, 3:7]
+        previous_anchor = anchor
     return result
 
 

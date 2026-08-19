@@ -14,6 +14,7 @@ from essay2608.policy.dynamac import (
     DynaMACDemonstration,
     DynaMACObservation,
     GaussianMarginal,
+    IDENTITY_POSE,
     _compose_framewise_poe_participation,
     _eq6_skill_selection,
     _filter_link_mask,
@@ -165,6 +166,76 @@ def test_pose_statistics_and_partition_ignore_whole_trajectory_antipodes() -> No
         _partition_modes(trajectories, config),
         _partition_modes(antipodal, config),
     )
+
+
+def test_batch_gauge_stays_continuous_when_demo_lifts_have_different_winding() -> None:
+    """SO(3) paths that reconverge must not leave mixed q/-q endpoints.
+
+    Three demonstrations take the long continuous S3 lift from a yaw above 180
+    degrees while two start near zero.  All five finish at the identity.  A gauge
+    frozen at the first sample flips an entire subgroup and makes the fitted mean
+    jump by roughly 2.6 radians on the final sample even though every physical
+    demonstration is smooth.
+    """
+
+    samples = 24
+    trajectories = np.stack(
+        [
+            np.stack(
+                [
+                    yaw_pose(
+                        [0.0, 0.0, 0.0],
+                        float(yaw),
+                    )
+                    for yaw in np.deg2rad(np.linspace(start_yaw, 0.0, samples))
+                ]
+            )
+            for start_yaw in (0.0, 200.0, 210.0, 190.0, 10.0)
+        ]
+    )
+    floor = 1.0e-8
+
+    mean, covariance = _fit_pose_sequence(
+        trajectories,
+        position_variance_floor=floor,
+        rotation_variance_floor=floor,
+        covariance_estimation_method="diagonal_empirical_spd_floor",
+    )
+    physical_increments = np.asarray(
+        [
+            2.0
+            * np.arccos(
+                np.clip(
+                    abs(float(np.dot(left[3:7], right[3:7]))),
+                    -1.0,
+                    1.0,
+                )
+            )
+            for left, right in zip(mean[:-1], mean[1:], strict=True)
+        ]
+    )
+    # The deliberately broad initial distribution is close to the SO(3) cut
+    # locus and need not have a unique global mean.  Once every demonstration
+    # has reconverged, however, the learned mean must remain on the same smooth
+    # branch instead of jumping at the final sample.
+    assert float(np.max(physical_increments[-5:])) < np.deg2rad(6.0)
+    assert abs(float(np.dot(mean[-1, 3:7], IDENTITY_POSE[3:7]))) > 1.0 - 1.0e-12
+
+    # Arbitrary q/-q representatives at individual samples remain physically
+    # equivalent and must produce the same statistics.
+    alternate_gauge = trajectories.copy()
+    alternate_gauge[:, 1::2, 3:7] *= -1.0
+    alternate_mean, alternate_covariance = _fit_pose_sequence(
+        alternate_gauge,
+        position_variance_floor=floor,
+        rotation_variance_floor=floor,
+        covariance_estimation_method="diagonal_empirical_spd_floor",
+    )
+    assert np.all(
+        np.abs(np.sum(mean[:, 3:7] * alternate_mean[:, 3:7], axis=1))
+        > 1.0 - 1.0e-12
+    )
+    np.testing.assert_allclose(covariance, alternate_covariance, atol=1.0e-12)
 
 
 def test_tapas_subsampling_uses_rounded_indices_not_interpolation() -> None:

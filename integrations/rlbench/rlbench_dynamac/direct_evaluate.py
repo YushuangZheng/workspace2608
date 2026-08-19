@@ -9,6 +9,7 @@ kept in the Python 3.10 worker started by this process.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import os
@@ -24,18 +25,32 @@ from .eval_set import (
     fixed_environment_plans,
     validate_formal_artifact_paths,
 )
+from .evaluation_videos import (
+    DEFAULT_MANIFEST_NAME as V4_VIDEO_SELECTION_MANIFEST,
+    DEFAULT_OUTPUT_ROOT as DEFAULT_V4_EVALUATION_VIDEO_ROOT,
+    EpisodeVideo,
+    LightweightCaptureConfig,
+    ObservationVideoRecorder,
+    RecordingTaskEnvironment,
+    finalize_cell_videos,
+)
 from .records import atomic_json, reserve_output
 from .runtime import (
     DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
     DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
     DiscreteGripperProtocol,
+    IK_SAMPLING_MAX_CONFIGS,
+    IK_SAMPLING_MAX_TIME_MS,
+    IK_SAMPLING_TRIALS,
     PrimaryActionRetryBudget,
     ScenarioController,
     execute_joint_target_control,
     final_settling_metadata,
     initialize_fresh_task_generation,
+    initialize_ik_solver_diagnostics,
     run_final_settling,
+    solve_absolute_ee_ik_with_sampling_fallback,
     stage_scenario_motion_plan,
     staged_motion_plan_batch,
 )
@@ -44,11 +59,42 @@ from .v3_protocol import (
     load_v3_motion_source_protocol,
     resolve_authenticated_v3_trigger,
 )
+from .v4_dynamic_protocol import (
+    V4_LIFT_MOTION_PROTOCOL_ID,
+    V4_LIFT_RUNTIME_LOADER_ID,
+    V4_LIFT_TASK,
+    V4_LIFT_TRIGGER_STEP,
+    build_v4_lift_task_scoped_plan_batch,
+    load_v4_lift_intervention_protocol,
+    load_v4_lift_motion_plan_batch,
+    load_v4_lift_motion_source_protocol,
+    stage_v4_lift_motion_plan,
+    v4_lift_task_identity_components,
+    v4_lift_trigger_authentication,
+)
+from .store_bottle_eval_v4 import (
+    V4_STORE_MOTION_PROTOCOL_ID,
+    V4_STORE_RUNTIME_LOADER_ID,
+    V4_STORE_TRIGGER_STEPS,
+    StoreBottleMultiEntityController,
+    StoreBottleMultiEntityPlan,
+    build_v4_store_task_scoped_plan_batch,
+    load_v4_store_intervention_protocol,
+    load_v4_store_motion_plan_batch,
+    load_v4_store_motion_source_protocol,
+    stage_v4_store_motion_plan,
+    v4_store_task_class,
+    v4_store_task_identity_components,
+    v4_store_trigger_authentication,
+)
+from .store_bottle_semantics import STORE_BOTTLE_TASK_NAME
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
 DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v3"
+V4_MODELS_DIR = INTEGRATION_ROOT / "models" / "v4"
+V4_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v4"
 DEFAULT_POLICY_PYTHON = Path(
     os.environ.get(
         "DYNAMAC_POLICY_PYTHON",
@@ -87,9 +133,189 @@ POLICY_CLOCK_SEMANTICS_ID = (
     "policy-tick-transaction-commit-on-primary-action-success-v1"
 )
 GRIPPER_PROTOCOL = DiscreteGripperProtocol(bimanual=True)
+V4_VIDEO_SIDECAR_SCHEMA = "dynamac-v4-formal-evaluation-video-sidecar-v1"
+V4_VIDEO_PAPER_TARGETS = {
+    ("bimanual_put_bottle_in_fridge", "static"): 0.82,
+    ("bimanual_put_bottle_in_fridge", "teleport"): 0.82,
+    ("bimanual_lift_tray", "static"): 1.0,
+    ("bimanual_lift_tray", "teleport"): 1.0,
+}
 
 
-def evaluation_protocol_id(max_primary_action_attempts):
+def _v4_video_capture_enabled(args):
+    release = getattr(args, "release", "v3")
+    enabled = bool(getattr(args, "record_v4_evaluation_videos", False))
+    if release not in {"v3", "v4"}:
+        raise ValueError("evaluation release must be v3 or v4")
+    if release == "v4" and not enabled:
+        raise ValueError("V4 formal evaluation requires episode video capture")
+    if release != "v4" and enabled:
+        raise ValueError("V4 episode video capture requires --release v4")
+    return enabled
+
+
+def _v4_video_cell(root, task, scenario):
+    cell_key = f"{task}/{scenario}"
+    return Path(root) / task / scenario, cell_key
+
+
+def _prepare_v4_video_cell(cell_dir):
+    cell_dir = Path(cell_dir)
+    if cell_dir.exists() and any(cell_dir.iterdir()):
+        raise FileExistsError(
+            f"refusing to mix a V4 video cell with existing artifacts: {cell_dir}"
+        )
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    return cell_dir
+
+
+def _v4_video_selection_audit(cell_dir, manifest):
+    manifest_path = Path(cell_dir) / V4_VIDEO_SELECTION_MANIFEST
+    if not manifest_path.is_file():
+        raise RuntimeError("V4 video finalizer did not write its selection manifest")
+    return {
+        "path": str(manifest_path),
+        "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "schema": manifest["schema"],
+        "selection": manifest["selection"],
+        "selected_episodes": [row["episode"] for row in manifest["selected"]],
+        "all_episodes_recorded_before_selection": manifest[
+            "all_episodes_recorded_before_selection"
+        ],
+    }
+
+
+def _finalize_v4_video_cell(
+    cell_dir,
+    recordings,
+    *,
+    cell_key,
+    successes,
+    episodes,
+    paper_success_rate,
+    cell_metadata,
+):
+    manifest = finalize_cell_videos(
+        cell_dir,
+        recordings,
+        cell_key=cell_key,
+        successes=successes,
+        episodes=episodes,
+        paper_success_rate=paper_success_rate,
+        cell_metadata=cell_metadata,
+    )
+    return _v4_video_selection_audit(cell_dir, manifest)
+
+
+def _commit_formal_result_with_optional_v4_videos(
+    output,
+    payload,
+    *,
+    enabled,
+    capture_metadata=None,
+    finalize_videos=None,
+):
+    """Finalize V4 video selection before publishing the formal result."""
+
+    if enabled:
+        if not isinstance(capture_metadata, dict) or not callable(finalize_videos):
+            raise ValueError("V4 result commit requires capture metadata and finalizer")
+        selection = finalize_videos()
+        payload["evaluation_video_capture"] = {
+            **capture_metadata,
+            "selection_manifest": selection,
+            "formal_result_committed_after_video_selection": True,
+        }
+    atomic_json(output, payload)
+    return payload
+
+
+def _run_episode_with_optional_v4_video(
+    task_environment,
+    initial_observation,
+    *,
+    enabled,
+    cell_dir,
+    cell_key,
+    episode,
+    episode_seed,
+    run_episode,
+    capture_config=None,
+    recorder_factory=None,
+    proxy_factory=None,
+):
+    """Run one formal episode and optionally retain its streamed V4 recording."""
+
+    if not enabled:
+        return run_episode(task_environment), None
+    if cell_dir is None or not cell_key:
+        raise ValueError("V4 video capture requires a cell directory and key")
+    capture_config = capture_config or LightweightCaptureConfig()
+    recorder_factory = recorder_factory or ObservationVideoRecorder
+    proxy_factory = proxy_factory or RecordingTaskEnvironment
+    stem = f"episode_{episode:03d}_seed_{episode_seed}"
+    video_path = Path(cell_dir) / f"{stem}.mp4"
+    sidecar_path = Path(cell_dir) / f"{stem}.json"
+    recorder = recorder_factory(video_path, config=capture_config)
+    try:
+        recorder.capture(initial_observation)
+    except BaseException:
+        recorder.abort()
+        raise
+    recording_environment = proxy_factory(task_environment, recorder)
+    try:
+        result = run_episode(recording_environment)
+    except BaseException as exc:
+        try:
+            capture = recorder.close()
+            atomic_json(
+                sidecar_path,
+                {
+                    "schema": V4_VIDEO_SIDECAR_SCHEMA,
+                    "cell_key": cell_key,
+                    "episode": episode,
+                    "episode_seed": episode_seed,
+                    "formal_episode_completed": False,
+                    "error_type": type(exc).__name__,
+                    "capture": capture,
+                },
+            )
+        except BaseException:
+            recorder.abort()
+            raise
+        raise
+
+    try:
+        capture = recorder.close()
+        success = bool(result["success"])
+        atomic_json(
+            sidecar_path,
+            {
+                "schema": V4_VIDEO_SIDECAR_SCHEMA,
+                "cell_key": cell_key,
+                "episode": episode,
+                "episode_seed": episode_seed,
+                "formal_episode_completed": True,
+                "success": success,
+                "reason": result.get("reason"),
+                "steps": result.get("steps"),
+                "invalid_actions": result.get("invalid_actions"),
+                "capture": capture,
+            },
+        )
+    except BaseException:
+        recorder.abort()
+        raise
+    return result, EpisodeVideo(
+        episode=episode,
+        episode_seed=episode_seed,
+        success=success,
+        video=video_path,
+        companions=(sidecar_path,),
+    )
+
+
+def legacy_v3_evaluation_protocol_id(max_primary_action_attempts):
     attempts = PrimaryActionRetryBudget(max_primary_action_attempts).max_attempts
     return GRIPPER_PROTOCOL.extend_evaluation_protocol_id(
         "rlbench-absolute-ee-ik-jacobian-sampling5-timeout200-"
@@ -100,6 +326,21 @@ def evaluation_protocol_id(max_primary_action_attempts):
     )
 
 
+def evaluation_protocol_id(max_primary_action_attempts):
+    attempts = PrimaryActionRetryBudget(max_primary_action_attempts).max_attempts
+    return GRIPPER_PROTOCOL.extend_evaluation_protocol_id(
+        "rlbench-absolute-ee-ik-jacobian-then-collision-aware-sampling5-"
+        "nearest-current-q-finite-joint-limits-timeout200-"
+        "noop-retry-same-policy-tick-fresh-observation-"
+        f"primary-attempt{attempts}-committed-dynamic-clock-"
+        "final-settle-up-to-raw10-staged34-deterministic-source-reset1-"
+        "formal-root-state-audit2-contact-delta-diagnostic-v4"
+    )
+
+
+LEGACY_V3_EVALUATION_PROTOCOL_ID = legacy_v3_evaluation_protocol_id(
+    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
+)
 EVALUATION_PROTOCOL_ID = evaluation_protocol_id(
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
 )
@@ -149,6 +390,80 @@ def _authenticated_v3_dynamic_trigger(args, worker):
     return protocol, authentication
 
 
+def _is_v4_lift(args):
+    return getattr(args, "release", "v3") == "v4" and args.task == V4_LIFT_TASK
+
+
+def _is_v4_store(args):
+    return (
+        getattr(args, "release", "v3") == "v4"
+        and args.task == STORE_BOTTLE_TASK_NAME
+    )
+
+
+def _is_v4_task_scoped(args):
+    return _is_v4_lift(args) or _is_v4_store(args)
+
+
+def _validate_v4_store_protocol_args(args):
+    """Fail before simulator launch on any StoreBottle V4 protocol drift."""
+
+    intervention = load_v4_store_intervention_protocol()
+    motion = load_v4_store_motion_source_protocol()
+    if args.scenario not in intervention["formal_scenarios"]:
+        raise ValueError("StoreBottle V4 formal evaluation supports only static/teleport")
+    if args.scenario_max_attempts != motion["goal_sampling_max_attempts"]:
+        raise RuntimeError("StoreBottle V4 goal-sampling budget differs from protocol")
+    if args.final_settling_steps != intervention["final_settling_physics_steps"]:
+        raise RuntimeError("StoreBottle V4 final-settling budget differs from protocol")
+    if getattr(args, "scenario_trigger_step", None) is not None:
+        raise RuntimeError(
+            "StoreBottle V4 has two entity triggers; --scenario-trigger-step is invalid"
+        )
+    if Path(args.models_dir).resolve() != V4_MODELS_DIR.resolve():
+        raise RuntimeError("StoreBottle V4 formal evaluation requires models/v4")
+    return intervention, motion
+
+
+def _authenticated_v4_store_triggers(args, worker):
+    intervention, _motion = _validate_v4_store_protocol_args(args)
+    authentication = v4_store_trigger_authentication(worker.policy_steps)
+    requested_reference = getattr(args, "scenario_reference_steps", None)
+    if requested_reference is not None and requested_reference != worker.policy_steps:
+        raise RuntimeError(
+            "StoreBottle V4 trigger reference must equal the loaded policy clock"
+        )
+    return intervention, authentication
+
+
+def _validate_v4_lift_protocol_args(args):
+    """Fail before simulator launch on any V4 LiftTray protocol drift."""
+
+    intervention = load_v4_lift_intervention_protocol()
+    motion = load_v4_lift_motion_source_protocol()
+    if args.scenario not in intervention["formal_scenarios"]:
+        raise ValueError("V4 LiftTray formal evaluation supports only static/teleport")
+    if args.scenario_max_attempts != motion["goal_sampling_max_attempts"]:
+        raise RuntimeError("V4 LiftTray goal-sampling budget differs from protocol")
+    if args.final_settling_steps != intervention["final_settling_physics_steps"]:
+        raise RuntimeError("V4 LiftTray final-settling budget differs from protocol")
+    requested = getattr(args, "scenario_trigger_step", None)
+    if requested is not None and requested != V4_LIFT_TRIGGER_STEP:
+        raise RuntimeError("V4 LiftTray trigger must be committed policy tick 35")
+    return intervention, motion
+
+
+def _authenticated_v4_lift_trigger(args, worker):
+    intervention, _motion = _validate_v4_lift_protocol_args(args)
+    authentication = v4_lift_trigger_authentication(worker.policy_steps)
+    requested_reference = getattr(args, "scenario_reference_steps", None)
+    if requested_reference is not None and requested_reference != worker.policy_steps:
+        raise RuntimeError(
+            "V4 LiftTray trigger reference must equal the loaded policy clock"
+        )
+    return intervention, authentication
+
+
 def _learned_policy_steps(models_dir, task):
     """Read the fitted bimanual clock length used to schedule interventions."""
 
@@ -177,20 +492,20 @@ def _make_action_mode():
 
     class BimanualAbsoluteEndEffectorIK(ArmActionMode):
         def __init__(self):
-            self._execution_diagnostics = {
-                "jacobian_failures": 0,
-                "sampling_fallback_successes": 0,
-                "sampling_fallback_failures": 0,
-                "joint_target_reached": 0,
-                "joint_target_stopped": 0,
-                "joint_target_timeouts": 0,
-            }
+            self._execution_diagnostics = initialize_ik_solver_diagnostics()
+            self._execution_diagnostics.update(
+                {
+                    "joint_target_reached": 0,
+                    "joint_target_stopped": 0,
+                    "joint_target_timeouts": 0,
+                }
+            )
 
         def diagnostics(self):
             return dict(self._execution_diagnostics)
 
         def _solve(self, arm, target):
-            """Use local Jacobian IK first, then PyRep's far-target IK search.
+            """Use local Jacobian IK, then validated collision-aware sampling.
 
             The author reports using IK for RLBench and reserving a heavier
             fallback for goals that are too far from the current pose.  PyRep's
@@ -199,32 +514,18 @@ def _make_action_mode():
             absolute target without changing the policy command or clock.
             """
 
-            try:
-                return arm.solve_ik_via_jacobian(
-                    target[:3], quaternion=target[3:], relative_to=None
-                )
-            except IKError:
-                self._execution_diagnostics["jacobian_failures"] += 1
-                try:
-                    result = arm.solve_ik_via_sampling(
-                        target[:3],
-                        quaternion=target[3:],
-                        ignore_collisions=True,
-                        trials=100,
-                        max_configs=5,
-                        max_time_ms=10,
-                        relative_to=None,
-                    )[0]
-                    self._execution_diagnostics["sampling_fallback_successes"] += 1
-                    return result
-                except ConfigurationError as exc:
-                    self._execution_diagnostics["sampling_fallback_failures"] += 1
-                    raise InvalidActionError(
-                        "bimanual absolute end-effector IK failed"
-                    ) from exc
+            return solve_absolute_ee_ik_with_sampling_fallback(
+                arm,
+                target,
+                diagnostics=self._execution_diagnostics,
+                ik_error=IKError,
+                configuration_error=ConfigurationError,
+                invalid_action_error=InvalidActionError,
+                error_message="bimanual absolute end-effector IK failed",
+            )
 
         def action(self, scene, action, ignore_collisions=True):
-            del ignore_collisions  # the public IK controller has no collision option
+            del ignore_collisions  # V4 collision policy is frozen in the IK helper
             assert_action_shape(action, (14,))
             right_action = np.asarray(action[:7], dtype=np.float64)
             left_action = np.asarray(action[7:], dtype=np.float64)
@@ -541,6 +842,279 @@ def _finalize_episode_intervention_status(
     return row
 
 
+def _run_v4_store_episode(
+    task_environment,
+    worker,
+    episode,
+    horizon,
+    *,
+    scenario,
+    max_primary_action_attempts,
+    motion_plan,
+    final_settling_steps,
+    descriptions,
+    observation,
+    fresh_task_generation,
+):
+    """Run one StoreBottle episode with two independently scheduled roots."""
+
+    if not isinstance(motion_plan, StoreBottleMultiEntityPlan):
+        raise TypeError("StoreBottle V4 requires a multi-entity motion plan")
+    if descriptions is None or observation is None or not isinstance(
+        fresh_task_generation,
+        dict,
+    ):
+        raise RuntimeError("formal StoreBottle episode requires fresh task input")
+    controller = StoreBottleMultiEntityController(plan=motion_plan, scenario=scenario)
+    source_binding = controller.bind_source(
+        task_environment,
+        descriptions=descriptions,
+        fresh_task_generation=fresh_task_generation,
+    )
+    observation = task_environment.get_observation()
+    source_binding["formal_observation_refreshed_after_binding"] = True
+    worker.request("reset", observation)
+    retry_budget = PrimaryActionRetryBudget(max_primary_action_attempts)
+    invalid_actions = 0
+    committed_policy_steps = 0
+    last_scenario_policy_step = None
+    scenario_events = []
+    reached_entities = set()
+
+    def finish(row):
+        row.setdefault(
+            "final_settling",
+            {
+                **final_settling_metadata(final_settling_steps),
+                "attempted": False,
+                "available": True,
+                "steps_executed": 0,
+                "first_terminal_step": None,
+                "stop_reason": "not_entered",
+                "success": False,
+                "terminate": False,
+            },
+        )
+        row.setdefault("committed_policy_steps", committed_policy_steps)
+        row.setdefault("dynamic_clock_steps", committed_policy_steps)
+        row.setdefault("staged_source_binding", source_binding)
+        row.setdefault("fresh_task_generation", fresh_task_generation)
+        row.setdefault("motion_plan_fingerprint", motion_plan.fingerprint())
+        row.setdefault("motion_plan_protocol_id", V4_STORE_MOTION_PROTOCOL_ID)
+        row.setdefault(
+            "motion_plan_evidence",
+            {
+                "plan_fingerprint": motion_plan.fingerprint(),
+                "source_waypoint_validated": motion_plan.validation[
+                    "source_waypoint_validated"
+                ],
+                "goal_waypoint_validated": motion_plan.validation[
+                    "goal_waypoint_validated"
+                ],
+                "scene_safety": motion_plan.validation.get("scene_safety"),
+                "formal_source_bound": source_binding["formal_source_bound"],
+                "formal_task_semantics_matched": source_binding[
+                    "task_semantics_matched"
+                ],
+                "formal_task_tree_matched": source_binding["task_tree_matched"],
+                "formal_deterministic_source_reconstruction_passed": (
+                    source_binding["deterministic_source_reconstruction"]["passed"]
+                ),
+                "policy_result_fields_read": False,
+            },
+        )
+        required = set(controller.required_entities)
+        applied = {
+            event["entity"]
+            for event in scenario_events
+            if event.get("applied") is True
+        }
+        per_entity = {}
+        for name in ("bottle", "fridge"):
+            is_required = name in required
+            is_reached = name in reached_entities
+            entity_applied = name in applied
+            per_entity[name] = {
+                "required": is_required,
+                "trigger_step": (
+                    V4_STORE_TRIGGER_STEPS[name] if is_required else None
+                ),
+                "eligible": is_reached if is_required else False,
+                "reached": is_reached if is_required else False,
+                "applied": entity_applied,
+                "effective": entity_applied if is_required else None,
+                "complete": entity_applied if is_required else None,
+            }
+        dynamic = scenario == "teleport"
+        all_reached = bool(dynamic and required and required <= reached_entities)
+        all_applied = bool(dynamic and required and required <= applied)
+        any_applied = bool(applied)
+        if not dynamic:
+            status = {
+                "trigger_step": None,
+                "intervention_eligible": False,
+                "intervention_reached": False,
+                "pre_intervention_terminal": False,
+                "pre_intervention_terminal_outcome": None,
+                "dynamic_condition_exercised": False,
+                "dynamic_condition_unexercised": None,
+                "intervention_effective": None,
+                "intervention_complete": None,
+            }
+        else:
+            status = {
+                "trigger_step": {
+                    name: V4_STORE_TRIGGER_STEPS[name] for name in sorted(required)
+                },
+                "intervention_eligible": all_reached,
+                "intervention_reached": all_reached,
+                "pre_intervention_terminal": not all_reached,
+                "pre_intervention_terminal_outcome": (
+                    ("success" if row.get("success") is True else "failure")
+                    if not all_reached
+                    else None
+                ),
+                "dynamic_condition_exercised": any_applied,
+                "dynamic_condition_unexercised": not any_applied,
+                "intervention_effective": all_applied if all_reached else None,
+                "intervention_complete": all_applied if any_applied else None,
+            }
+        row.update(status)
+        row["store_mode"] = motion_plan.mode
+        row["store_required_entities"] = sorted(required)
+        row["store_entity_interventions"] = per_entity
+        row["scenario_events"] = scenario_events
+        return row
+
+    from rlbench.backend.exceptions import InvalidActionError
+
+    for control_step in range(horizon):
+        if last_scenario_policy_step != committed_policy_steps:
+            for entity in controller.required_entities:
+                if committed_policy_steps == V4_STORE_TRIGGER_STEPS[entity]:
+                    reached_entities.add(entity)
+            observation, events = controller.apply(
+                task_environment,
+                observation,
+                policy_step=committed_policy_steps,
+            )
+            scenario_events.extend(events)
+            last_scenario_policy_step = committed_policy_steps
+        response = worker.request("act", observation)
+        action = response.get("action")
+        if action is None:
+            settling = run_final_settling(
+                task_environment,
+                physics_steps=final_settling_steps,
+            )
+            if settling["success"]:
+                reason = "success_after_final_settling"
+            elif settling["terminate"]:
+                reason = "terminate_during_final_settling"
+            elif settling["available"]:
+                reason = "policy_complete_after_final_settling"
+            else:
+                reason = "policy_complete"
+            return finish(
+                {
+                    "episode": episode,
+                    "success": bool(settling["success"]),
+                    "steps": control_step,
+                    "control_attempts": control_step,
+                    "reason": reason,
+                    "invalid_actions": invalid_actions,
+                    "final_settling": settling,
+                }
+            )
+        transaction_id = response.get("transaction_id")
+        if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
+            raise RuntimeError("policy worker did not return an action transaction id")
+        primary_action_succeeded = False
+        retry_exhausted = False
+        try:
+            observation, reward, terminate = task_environment.step(
+                np.asarray(action, dtype=np.float64)
+            )
+            primary_action_succeeded = True
+        except InvalidActionError:
+            invalid_actions += 1
+            retry_exhausted = retry_budget.record_failure()
+            worker.request("abort", transaction_id=transaction_id)
+            try:
+                observation, reward, terminate = task_environment.step(
+                    _noop_action(observation)
+                )
+            except InvalidActionError:
+                return finish(
+                    {
+                        "episode": episode,
+                        "success": False,
+                        "steps": control_step + 1,
+                        "control_attempts": control_step + 1,
+                        "reason": "noop_failed",
+                        "invalid_actions": invalid_actions,
+                    }
+                )
+        except Exception:
+            worker.request("abort", transaction_id=transaction_id)
+            raise
+        if primary_action_succeeded:
+            commit = worker.request("commit", transaction_id=transaction_id)
+            retry_budget.record_success()
+            policy_complete = bool(commit.get("complete"))
+            committed_policy_steps += 1
+        else:
+            policy_complete = False
+        settling = None
+        if reward > 0.0:
+            reason = "success"
+        elif terminate:
+            reason = "terminate"
+        elif retry_exhausted:
+            reason = "primary_action_retry_exhausted"
+        elif policy_complete:
+            settling = run_final_settling(
+                task_environment,
+                physics_steps=final_settling_steps,
+            )
+            if settling["success"]:
+                reason = "success_after_final_settling"
+            elif settling["terminate"]:
+                reason = "terminate_during_final_settling"
+            elif settling["available"]:
+                reason = "policy_complete_after_final_settling"
+            else:
+                reason = "policy_complete"
+        else:
+            continue
+        return finish(
+            {
+                "episode": episode,
+                "success": bool(reward > 0.0 or (settling or {}).get("success")),
+                "steps": control_step + 1,
+                "control_attempts": control_step + 1,
+                "reason": reason,
+                "invalid_actions": invalid_actions,
+                **(
+                    {"primary_action_attempts": retry_budget.attempts}
+                    if reason == "primary_action_retry_exhausted"
+                    else {}
+                ),
+                **({"final_settling": settling} if settling is not None else {}),
+            }
+        )
+    return finish(
+        {
+            "episode": episode,
+            "success": False,
+            "steps": horizon,
+            "control_attempts": horizon,
+            "reason": "horizon",
+            "invalid_actions": invalid_actions,
+        }
+    )
+
+
 def _run_episode(
     task_environment,
     worker,
@@ -561,6 +1135,20 @@ def _run_episode(
     observation=None,
     fresh_task_generation=None,
 ):
+    if isinstance(motion_plan, StoreBottleMultiEntityPlan):
+        return _run_v4_store_episode(
+            task_environment,
+            worker,
+            episode,
+            horizon,
+            scenario=scenario,
+            max_primary_action_attempts=max_primary_action_attempts,
+            motion_plan=motion_plan,
+            final_settling_steps=final_settling_steps,
+            descriptions=descriptions,
+            observation=observation,
+            fresh_task_generation=fresh_task_generation,
+        )
     if descriptions is None or observation is None or not isinstance(
         fresh_task_generation,
         dict,
@@ -628,7 +1216,11 @@ def _run_episode(
         row.setdefault(
             "motion_plan_protocol_id",
             (
-                motion_plan.metadata()["protocol_id"]
+                (
+                    V4_LIFT_MOTION_PROTOCOL_ID
+                    if motion_plan.validation.get("v4_lift_tray") is not None
+                    else motion_plan.metadata()["protocol_id"]
+                )
                 if motion_plan is not None
                 else None
             ),
@@ -678,6 +1270,15 @@ def _run_episode(
                     ),
                     "formal_source_fingerprint": source_binding.get(
                         "formal_source_fingerprint"
+                    ),
+                    **(
+                        {
+                            "v4_lift_tray": motion_plan.validation[
+                                "v4_lift_tray"
+                            ]
+                        }
+                        if motion_plan.validation.get("v4_lift_tray") is not None
+                        else {}
                     ),
                 }
                 if motion_plan is not None
@@ -854,8 +1455,25 @@ def _stage_motion_plan_batch(args, task_class):
         ).variation_count()
         for episode in range(args.episodes):
             variation = episode % variation_count
-            plans.append(
-                stage_scenario_motion_plan(
+            if _is_v4_store(args):
+                plan = stage_v4_store_motion_plan(
+                    environment,
+                    task_class,
+                    episode_index=episode,
+                    episode_seed=args.seed + episode,
+                    variation=variation,
+                    max_attempts=args.scenario_max_attempts,
+                )
+            elif _is_v4_lift(args):
+                plan = stage_v4_lift_motion_plan(
+                    environment,
+                    task_class,
+                    episode_seed=args.seed + episode,
+                    variation=variation,
+                    max_attempts=args.scenario_max_attempts,
+                )
+            else:
+                plan = stage_scenario_motion_plan(
                     environment,
                     task_class,
                     task_name=args.task,
@@ -863,7 +1481,7 @@ def _stage_motion_plan_batch(args, task_class):
                     variation=variation,
                     max_attempts=args.scenario_max_attempts,
                 )
-            )
+            plans.append(plan)
             variations.append(variation)
             print(
                 f"staged {args.task} A/B {episode + 1}/{args.episodes}",
@@ -872,12 +1490,25 @@ def _stage_motion_plan_batch(args, task_class):
     finally:
         if launched:
             environment.shutdown()
-    payload = staged_motion_plan_batch(
-        task_name=args.task,
-        base_seed=args.seed,
-        variations=variations,
-        plans=plans,
-    )
+    if _is_v4_store(args):
+        payload = build_v4_store_task_scoped_plan_batch(
+            base_seed=args.seed,
+            variations=variations,
+            plans=plans,
+        )
+    elif _is_v4_lift(args):
+        payload = build_v4_lift_task_scoped_plan_batch(
+            base_seed=args.seed,
+            variations=variations,
+            plans=plans,
+        )
+    else:
+        payload = staged_motion_plan_batch(
+            task_name=args.task,
+            base_seed=args.seed,
+            variations=variations,
+            plans=plans,
+        )
     atomic_json(args.stage_motion_plans_output, payload)
     return payload
 
@@ -901,7 +1532,24 @@ def _load_fixed_motion_plans(args):
         raise RuntimeError(
             "formal evaluation seed/episode count differs from the fixed eval set"
         )
-    manifest, selected = fixed_environment_plans(args.eval_set_id, args.task)
+    if _is_v4_store(args):
+        runtime_loaders = {
+            V4_STORE_RUNTIME_LOADER_ID: load_v4_store_motion_plan_batch
+        }
+    elif _is_v4_lift(args):
+        runtime_loaders = {
+            V4_LIFT_RUNTIME_LOADER_ID: load_v4_lift_motion_plan_batch
+        }
+    else:
+        runtime_loaders = None
+    if runtime_loaders is None:
+        manifest, selected = fixed_environment_plans(args.eval_set_id, args.task)
+    else:
+        manifest, selected = fixed_environment_plans(
+            args.eval_set_id,
+            args.task,
+            runtime_loaders=runtime_loaders,
+        )
     plans = selected["plans"]
     if any(
         plan.validation.get("goal_sampling_max_attempts")
@@ -909,6 +1557,24 @@ def _load_fixed_motion_plans(args):
         for plan in plans
     ):
         raise RuntimeError("fixed eval-set goal-sampling budget is inconsistent")
+    if _is_v4_store(args):
+        payload = selected.get("payload")
+        if (
+            not isinstance(payload, dict)
+            or payload.get("runtime_loader") != V4_STORE_RUNTIME_LOADER_ID
+            or payload.get("task_identity", {}).get("components")
+            != v4_store_task_identity_components()
+        ):
+            raise RuntimeError("fixed StoreBottle V4 task-scoped identity is invalid")
+    elif _is_v4_lift(args):
+        payload = selected.get("payload")
+        if (
+            not isinstance(payload, dict)
+            or payload.get("runtime_loader") != V4_LIFT_RUNTIME_LOADER_ID
+            or payload.get("task_identity", {}).get("components")
+            != v4_lift_task_identity_components()
+        ):
+            raise RuntimeError("fixed V4 LiftTray task-scoped identity is invalid")
     return manifest, selected
 
 
@@ -919,22 +1585,62 @@ def evaluate(args):
 
 
 def _evaluate_reserved(args):
+    video_capture_enabled = _v4_video_capture_enabled(args)
     from rlbench.environment import Environment
     from rlbench.observation_config import ObservationConfig
 
-    # Do this before spawning the staging process so an invalid CLI override
-    # can never populate the canonical V3 plan cache.
-    _validate_v3_protocol_budgets(args)
-    module_name, class_name = TASKS[args.task]
-    task_class = getattr(importlib.import_module(module_name), class_name)
+    # Validate the release-scoped protocol before loading a formal plan batch.
+    if _is_v4_store(args):
+        _validate_v4_store_protocol_args(args)
+    elif _is_v4_lift(args):
+        _validate_v4_lift_protocol_args(args)
+    else:
+        _validate_v3_protocol_budgets(args)
+    if _is_v4_store(args):
+        task_class = v4_store_task_class()
+    else:
+        module_name, class_name = TASKS[args.task]
+        task_class = getattr(importlib.import_module(module_name), class_name)
     eval_set, selected_batch = _load_fixed_motion_plans(args)
-    motion_plan_payload = selected_batch["payload"]
+    selected_motion_plan_payload = selected_batch["payload"]
+    motion_plan_payload = (
+        selected_motion_plan_payload["runtime_batch"]
+        if _is_v4_task_scoped(args)
+        else selected_motion_plan_payload
+    )
     motion_plans = selected_batch["plans"]
     observation_config = ObservationConfig()
     observation_config.set_all(False)
     observation_config.gripper_open = True
     observation_config.gripper_pose = True
     observation_config.task_low_dim_state = True
+    video_capture_config = (
+        LightweightCaptureConfig() if video_capture_enabled else None
+    )
+    video_cell_dir = None
+    video_cell_key = None
+    episode_videos = []
+    if video_capture_enabled:
+        from rlbench.observation_config import CameraConfig
+
+        observation_config.camera_configs = {
+            video_capture_config.camera: CameraConfig(
+                rgb=True,
+                depth=False,
+                point_cloud=False,
+                mask=False,
+            )
+        }
+        video_cell_dir, video_cell_key = _v4_video_cell(
+            getattr(
+                args,
+                "v4_evaluation_video_root",
+                DEFAULT_V4_EVALUATION_VIDEO_ROOT,
+            ),
+            args.task,
+            args.scenario,
+        )
+        video_cell_dir = _prepare_v4_video_cell(video_cell_dir)
     action_mode = _make_action_mode()
     environment = Environment(
         action_mode=action_mode,
@@ -951,20 +1657,45 @@ def _evaluate_reserved(args):
     results = []
     launched = False
     try:
-        intervention_registry, trigger_authentication = (
-            _authenticated_v3_dynamic_trigger(args, worker)
-        )
+        if _is_v4_store(args):
+            intervention_registry, trigger_authentication = (
+                _authenticated_v4_store_triggers(args, worker)
+            )
+        elif _is_v4_lift(args):
+            intervention_registry, trigger_authentication = (
+                _authenticated_v4_lift_trigger(args, worker)
+            )
+        else:
+            intervention_registry, trigger_authentication = (
+                _authenticated_v3_dynamic_trigger(args, worker)
+            )
         scenario_reference_steps = worker.policy_steps
         scenario_reference_source = (
-            "AUTHENTICATED_LOADED_CHECKPOINT_POLICY_STEPS"
+            (
+                (
+                    "V4_STORE_INDEPENDENT_SKILL0_ENTITY_TICKS_WITH_LOADED_POLICY_HORIZON"
+                    if _is_v4_store(args)
+                    else "V4_LIFT_FIXED_SKILL0_GLOBAL_TICK_WITH_LOADED_POLICY_HORIZON"
+                )
+                if _is_v4_task_scoped(args)
+                else "AUTHENTICATED_LOADED_CHECKPOINT_POLICY_STEPS"
+            )
             if args.scenario_reference_steps is None
-            else "COMMAND_LINE_MATCHED_AUTHENTICATED_LOADED_CHECKPOINT_POLICY_STEPS"
+            else (
+                "COMMAND_LINE_MATCHED_V4_LOADED_POLICY_HORIZON"
+                if _is_v4_task_scoped(args)
+                else "COMMAND_LINE_MATCHED_AUTHENTICATED_LOADED_CHECKPOINT_POLICY_STEPS"
+            )
         )
-        resolved_trigger_step = (
-            None
-            if args.scenario == "static"
-            else trigger_authentication["trigger_step"]
-        )
+        if args.scenario == "static":
+            resolved_trigger_step = None
+        elif _is_v4_store(args):
+            resolved_trigger_step = {
+                name: value["trigger_step"]
+                for name, value in trigger_authentication["triggers"].items()
+            }
+        else:
+            resolved_trigger_step = trigger_authentication["trigger_step"]
         environment.launch()
         launched = True
         variation_count = task_class(
@@ -993,26 +1724,41 @@ def _evaluate_reserved(args):
                 variation=variation,
                 verify_instance=False,
             )
-            result = _run_episode(
+            def run_formal_episode(formal_task_environment):
+                return _run_episode(
+                    formal_task_environment,
+                    worker,
+                    episode,
+                    args.seed,
+                    args.horizon,
+                    scenario=args.scenario,
+                    scenario_trigger_fraction=args.scenario_trigger_fraction,
+                    scenario_trigger_step=resolved_trigger_step,
+                    scenario_reference_steps=scenario_reference_steps,
+                    scenario_steps=args.scenario_steps,
+                    scenario_max_attempts=args.scenario_max_attempts,
+                    max_primary_action_attempts=args.max_primary_action_attempts,
+                    motion_plan=episode_motion_plan,
+                    final_settling_steps=args.final_settling_steps,
+                    descriptions=descriptions,
+                    observation=observation,
+                    fresh_task_generation=fresh_task_generation,
+                )
+
+            result, episode_video = _run_episode_with_optional_v4_video(
                 task_environment,
-                worker,
-                episode,
-                args.seed,
-                args.horizon,
-                scenario=args.scenario,
-                scenario_trigger_fraction=args.scenario_trigger_fraction,
-                scenario_trigger_step=resolved_trigger_step,
-                scenario_reference_steps=scenario_reference_steps,
-                scenario_steps=args.scenario_steps,
-                scenario_max_attempts=args.scenario_max_attempts,
-                max_primary_action_attempts=args.max_primary_action_attempts,
-                motion_plan=episode_motion_plan,
-                final_settling_steps=args.final_settling_steps,
-                descriptions=descriptions,
-                observation=observation,
-                fresh_task_generation=fresh_task_generation,
+                observation,
+                enabled=video_capture_enabled,
+                cell_dir=video_cell_dir,
+                cell_key=video_cell_key,
+                episode=episode,
+                episode_seed=args.seed + episode,
+                run_episode=run_formal_episode,
+                capture_config=video_capture_config,
             )
             results.append(result)
+            if episode_video is not None:
+                episode_videos.append(episode_video)
             successes = sum(item["success"] for item in results)
             success_rate = 100.0 * successes / len(results)
             print(
@@ -1052,22 +1798,58 @@ def _evaluate_reserved(args):
         )
         for item in results
     ]
-    motion_protocol = ScenarioController(
-        SCENARIO_KINDS[args.scenario],
-        trigger_fraction=args.scenario_trigger_fraction,
-        trigger_step=resolved_trigger_step,
-        total_steps=args.scenario_steps,
-        max_attempts=args.scenario_max_attempts,
-        motion_plan=(motion_plans[0] if motion_plans else None),
-    ).protocol_metadata()
+    if _is_v4_store(args):
+        motion_protocol = StoreBottleMultiEntityController(
+            plan=motion_plans[0],
+            scenario=args.scenario,
+        ).protocol_metadata()
+    else:
+        motion_protocol = ScenarioController(
+            SCENARIO_KINDS[args.scenario],
+            trigger_fraction=args.scenario_trigger_fraction,
+            trigger_step=resolved_trigger_step,
+            total_steps=args.scenario_steps,
+            max_attempts=args.scenario_max_attempts,
+            motion_plan=(motion_plans[0] if motion_plans else None),
+        ).protocol_metadata()
+    store_mode_subgroups = None
+    if _is_v4_store(args):
+        store_mode_subgroups = {}
+        for mode in ("bottle_only", "fridge_only", "both"):
+            members = [item for item in results if item.get("store_mode") == mode]
+            successes = sum(int(item["success"]) for item in members)
+            store_mode_subgroups[mode] = {
+                "planned": sum(plan.mode == mode for plan in motion_plans),
+                "completed": len(members),
+                "successes": successes,
+                "success_rate": (
+                    successes / float(len(members)) if members else None
+                ),
+                "intervention_complete": sum(
+                    item.get("intervention_complete") is True for item in members
+                ),
+                "dynamic_condition_unexercised": sum(
+                    item.get("dynamic_condition_unexercised") is True
+                    for item in members
+                ),
+            }
     summary = {
+        **({"release": "v4"} if getattr(args, "release", "v3") == "v4" else {}),
         "task": args.task,
         "scenario": args.scenario,
         "scenario_protocol": {
             "status": (
                 "STATIC_REFERENCE"
                 if args.scenario == "static"
-                else "V3_PREREGISTERED_CHECKPOINT_AUTHENTICATED"
+                else (
+                    (
+                        "V4_STORE_INDEPENDENT_ENTITY_TRIGGERS_TASK_SCOPED"
+                        if _is_v4_store(args)
+                        else "V4_LIFT_SKILL0_TICK35_TASK_SCOPED"
+                    )
+                    if _is_v4_task_scoped(args)
+                    else "V3_PREREGISTERED_CHECKPOINT_AUTHENTICATED"
+                )
             ),
             "motion_kind": SCENARIO_KINDS[args.scenario],
             "motion_protocol": motion_protocol,
@@ -1152,12 +1934,58 @@ def _evaluate_reserved(args):
                     "seed_domain": motion_plan_payload["seed_domain"],
                     "goal_sampling_max_attempts": args.scenario_max_attempts,
                     "source_selection_max_attempts": 20,
-                    "motion_source_protocol_schema": motion_plans[0].validation[
-                        "motion_source_protocol_schema"
-                    ],
-                    "motion_source_protocol_fingerprint": motion_plans[0].validation[
-                        "motion_source_protocol_fingerprint"
-                    ],
+                    "motion_source_protocol_schema": (
+                        (
+                            motion_plans[0].validation["motion_source_schema"]
+                            if _is_v4_store(args)
+                            else motion_plans[0].validation["v4_lift_tray"][
+                                "motion_source_schema"
+                            ]
+                        )
+                        if _is_v4_task_scoped(args)
+                        else motion_plans[0].validation[
+                            "motion_source_protocol_schema"
+                        ]
+                    ),
+                    "motion_source_protocol_fingerprint": (
+                        (
+                            motion_plans[0].validation[
+                                "motion_source_fingerprint"
+                            ]
+                            if _is_v4_store(args)
+                            else motion_plans[0].validation["v4_lift_tray"][
+                                "motion_source_fingerprint"
+                            ]
+                        )
+                        if _is_v4_task_scoped(args)
+                        else motion_plans[0].validation[
+                            "motion_source_protocol_fingerprint"
+                        ]
+                    ),
+                    **(
+                        {
+                            "runtime_protocol_id": (
+                                V4_STORE_MOTION_PROTOCOL_ID
+                                if _is_v4_store(args)
+                                else V4_LIFT_MOTION_PROTOCOL_ID
+                            ),
+                            "task_scoped_envelope": {
+                            "schema": selected_motion_plan_payload["schema"],
+                            "protocol_id": selected_motion_plan_payload["protocol_id"],
+                            "runtime_loader": selected_motion_plan_payload[
+                                "runtime_loader"
+                            ],
+                            "task_identity_fingerprint": selected_motion_plan_payload[
+                                "task_identity"
+                            ]["fingerprint"],
+                            "batch_fingerprint": selected_motion_plan_payload[
+                                "batch_fingerprint"
+                            ],
+                            },
+                        }
+                        if _is_v4_task_scoped(args)
+                        else {}
+                    ),
                     "formal_dynamic_reset_verify_instance": False,
                     "cache_key": {
                         "task": args.task,
@@ -1194,7 +2022,7 @@ def _evaluate_reserved(args):
             "selected_batch_sha256": eval_set["payload"][
                 "environment_plan_batches"
             ][args.task]["sha256"],
-            "selected_batch_fingerprint": motion_plan_payload[
+            "selected_batch_fingerprint": selected_motion_plan_payload[
                 "batch_fingerprint"
             ],
             "formal_access": "canonical_id_read_only_no_generation",
@@ -1202,11 +2030,15 @@ def _evaluate_reserved(args):
         "controller": {
             "command": "absolute_world_end_effector_pose",
             "primary_ik": "jacobian",
+            "primary_ik_collision_check": False,
             "fallback_ik": "sampling",
-            "sampling_trials": 100,
-            "sampling_max_configs": 5,
-            "sampling_max_time_ms": 10,
-            "sampling_ignore_collisions": True,
+            "sampling_trials": IK_SAMPLING_TRIALS,
+            "sampling_max_configs": IK_SAMPLING_MAX_CONFIGS,
+            "sampling_max_time_ms": IK_SAMPLING_MAX_TIME_MS,
+            "sampling_ignore_collisions": False,
+            "sampling_collision_check_scope": "candidate_configuration",
+            "sampling_candidate_selection": "nearest_current_joint_l2",
+            "ik_candidate_validation": "shape_finite_noncyclic_joint_limits",
             "joint_target_max_steps": 200,
             "failed_action": "abort_policy_target_then_current_pose_current_gripper_noop",
             "failed_action_next_tick": "retry_same_policy_tick_from_fresh_observation",
@@ -1223,6 +2055,11 @@ def _evaluate_reserved(args):
             "pyrep_commit": "b8bd1d7a3182adcd570d001649c0849047ebf197",
         },
         "model_identity": worker.model_identity,
+        **(
+            {"store_mode_subgroups": store_mode_subgroups}
+            if store_mode_subgroups is not None
+            else {}
+        ),
         "successes": sum(item["success"] for item in results),
         "success_rate": sum(item["success"] for item in results) / float(args.episodes),
         "episode_accounting": {
@@ -1265,8 +2102,8 @@ def _evaluate_reserved(args):
             args.final_settling_steps
         ),
         "motion_plan_batch_fingerprint": (
-            motion_plan_payload["batch_fingerprint"]
-            if motion_plan_payload is not None
+            selected_motion_plan_payload["batch_fingerprint"]
+            if selected_motion_plan_payload is not None
             else None
         ),
         "results": results,
@@ -1281,7 +2118,45 @@ def _evaluate_reserved(args):
             ],
         },
     }
-    atomic_json(args.output, summary)
+    if video_capture_enabled:
+        video_capture_metadata = {
+            "release": "v4",
+            "cell_key": video_cell_key,
+            "cell_dir": str(video_cell_dir),
+            "episodes_recorded": len(episode_videos),
+            "capture_config": dict(video_capture_config.audit()),
+            "paper_success_rate": V4_VIDEO_PAPER_TARGETS.get(
+                (args.task, args.scenario)
+            ),
+        }
+
+        def finalize_videos():
+            return _finalize_v4_video_cell(
+                video_cell_dir,
+                episode_videos,
+                cell_key=video_cell_key,
+                successes=sum(int(item["success"]) for item in results),
+                episodes=args.episodes,
+                paper_success_rate=V4_VIDEO_PAPER_TARGETS.get(
+                    (args.task, args.scenario)
+                ),
+                cell_metadata={
+                    "evaluator": "direct_evaluate",
+                    "task": args.task,
+                    "scenario": args.scenario,
+                    "formal_result": str(args.output),
+                },
+            )
+    else:
+        video_capture_metadata = None
+        finalize_videos = None
+    _commit_formal_result_with_optional_v4_videos(
+        args.output,
+        summary,
+        enabled=video_capture_enabled,
+        capture_metadata=video_capture_metadata,
+        finalize_videos=finalize_videos,
+    )
     print(f"wrote {args.output}")
     return 0
 
@@ -1361,6 +2236,26 @@ def build_parser():
         default=DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
         help="Maximum primary InvalidAction attempts for one policy clock tick.",
     )
+    parser.add_argument(
+        "--release",
+        choices=("v3", "v4"),
+        default="v3",
+        help="Evaluation release gate; V4 requires formal episode video capture.",
+    )
+    parser.add_argument(
+        "--record-v4-evaluation-videos",
+        action="store_true",
+        help=(
+            "Stream front RGB from the actual formal V4 episodes and retain "
+            "the fixed outcome-stratified sample; disabled by default for V3."
+        ),
+    )
+    parser.add_argument(
+        "--v4-evaluation-video-root",
+        type=Path,
+        default=DEFAULT_V4_EVALUATION_VIDEO_ROOT,
+        help="Root for V4 formal evaluation video cells.",
+    )
     display = parser.add_mutually_exclusive_group()
     display.add_argument("--headless", dest="headless", action="store_true")
     display.add_argument("--no-headless", dest="headless", action="store_false")
@@ -1375,12 +2270,22 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if _is_v4_store(args) and Path(args.models_dir) == DEFAULT_MODELS_DIR:
+        args.models_dir = V4_MODELS_DIR
     if args.stage_motion_plans_output is not None:
-        _validate_v3_protocol_budgets(args)
+        if _is_v4_store(args):
+            _validate_v4_store_protocol_args(args)
+        elif _is_v4_lift(args):
+            _validate_v4_lift_protocol_args(args)
+        else:
+            _validate_v3_protocol_budgets(args)
         if args.episodes < 1 or args.seed < 0 or args.scenario_max_attempts < 1:
             raise ValueError("staging episodes/attempts must be positive")
-        module_name, class_name = TASKS[args.task]
-        task_class = getattr(importlib.import_module(module_name), class_name)
+        if _is_v4_store(args):
+            task_class = v4_store_task_class()
+        else:
+            module_name, class_name = TASKS[args.task]
+            task_class = getattr(importlib.import_module(module_name), class_name)
         with reserve_output(args.stage_motion_plans_output):
             _stage_motion_plan_batch(args, task_class)
         return 0
@@ -1401,8 +2306,9 @@ def main(argv=None):
         raise ValueError("scenario reference steps must be positive")
     if args.output is None:
         family = "table_ii" if args.scenario == "static" else "table_iii_environment"
+        results_root = V4_RESULTS_DIR if _is_v4_store(args) else DEFAULT_RESULTS_DIR
         args.output = (
-            DEFAULT_RESULTS_DIR
+            results_root
             / family
             / f"{args.task}_{args.scenario}_seed{args.seed}_n{args.episodes}_h{args.horizon}.json"
         )

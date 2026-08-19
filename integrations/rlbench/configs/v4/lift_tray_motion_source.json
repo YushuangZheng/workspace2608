@@ -1,0 +1,37 @@
+{
+  "schema": "rlbench-dynamac-lift-tray-motion-source-v4",
+  "release": "v4",
+  "task": "bimanual_lift_tray",
+  "task_semantics": {
+    "schema": "rlbench-public-bimanual-lift-tray-task-semantics-v1",
+    "module": "rlbench.bimanual_tasks.bimanual_lift_tray",
+    "class_name": "BimanualLiftTray",
+    "spatial_root_name": "bimanual_lift_tray",
+    "spatial_root_type": "DUMMY",
+    "moved_entity_scope": "complete_boundary_root_subtree"
+  },
+  "source_selection_max_attempts": 20,
+  "goal_sampling_max_attempts": 100,
+  "translation": {
+    "reference": "source_A_boundary_root",
+    "frame": "world_xy",
+    "radial_min_m": 0.03,
+    "radial_max_m": 0.08,
+    "z_delta_m": 0.0
+  },
+  "rotation": {
+    "composition": "world_z_yaw_left_multiply_source_quaternion",
+    "yaw_delta_abs_max_rad": 0.1,
+    "roll_pitch": "unchanged_from_source_A"
+  },
+  "candidate_generation": {
+    "protocol_id": "lift-tray-source-relative-radial-candidate-v4",
+    "seed": "(logical_episode_seed*1000003 + variation*9176 + attempt*7919) % 4294967295",
+    "distribution": "radius_uniform_angle_uniform_yaw_delta_uniform",
+    "acceptance": "workspace_fit_waypoint_validation_no_new_robot_collision_pairs",
+    "selection_authority": "scene_validity_only",
+    "policy_result_fields_read": false,
+    "result_based_candidate_selection_forbidden": true
+  },
+  "runtime_loader": "lift-tray-source-relative-motion-plan-batch-v4"
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "rlbench-store-bottle-training-protocol-v4",
+  "protocol_id": "store_bottle_static_g5_seed4104000000_v4",
+  "release": "v4",
+  "semantic_config": "integrations/rlbench/configs/v4/store_bottle_semantics.json",
+  "task": {
+    "task_name": "bimanual_put_bottle_in_fridge",
+    "module": "integrations.rlbench.rlbench_dynamac.store_bottle_live_v4",
+    "class_name": "BimanualPutBottleInFridgeSemanticV4"
+  },
+  "collection": {
+    "scenario": "static",
+    "environment_intervention": "none",
+    "demonstrations": 5,
+    "base_seed": 4104000000,
+    "variation": 0,
+    "max_demo_attempts": 10,
+    "robot_setup": "dual_panda",
+    "static_positions": false,
+    "success_authority": "RLBench Scene.get_demo raises DemoError unless task.success is true"
+  },
+  "paths": {
+    "data_directory": "integrations/rlbench/data/v4/store_bottle",
+    "policy_config": "integrations/rlbench/configs/v4/dynamac_store_bottle.json",
+    "models_directory": "integrations/rlbench/models/v4",
+    "model_directory": "integrations/rlbench/models/v4/bimanual_put_bottle_in_fridge",
+    "release_plan": "integrations/rlbench/configs/v4/model_release.json"
+  },
+  "training": {
+    "manifest_schema": "dynamac-direct-training-v4",
+    "pose_frames": [
+      "bottle",
+      "fridge"
+    ],
+    "online_pose_frames": [
+      "bottle",
+      "fridge"
+    ],
+    "other_tasks_trained": false
+  },
+  "split": {
+    "evaluation_set_id": "rlbench_eval_v2",
+    "evaluation_seed_start": 2608000000,
+    "training_seed_range": [
+      4104000000,
+      4104000004
+    ],
+    "training_and_evaluation_seeds_disjoint": true,
+    "evaluation_artifacts_allowed_as_training_inputs": false
+  }
+}

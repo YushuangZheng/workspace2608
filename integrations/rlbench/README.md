@@ -48,7 +48,14 @@ Install the two environments from [requirements/](requirements/). Demonstrations
 - [tasks.json](configs/tasks.json): task frames and bimanual coordination.
 - [v3_interventions.json](configs/v3_interventions.json): preregistered task/skill trigger ticks and protocol constants.
 - [v3_motion_sources.json](configs/v3_motion_sources.json): spatial roots and deterministic offline source/goal generation budgets.
+- [evaluation_set_spec.json](configs/v4/evaluation_set_spec.json): V4 input-only
+  specification for `rlbench_eval_v2`. Unchanged tasks remain authenticated,
+  zero-copy references to `rlbench_fixed_v1`; StoreBottle and LiftTray require
+  newly generated task-scoped plan-batch envelopes before sealing.
 - [V3_PROTOCOL.md](V3_PROTOCOL.md): frozen V3 mechanism, trigger evidence, staging, clock, settling, and accounting contract.
+- [V4_PROTOCOL.md](V4_PROTOCOL.md): V4 release identity, six-cell first-run
+  scope, intervention changes, formal video retention, and diagnostic boundary.
+- [V4_STORE_BOTTLE.md](V4_STORE_BOTTLE.md): StoreBottle-only V4 semantic, collection, training, serving, and model-release boundary.
 - [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md): implementation boundary.
 - [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md): details still required for an exact author-side match.
 
@@ -75,6 +82,9 @@ RLBench task or protocol.
 - Immutable second-release checkpoints and outputs: `models/v2/` and `results/v2/`.
 - Current checkpoints and outputs: `models/v3/` and `results/v3/`.
 - Tracked, outcome-free fixed evaluation inputs: `evaluation_sets/rlbench_fixed_v1/`.
+- V4 evaluation inputs (after generation): `evaluation_sets/rlbench_eval_v2/`.
+  `NOT_RUN` and other result state are deliberately excluded from this input
+  schema and belong only in V4 result reports.
 - Failure replays: `results/failure_videos/v1/`.
 - Generated V3 comparison: `results/v3/paper_comparison.md`, with CSV and JSON beside it.
 

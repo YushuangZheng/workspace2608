@@ -11,7 +11,7 @@ import pytest
 
 from integrations.rlbench.rlbench_dynamac import paper_comparison
 from integrations.rlbench.rlbench_dynamac.direct_evaluate import (
-    evaluation_protocol_id as bimanual_evaluation_protocol_id,
+    legacy_v3_evaluation_protocol_id as bimanual_evaluation_protocol_id,
 )
 from integrations.rlbench.rlbench_dynamac.direct_policy import V3_ADAPTER_PROTOCOL
 from integrations.rlbench.rlbench_dynamac.eval_set import (
@@ -55,7 +55,7 @@ from integrations.rlbench.rlbench_dynamac.unimanual_evaluate import (
     EXPECTED_UNIMANUAL_BASE_SCENE_SHA256,
     EXPECTED_UNIMANUAL_BASE_VISION_SENSOR_COUNT,
     LOW_DIM_HEADLESS_SCENE_PROTOCOL_ID,
-    evaluation_protocol_id,
+    legacy_v3_evaluation_protocol_id as evaluation_protocol_id,
 )
 from integrations.rlbench.rlbench_dynamac.v3_protocol import (
     V3_CHECKPOINT_TRIGGER_AUDIT_SCHEMA,

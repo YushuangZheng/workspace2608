@@ -16,7 +16,7 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
@@ -38,7 +38,7 @@ from .runtime import (
     unimanual_action_to_rlbench,
     unimanual_observation_from_rlbench,
 )
-from .task_specs import get_task_spec, load_task_specs
+from .task_specs import TaskSpec, get_task_spec, load_task_specs
 from .v3_protocol import (
     bimanual_checkpoint_trigger_audit,
     build_v3_trigger_anchor_evidence,
@@ -59,8 +59,13 @@ DEFAULT_CONFIG = INTEGRATION_ROOT / "configs" / "dynamac_rlbench_v3.json"
 DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
 TRAINING_MANIFEST_SCHEMA_V2 = "dynamac-direct-training-v2"
 TRAINING_MANIFEST_SCHEMA_V3 = "dynamac-direct-training-v3"
+TRAINING_MANIFEST_SCHEMA_V4 = "dynamac-direct-training-v4"
 AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS = frozenset(
-    {TRAINING_MANIFEST_SCHEMA_V2, TRAINING_MANIFEST_SCHEMA_V3}
+    {
+        TRAINING_MANIFEST_SCHEMA_V2,
+        TRAINING_MANIFEST_SCHEMA_V3,
+        TRAINING_MANIFEST_SCHEMA_V4,
+    }
 )
 V3_ADAPTER_PROTOCOL = {
     "schema": "rlbench-dynamac-demo-adapter-v3",
@@ -72,6 +77,25 @@ V3_ADAPTER_PROTOCOL = {
 POLICY_CLOCK_SEMANTICS_ID = (
     "policy-tick-transaction-commit-on-primary-action-success-v1"
 )
+
+
+def v4_quaternion_batch_gauge_identity() -> dict[str, str]:
+    """Return the training-only quaternion gauge bound into V4 manifests.
+
+    Existing schema-13 checkpoints contain all fitted arrays and keep their
+    historical load/inference behavior.  This identity distinguishes newly
+    fitted V4 artifacts without changing that read-only checkpoint contract.
+    """
+
+    from essay2608.policy import QUATERNION_BATCH_GAUGE_PROTOCOL_ID
+
+    return {
+        "protocol_id": QUATERNION_BATCH_GAUGE_PROTOCOL_ID,
+        "application": "training_pose_batch_preprocessing",
+        "legacy_checkpoint_compatibility": (
+            "existing_schema13_arrays_load_without_refit_or_runtime_change"
+        ),
+    }
 
 
 def _episode_number(path: Path) -> tuple[int, str]:
@@ -95,6 +119,69 @@ def demonstration_paths(data_root: Path, task: str, count: int = 5) -> list[Path
     return paths[:count]
 
 
+def task_demonstration_paths(task_data_dir: Path, count: int = 5) -> list[Path]:
+    """Return demos when ``task_data_dir`` is already the task directory.
+
+    Historical releases pass a shared data root to :func:`demonstration_paths`.
+    A task-scoped release may instead version one task directly, without adding
+    a redundant second task-name directory.
+    """
+
+    if count < 1:
+        raise ValueError("demonstration count must be positive")
+    episode_root = task_data_dir / "all_variations" / "episodes"
+    paths = sorted(episode_root.glob("episode*/low_dim_obs.pkl"), key=_episode_number)
+    if len(paths) < count:
+        raise FileNotFoundError(
+            f"found {len(paths)} low_dim_obs.pkl files under {episode_root}; "
+            f"need {count}"
+        )
+    return paths[:count]
+
+
+def _resolve_task_spec(task: str, task_spec: TaskSpec | None) -> TaskSpec:
+    spec = get_task_spec(task) if task_spec is None else task_spec
+    if spec.task_name != task:
+        raise ValueError(
+            f"injected task spec names {spec.task_name!r}, expected {task!r}"
+        )
+    return spec
+
+
+def _v4_store_policy_spec_identity() -> tuple[TaskSpec, dict[str, Any]]:
+    """Load the tracked V4 StoreBottle spec without affecting V3 defaults."""
+
+    from .store_bottle_semantics import (
+        store_bottle_policy_spec_identity,
+        store_bottle_semantic_task_spec,
+    )
+
+    return store_bottle_semantic_task_spec(), store_bottle_policy_spec_identity()
+
+
+def _resolve_manifest_task_spec(
+    task: str,
+    manifest: Mapping[str, Any],
+    task_spec: TaskSpec | None,
+) -> TaskSpec:
+    if manifest.get("manifest_schema") != TRAINING_MANIFEST_SCHEMA_V4:
+        return _resolve_task_spec(task, task_spec)
+    current, expected_identity = _v4_store_policy_spec_identity()
+    if task != current.task_name:
+        raise RuntimeError("V4 training manifests are currently StoreBottle-only")
+    training_identity = manifest.get("training_identity")
+    policy_identity = (
+        training_identity.get("policy_spec")
+        if isinstance(training_identity, dict)
+        else None
+    )
+    if policy_identity != expected_identity:
+        raise RuntimeError("V4 StoreBottle policy spec identity mismatch")
+    if task_spec is not None and task_spec != current:
+        raise RuntimeError("injected V4 task spec differs from its authenticated manifest")
+    return current
+
+
 def load_policy_config(path: Path) -> Any:
     from essay2608.policy import DynaMACConfig
 
@@ -111,12 +198,22 @@ def train_task(
     models_dir: Path,
     config_path: Path,
     demonstration_count: int = 5,
+    task_spec: TaskSpec | None = None,
+    task_data_dir: Path | None = None,
+    manifest_schema: str = TRAINING_MANIFEST_SCHEMA_V3,
+    training_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fit, validate, and atomically publish one complete task model."""
 
     from .evaluation_split import validate_training_entry_paths
 
     validate_training_entry_paths(data_root, models_dir, config_path)
+    if task_data_dir is not None:
+        validate_training_entry_paths(task_data_dir)
+    if manifest_schema not in AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS:
+        raise ValueError(f"unsupported training manifest schema: {manifest_schema}")
+    if manifest_schema == TRAINING_MANIFEST_SCHEMA_V4 and training_identity is None:
+        raise ValueError("V4 training requires an authenticated training identity")
 
     output = models_dir / task
     with reserve_output(output):
@@ -130,8 +227,17 @@ def train_task(
                 output=staging,
                 config_path=config_path,
                 demonstration_count=demonstration_count,
+                task_spec=task_spec,
+                task_data_dir=task_data_dir,
+                manifest_schema=manifest_schema,
+                training_identity=training_identity,
             )
-            _validate_published_model(task, staging, summary)
+            _validate_published_model(
+                task,
+                staging,
+                summary,
+                expected_training_identity=training_identity,
+            )
             os.rename(staging, output)
         finally:
             if staging.exists():
@@ -146,13 +252,21 @@ def _train_task_into(
     output: Path,
     config_path: Path,
     demonstration_count: int,
+    task_spec: TaskSpec | None = None,
+    task_data_dir: Path | None = None,
+    manifest_schema: str = TRAINING_MANIFEST_SCHEMA_V3,
+    training_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fit all artifacts inside an unpublished staging directory."""
 
     from essay2608.policy import BimanualDynaMAC, DynaMAC
 
-    spec = get_task_spec(task)
-    paths = demonstration_paths(data_root, task, demonstration_count)
+    spec = _resolve_task_spec(task, task_spec)
+    paths = (
+        demonstration_paths(data_root, task, demonstration_count)
+        if task_data_dir is None
+        else task_demonstration_paths(task_data_dir, demonstration_count)
+    )
     episodes = load_low_dim_obs_pickles(paths)
     config = load_policy_config(config_path)
     output.mkdir(parents=True, exist_ok=True)
@@ -200,13 +314,18 @@ def _train_task_into(
             "adapter": converted.audit,
         }
         checkpoint_audit = checkpoint_trigger_audit(policy)
-    summary["manifest_schema"] = TRAINING_MANIFEST_SCHEMA_V3
+    summary["manifest_schema"] = manifest_schema
     summary["checkpoint_trigger_audit"] = checkpoint_audit
-    summary["v3_trigger_anchor_evidence"] = build_v3_trigger_anchor_evidence(
-        task,
-        checkpoint_audit,
-        summary,
-    )
+    if training_identity is not None:
+        summary["training_identity"] = deepcopy(dict(training_identity))
+    if manifest_schema == TRAINING_MANIFEST_SCHEMA_V4:
+        summary["quaternion_batch_gauge"] = v4_quaternion_batch_gauge_identity()
+    if manifest_schema == TRAINING_MANIFEST_SCHEMA_V3:
+        summary["v3_trigger_anchor_evidence"] = build_v3_trigger_anchor_evidence(
+            task,
+            checkpoint_audit,
+            summary,
+        )
     atomic_json(output / "training.json", summary)
     return summary
 
@@ -243,6 +362,8 @@ def _validate_published_model(
     task: str,
     output: Path,
     summary: dict[str, Any],
+    *,
+    expected_training_identity: Mapping[str, Any] | None = None,
 ) -> None:
     """Reload staged checkpoints and bind them to their manifest fingerprints."""
 
@@ -253,8 +374,25 @@ def _validate_published_model(
     manifest_schema = summary.get("manifest_schema")
     if manifest_schema not in AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS:
         raise RuntimeError("staged training manifest schema is not authenticated")
-    if manifest_schema == TRAINING_MANIFEST_SCHEMA_V3:
+    if manifest_schema in {
+        TRAINING_MANIFEST_SCHEMA_V3,
+        TRAINING_MANIFEST_SCHEMA_V4,
+    }:
         _validate_v3_adapter_protocol(summary)
+    if manifest_schema == TRAINING_MANIFEST_SCHEMA_V4:
+        identity = summary.get("training_identity")
+        if not isinstance(identity, dict):
+            raise RuntimeError("staged V4 manifest is missing its training identity")
+        gauge_identity = v4_quaternion_batch_gauge_identity()
+        if summary.get("quaternion_batch_gauge") != gauge_identity:
+            raise RuntimeError("staged V4 manifest has the wrong quaternion batch gauge")
+        if identity.get("quaternion_batch_gauge") != gauge_identity:
+            raise RuntimeError("staged V4 training identity has the wrong quaternion batch gauge")
+        _resolve_manifest_task_spec(task, summary, None)
+        if expected_training_identity is not None and identity != dict(
+            expected_training_identity
+        ):
+            raise RuntimeError("staged V4 training identity mismatch")
     if summary.get("bimanual"):
         base_record = summary.get("config")
         if not isinstance(base_record, dict):
@@ -334,12 +472,17 @@ class _WireArm:
 class PolicyServer:
     """Stateful current-core policy used by the Python 3.8 simulator process."""
 
-    def __init__(self, task: str, models_dir: Path) -> None:
+    def __init__(
+        self,
+        task: str,
+        models_dir: Path,
+        *,
+        task_spec: TaskSpec | None = None,
+        expected_training_identity: Mapping[str, Any] | None = None,
+    ) -> None:
         from essay2608.policy import BimanualDynaMAC, DynaMAC
 
-        spec = get_task_spec(task)
         self.task = task
-        self.bimanual = spec.bimanual
         task_dir = models_dir / task
         manifest_path = task_dir / "training.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -347,6 +490,9 @@ class PolicyServer:
             raise ValueError(f"training manifest must be a JSON object: {manifest_path}")
         if manifest.get("task") not in {None, task}:
             raise ValueError("training manifest task does not match the requested policy")
+        spec = _resolve_manifest_task_spec(task, manifest, task_spec)
+        self.task_spec = spec
+        self.bimanual = spec.bimanual
         if manifest.get("bimanual") not in {None, self.bimanual}:
             raise ValueError("training manifest arm count does not match the task")
         manifest_authenticated = (
@@ -354,7 +500,12 @@ class PolicyServer:
             in AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS
         )
         if manifest_authenticated:
-            _validate_published_model(task, task_dir, manifest)
+            _validate_published_model(
+                task,
+                task_dir,
+                manifest,
+                expected_training_identity=expected_training_identity,
+            )
         self.policy = (
             BimanualDynaMAC(
                 left=DynaMAC.load(task_dir / "left.npz"),
@@ -430,6 +581,10 @@ class PolicyServer:
                 ),
             }
         )
+        if "training_identity" in manifest:
+            self.model_identity["training_identity"] = deepcopy(
+                manifest["training_identity"]
+            )
         self._pending_transaction: dict[str, Any] | None = None
         self._next_transaction_id = 1
 
@@ -506,7 +661,10 @@ class PolicyServer:
             raise ValueError("command must be ping, reset, act, commit, abort, or close")
         observation = _WireObservation(request["observation"])
         if self.bimanual:
-            left, right = bimanual_observations_from_rlbench(observation, self.task)
+            left, right = bimanual_observations_from_rlbench(
+                observation,
+                getattr(self, "task_spec", self.task),
+            )
             if command == "reset":
                 if self._pending_transaction is not None:
                     self._restore_runtime(self._pending_transaction["runtime"])
@@ -558,10 +716,21 @@ class PolicyServer:
         }
 
 
-def serve(task: str, models_dir: Path) -> int:
+def serve(
+    task: str,
+    models_dir: Path,
+    *,
+    task_spec: TaskSpec | None = None,
+    expected_training_identity: Mapping[str, Any] | None = None,
+) -> int:
     """Serve one policy over newline-delimited JSON on stdin/stdout."""
 
-    server = PolicyServer(task, models_dir)
+    server = PolicyServer(
+        task,
+        models_dir,
+        task_spec=task_spec,
+        expected_training_identity=expected_training_identity,
+    )
     for line in sys.stdin:
         if not line.strip():
             continue

@@ -63,11 +63,28 @@ _TASK_SPEC_EXPORTS = (
     "wxyz_to_xyzw",
     "xyzw_to_wxyz",
 )
+_STORE_BOTTLE_EXPORTS = (
+    "STORE_BOTTLE_CONFIG_PATH",
+    "STORE_BOTTLE_POLICY_SPEC_SCHEMA",
+    "STORE_BOTTLE_SEMANTIC_SCHEMA",
+    "STORE_BOTTLE_SEMANTIC_VERSION",
+    "STORE_BOTTLE_TASK_NAME",
+    "StoreBottleEntityGroup",
+    "StoreBottleSemanticSpec",
+    "extract_store_bottle_semantic_episode",
+    "load_store_bottle_semantic_spec",
+    "make_store_bottle_semantic_demonstrations",
+    "store_bottle_semantic_observations_from_rlbench",
+    "store_bottle_policy_spec_identity",
+    "store_bottle_semantic_task_spec",
+    "validate_store_bottle_scene_hierarchy",
+)
 
 _EXPORT_MODULES = {
     **{name: ".demo_adapter" for name in _DEMO_ADAPTER_EXPORTS},
     **{name: ".tapas_segmentation" for name in _SEGMENTATION_EXPORTS},
     **{name: ".task_specs" for name in _TASK_SPEC_EXPORTS},
+    **{name: ".store_bottle_semantics" for name in _STORE_BOTTLE_EXPORTS},
 }
 
 __all__ = sorted(_EXPORT_MODULES)

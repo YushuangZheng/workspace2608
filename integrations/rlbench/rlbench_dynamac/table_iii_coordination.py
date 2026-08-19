@@ -29,24 +29,31 @@ from pathlib import Path
 import numpy as np
 
 from .direct_evaluate import (
+    DEFAULT_V4_EVALUATION_VIDEO_ROOT,
     GRIPPER_PROTOCOL,
     PolicyProcess,
+    _commit_formal_result_with_optional_v4_videos,
+    _finalize_v4_video_cell,
     _make_action_mode,
     _noop_action,
+    _prepare_v4_video_cell,
+    _run_episode_with_optional_v4_video,
+    _v4_video_capture_enabled,
+    _v4_video_cell,
     evaluation_protocol_id,
 )
-from .records import atomic_json, reserve_output
 from .eval_set import (
     FIXED_EVAL_EPISODES,
     GLOBAL_EVAL_SEED_START,
     fixed_coordination_sources,
     validate_formal_artifact_paths,
 )
+from .evaluation_videos import LightweightCaptureConfig
+from .records import atomic_json, reserve_output
 from .runtime import (
     DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
     DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
-    FRESH_TASK_GENERATION_PROTOCOL_ID,
     PrimaryActionRetryBudget,
     bind_staged_source_plan,
     final_settling_metadata,
@@ -58,6 +65,14 @@ from .v3_protocol import (
     build_v3_trigger_anchor_evidence,
     load_v3_intervention_protocol,
     resolve_authenticated_v3_trigger,
+)
+from .v4_dynamic_protocol import (
+    V4_COORDINATION_CARTESIAN_SUBSTEPS,
+    V4_COORDINATION_PROTOCOL_ID,
+    V4_COORDINATION_TRANSLATION_METERS,
+    V4_COORDINATION_TRIGGER_STEP,
+    load_v4_coordination_intervention_protocol,
+    v4_coordination_trigger_authentication,
 )
 
 INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +89,7 @@ DEFAULT_POLICY_CONFIG = (
 LOCAL_PROTOCOL_CONFIG = INTEGRATION_ROOT / "configs" / "table_iii_coordination_local.json"
 PERTURBATION_METERS = (0.0, 0.0, 0.03)
 EXPECTED_VARIATION_COUNT = 5
+V4_VIDEO_PAPER_TARGET = 0.97
 EVALUATION_PROTOCOL_ID = evaluation_protocol_id(
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
 )
@@ -122,6 +138,27 @@ def _authenticated_v3_coordination_trigger(args, worker):
     return protocol, authentication, trigger
 
 
+def _authenticated_v4_coordination_trigger(args, worker):
+    """Authenticate the fixed one-shot V4 handover perturbation."""
+
+    protocol = load_v4_coordination_intervention_protocol()
+    if getattr(args, "max_primary_action_attempts", None) != 3:
+        raise RuntimeError("V4 coordination preserves the preregistered 3-attempt budget")
+    requested = getattr(args, "trigger_step", None)
+    if args.arm == "none":
+        if requested is not None:
+            raise RuntimeError("the unperturbed V4 coordination baseline has no trigger")
+        return protocol, None, None
+    authentication = v4_coordination_trigger_authentication(
+        arm=args.arm,
+        policy_steps=worker.policy_steps,
+    )
+    trigger = authentication["trigger_step"]
+    if requested is not None and requested != trigger:
+        raise RuntimeError("V4 coordination trigger must be committed policy tick 235")
+    return protocol, authentication, trigger
+
+
 def _validate_published_model(*args, **kwargs):
     """Import policy-only validation lazily so Python 3.8 can run evaluation."""
 
@@ -134,7 +171,7 @@ def _task_class():
     return getattr(importlib.import_module(TASK_MODULE), TASK_CLASS)
 
 
-def _observation_config():
+def _observation_config(*, capture_front_rgb=False):
     from rlbench.observation_config import ObservationConfig
 
     config = ObservationConfig()
@@ -142,6 +179,17 @@ def _observation_config():
     config.gripper_open = True
     config.gripper_pose = True
     config.task_low_dim_state = True
+    if capture_front_rgb:
+        from rlbench.observation_config import CameraConfig
+
+        config.camera_configs = {
+            "front": CameraConfig(
+                rgb=True,
+                depth=False,
+                point_cloud=False,
+                mask=False,
+            )
+        }
     return config
 
 
@@ -383,6 +431,148 @@ def _perturb_action(action, arm, enabled):
     return result
 
 
+def _v4_coordination_cartesian_command(
+    observation,
+    *,
+    arm,
+    measured_pose,
+    fraction,
+):
+    """Hold everything except one measured EE translated along world +z."""
+
+    if arm not in {"left", "right"}:
+        raise ValueError("V4 coordination perturbation arm must be left or right")
+    if not 0.0 < float(fraction) <= 1.0:
+        raise ValueError("V4 coordination Cartesian fraction must lie in (0, 1]")
+    source = np.asarray(measured_pose, dtype=np.float64)
+    if source.shape != (7,) or not np.all(np.isfinite(source)):
+        raise ValueError("V4 coordination measured EE pose must be finite 7D")
+    command = _noop_action(observation)
+    start = 9 if arm == "left" else 0
+    command[start : start + 3] = source[:3] + (
+        float(fraction) * np.asarray(V4_COORDINATION_TRANSLATION_METERS)
+    )
+    command[start + 3 : start + 7] = source[3:7]
+    return command
+
+
+def _apply_v4_coordination_intervention(
+    task_environment,
+    observation,
+    *,
+    arm,
+    max_attempts,
+    invalid_action_error,
+):
+    """Execute the one-shot measured-pose push without touching policy time."""
+
+    if max_attempts != 3:
+        raise ValueError("V4 coordination Cartesian retry budget must remain three")
+    arm_observation = getattr(observation, arm, None)
+    measured_pose = np.asarray(
+        getattr(arm_observation, "gripper_pose", ()),
+        dtype=np.float64,
+    )
+    if measured_pose.shape != (7,) or not np.all(np.isfinite(measured_pose)):
+        raise RuntimeError("V4 coordination measured EE pose is unavailable")
+    current_observation = observation
+    reward = 0.0
+    terminate = False
+    invalid_actions = 0
+    action_attempts = 0
+    substeps_completed = 0
+    attempts_by_substep = []
+    for substep in range(1, V4_COORDINATION_CARTESIAN_SUBSTEPS + 1):
+        fraction = substep / float(V4_COORDINATION_CARTESIAN_SUBSTEPS)
+        attempts = 0
+        while attempts < max_attempts:
+            attempts += 1
+            action_attempts += 1
+            command = _v4_coordination_cartesian_command(
+                current_observation,
+                arm=arm,
+                measured_pose=measured_pose,
+                fraction=fraction,
+            )
+            try:
+                current_observation, reward, terminate = task_environment.step(
+                    command
+                )
+            except invalid_action_error:
+                invalid_actions += 1
+                if attempts >= max_attempts:
+                    attempts_by_substep.append(attempts)
+                    return current_observation, 0.0, False, {
+                        "schema": "dynamac-coordination-cartesian-intervention-v4",
+                        "protocol_id": V4_COORDINATION_PROTOCOL_ID,
+                        "perturbed_arm": arm,
+                        "trigger_step": V4_COORDINATION_TRIGGER_STEP,
+                        "measured_start_pose": measured_pose.tolist(),
+                        "translation_world_m": list(
+                            V4_COORDINATION_TRANSLATION_METERS
+                        ),
+                        "orientation_fixed": True,
+                        "cartesian_substeps_planned": (
+                            V4_COORDINATION_CARTESIAN_SUBSTEPS
+                        ),
+                        "cartesian_substeps_completed": substeps_completed,
+                        "attempts_by_substep": attempts_by_substep,
+                        "action_attempts": action_attempts,
+                        "invalid_actions": invalid_actions,
+                        "max_attempts_per_substep": max_attempts,
+                        "policy_requests": 0,
+                        "policy_clock_advances": 0,
+                        "persistent_offset": False,
+                        "observation_refreshed_after_substeps": False,
+                        "completed": False,
+                        "retry_exhausted": True,
+                    }
+                # InvalidAction does not commit a simulator target; refresh the
+                # measured hold poses before retrying this same Cartesian point.
+                current_observation = task_environment.get_observation()
+                continue
+            substeps_completed += 1
+            attempts_by_substep.append(attempts)
+            break
+        if reward > 0.0 or terminate:
+            break
+    completed = substeps_completed == V4_COORDINATION_CARTESIAN_SUBSTEPS
+    refreshed = False
+    if completed:
+        current_observation = task_environment.get_observation()
+        refreshed = True
+    final_arm_observation = getattr(current_observation, arm, None)
+    final_pose = np.asarray(
+        getattr(final_arm_observation, "gripper_pose", ()),
+        dtype=np.float64,
+    )
+    return current_observation, reward, terminate, {
+        "schema": "dynamac-coordination-cartesian-intervention-v4",
+        "protocol_id": V4_COORDINATION_PROTOCOL_ID,
+        "perturbed_arm": arm,
+        "trigger_step": V4_COORDINATION_TRIGGER_STEP,
+        "measured_start_pose": measured_pose.tolist(),
+        "measured_final_pose": (
+            final_pose.tolist() if final_pose.shape == (7,) else None
+        ),
+        "translation_world_m": list(V4_COORDINATION_TRANSLATION_METERS),
+        "orientation_fixed": True,
+        "cartesian_substeps_planned": V4_COORDINATION_CARTESIAN_SUBSTEPS,
+        "cartesian_substeps_completed": substeps_completed,
+        "attempts_by_substep": attempts_by_substep,
+        "action_attempts": action_attempts,
+        "invalid_actions": invalid_actions,
+        "max_attempts_per_substep": max_attempts,
+        "policy_requests": 0,
+        "policy_clock_advances": 0,
+        "persistent_offset": False,
+        "observation_refreshed_after_substeps": refreshed,
+        "completed": completed,
+        "retry_exhausted": False,
+        "terminal_during_intervention": bool(reward > 0.0 or terminate),
+    }
+
+
 def _run_episode(
     task_environment,
     worker,
@@ -399,18 +589,22 @@ def _run_episode(
     observation=None,
     fresh_task_generation=None,
     staged_source_binding=None,
+    release="v3",
 ):
     from rlbench.backend.exceptions import InvalidActionError
 
     episode_seed = seed + episode
     if observation is None or not isinstance(fresh_task_generation, dict):
         raise RuntimeError("formal episode requires fresh task-generation input")
+    if release not in {"v3", "v4"}:
+        raise ValueError("coordination release must be v3 or v4")
     worker.request("reset", observation)
     invalid_actions = 0
     retry_budget = PrimaryActionRetryBudget(max_primary_action_attempts)
     perturbed_steps = 0
     perturbed_attempts = 0
     committed_policy_steps = 0
+    v4_intervention = None
 
     def finish(row):
         row.setdefault("variation", variation)
@@ -430,11 +624,55 @@ def _run_episode(
         )
         row.setdefault("perturbed_steps", perturbed_steps)
         row.setdefault("perturbed_attempts", perturbed_attempts)
+        if release == "v4":
+            row.setdefault("coordination_intervention", v4_intervention)
         row.setdefault("fresh_task_generation", fresh_task_generation)
         row.setdefault("staged_source_binding", staged_source_binding)
         return row
 
     for control_step in range(horizon):
+        if (
+            release == "v4"
+            and arm != "none"
+            and v4_intervention is None
+            and committed_policy_steps == trigger
+        ):
+            observation, reward, terminate, v4_intervention = (
+                _apply_v4_coordination_intervention(
+                    task_environment,
+                    observation,
+                    arm=arm,
+                    max_attempts=max_primary_action_attempts,
+                    invalid_action_error=InvalidActionError,
+                )
+            )
+            invalid_actions += v4_intervention["invalid_actions"]
+            perturbed_steps += v4_intervention["cartesian_substeps_completed"]
+            perturbed_attempts += v4_intervention["action_attempts"]
+            if v4_intervention["retry_exhausted"]:
+                return finish({
+                    "episode": episode,
+                    "seed": episode_seed,
+                    "success": False,
+                    "steps": control_step,
+                    "control_attempts": control_step,
+                    "reason": "coordination_intervention_retry_exhausted",
+                    "invalid_actions": invalid_actions,
+                })
+            if reward > 0.0 or terminate:
+                return finish({
+                    "episode": episode,
+                    "seed": episode_seed,
+                    "success": bool(reward > 0.0),
+                    "steps": control_step,
+                    "control_attempts": control_step,
+                    "reason": (
+                        "success_during_coordination_intervention"
+                        if reward > 0.0
+                        else "terminate_during_coordination_intervention"
+                    ),
+                    "invalid_actions": invalid_actions,
+                })
         response = worker.request("act", observation)
         action = response.get("action")
         if action is None:
@@ -463,7 +701,11 @@ def _run_episode(
         transaction_id = response.get("transaction_id")
         if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
             raise RuntimeError("policy worker did not return an action transaction id")
-        enabled = arm != "none" and committed_policy_steps >= trigger
+        enabled = (
+            release == "v3"
+            and arm != "none"
+            and committed_policy_steps >= trigger
+        )
         primary_action_succeeded = False
         retry_exhausted = False
         try:
@@ -558,6 +800,7 @@ def evaluate(args):
 def _evaluate_reserved(args, output):
     """Run one coordination evaluation while its result path is reserved."""
 
+    video_capture_enabled = _v4_video_capture_enabled(args)
     from rlbench.environment import Environment
 
     if args.eval_set_id is None:
@@ -573,10 +816,36 @@ def _evaluate_reserved(args, output):
         "max_primary_action_attempts",
         DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
     )
+    video_capture_config = (
+        LightweightCaptureConfig() if video_capture_enabled else None
+    )
+    video_cell_dir = None
+    video_cell_key = None
+    episode_videos = []
+    if video_capture_enabled:
+        scenario = (
+            f"coordination_hand_{args.arm}"
+            if args.arm != "none"
+            else "local_baseline"
+        )
+        video_cell_dir, video_cell_key = _v4_video_cell(
+            getattr(
+                args,
+                "v4_evaluation_video_root",
+                DEFAULT_V4_EVALUATION_VIDEO_ROOT,
+            ),
+            "bimanual_handover_item_dynamic",
+            scenario,
+        )
+        video_cell_dir = _prepare_v4_video_cell(video_cell_dir)
     action_mode = _make_action_mode()
     environment = Environment(
         action_mode=action_mode,
-        obs_config=_observation_config(),
+        obs_config=(
+            _observation_config(capture_front_rgb=True)
+            if video_capture_enabled
+            else _observation_config()
+        ),
         headless=args.headless,
         robot_setup="dual_panda",
     )
@@ -590,9 +859,14 @@ def _evaluate_reserved(args, output):
     launched = False
     episodes = []
     try:
-        intervention_registry, trigger_authentication, trigger = (
-            _authenticated_v3_coordination_trigger(args, worker)
-        )
+        if getattr(args, "release", "v3") == "v4":
+            intervention_registry, trigger_authentication, trigger = (
+                _authenticated_v4_coordination_trigger(args, worker)
+            )
+        else:
+            intervention_registry, trigger_authentication, trigger = (
+                _authenticated_v3_coordination_trigger(args, worker)
+            )
         environment.launch()
         launched = True
         task_class = _task_class()
@@ -622,29 +896,52 @@ def _evaluate_reserved(args, output):
                 variation=variation_schedule[episode],
                 verify_instance=False,
             )
-            source_binding = bind_staged_source_plan(
+            def run_formal_episode(formal_task_environment):
+                source_binding = bind_staged_source_plan(
+                    formal_task_environment,
+                    source_plans[episode],
+                    descriptions=descriptions,
+                    fresh_task_generation=fresh_task_generation,
+                )
+                bound_observation = formal_task_environment.get_observation()
+                episode_kwargs = dict(
+                    episode=episode,
+                    variation=variation_schedule[episode],
+                    seed=args.seed,
+                    horizon=args.horizon,
+                    arm=args.arm,
+                    trigger=trigger,
+                    max_primary_action_attempts=max_primary_action_attempts,
+                    observation=bound_observation,
+                    fresh_task_generation=fresh_task_generation,
+                    staged_source_binding=source_binding,
+                )
+                if hasattr(args, "final_settling_steps"):
+                    episode_kwargs["final_settling_steps"] = (
+                        args.final_settling_steps
+                    )
+                if getattr(args, "release", "v3") == "v4":
+                    episode_kwargs["release"] = "v4"
+                return _run_episode(
+                    formal_task_environment,
+                    worker,
+                    **episode_kwargs,
+                )
+
+            record, episode_video = _run_episode_with_optional_v4_video(
                 task_environment,
-                source_plans[episode],
-                descriptions=descriptions,
-                fresh_task_generation=fresh_task_generation,
-            )
-            observation = task_environment.get_observation()
-            episode_kwargs = dict(
+                observation,
+                enabled=video_capture_enabled,
+                cell_dir=video_cell_dir,
+                cell_key=video_cell_key,
                 episode=episode,
-                variation=variation_schedule[episode],
-                seed=args.seed,
-                horizon=args.horizon,
-                arm=args.arm,
-                trigger=trigger,
-                max_primary_action_attempts=max_primary_action_attempts,
-                observation=observation,
-                fresh_task_generation=fresh_task_generation,
-                staged_source_binding=source_binding,
+                episode_seed=args.seed + episode,
+                run_episode=run_formal_episode,
+                capture_config=video_capture_config,
             )
-            if hasattr(args, "final_settling_steps"):
-                episode_kwargs["final_settling_steps"] = args.final_settling_steps
-            record = _run_episode(task_environment, worker, **episode_kwargs)
             episodes.append(record)
+            if episode_video is not None:
+                episode_videos.append(episode_video)
             successes = sum(int(item["success"]) for item in episodes)
             print(
                 f"{args.arm} episode {episode + 1}/{args.episodes}: "
@@ -657,8 +954,15 @@ def _evaluate_reserved(args, output):
             environment.shutdown()
 
     successes = sum(int(item["success"]) for item in episodes)
+    release = getattr(args, "release", "v3")
+    v4_coordination = release == "v4"
     payload = {
-        "schema": "dynamac-table-iii-coordination-local-v3",
+        "schema": (
+            "dynamac-table-iii-coordination-local-v4"
+            if v4_coordination
+            else "dynamac-table-iii-coordination-local-v3"
+        ),
+        **({"release": "v4"} if v4_coordination else {}),
         "task": "bimanual_handover_item_dynamic",
         "policy_task_alias": POLICY_TASK,
         "result_family": "bimanual_coordination",
@@ -683,7 +987,17 @@ def _evaluate_reserved(args, output):
             "sampling_trials": 100,
             "sampling_max_configs": 5,
             "sampling_max_time_ms": 10,
-            "sampling_ignore_collisions": True,
+            "sampling_ignore_collisions": not v4_coordination,
+            **(
+                {
+                    "sampling_candidate_selection": "nearest_current_joint_l2",
+                    "ik_candidate_validation": (
+                        "shape_finite_noncyclic_joint_limits"
+                    ),
+                }
+                if v4_coordination
+                else {}
+            ),
             "joint_target_max_steps": 200,
             "failed_action": "abort_policy_target_then_current_pose_current_gripper_noop",
             "failed_action_next_tick": "retry_same_policy_tick_from_fresh_observation",
@@ -716,12 +1030,52 @@ def _evaluate_reserved(args, output):
             "magnitude, start time, duration, demonstration IDs, or evaluation seeds."
         ),
         "coordination_protocol": {
-            "source": "LOCAL_EXPLICIT_DIAGNOSTIC_20260815",
+            "source": (
+                "V4_MEASURED_EE_ONE_SHOT_CARTESIAN_PROTOCOL"
+                if v4_coordination
+                else "LOCAL_EXPLICIT_DIAGNOSTIC_20260815"
+            ),
+            **(
+                {"protocol_id": V4_COORDINATION_PROTOCOL_ID}
+                if v4_coordination
+                else {}
+            ),
             "paper_comparable": False,
             "protocol_valid": True,
             "perturbed_arm": args.arm,
-            "translation_world_m": list(PERTURBATION_METERS),
-            "application": "persistent offset on every predicted EE target from trigger",
+            "translation_world_m": list(
+                V4_COORDINATION_TRANSLATION_METERS
+                if v4_coordination
+                else PERTURBATION_METERS
+            ),
+            "application": (
+                "measured current EE to world +z in 10 Cartesian substeps once, then unmodified policy"
+                if v4_coordination
+                else "persistent offset on every predicted EE target from trigger"
+            ),
+            **(
+                {
+                    "cartesian_substeps": (
+                        V4_COORDINATION_CARTESIAN_SUBSTEPS
+                        if args.arm != "none"
+                        else None
+                    ),
+                    "orientation": (
+                        "fixed at measured pre-intervention orientation"
+                        if args.arm != "none"
+                        else None
+                    ),
+                    "other_arm_and_grippers": (
+                        "hold current measured state each substep"
+                        if args.arm != "none"
+                        else None
+                    ),
+                    "persistent_policy_target_offset": False,
+                    "policy_clock_advances_during_intervention": False,
+                }
+                if v4_coordination
+                else {}
+            ),
             "legacy_one_third_trigger_disabled": True,
             "trigger_reference_domain": (
                 "successfully_committed_policy_ticks"
@@ -760,7 +1114,49 @@ def _evaluate_reserved(args, output):
             )
         ),
     }
-    atomic_json(output, payload)
+    if video_capture_enabled:
+        video_capture_metadata = {
+            "release": "v4",
+            "cell_key": video_cell_key,
+            "cell_dir": str(video_cell_dir),
+            "episodes_recorded": len(episode_videos),
+            "capture_config": dict(video_capture_config.audit()),
+            "paper_success_rate": (
+                V4_VIDEO_PAPER_TARGET
+                if args.arm in {"left", "right"}
+                else None
+            ),
+        }
+
+        def finalize_videos():
+            return _finalize_v4_video_cell(
+                video_cell_dir,
+                episode_videos,
+                cell_key=video_cell_key,
+                successes=successes,
+                episodes=args.episodes,
+                paper_success_rate=(
+                    V4_VIDEO_PAPER_TARGET
+                    if args.arm in {"left", "right"}
+                    else None
+                ),
+                cell_metadata={
+                    "evaluator": "table_iii_coordination",
+                    "task": "bimanual_handover_item_dynamic",
+                    "arm": args.arm,
+                    "formal_result": str(output),
+                },
+            )
+    else:
+        video_capture_metadata = None
+        finalize_videos = None
+    _commit_formal_result_with_optional_v4_videos(
+        output,
+        payload,
+        enabled=video_capture_enabled,
+        capture_metadata=video_capture_metadata,
+        finalize_videos=finalize_videos,
+    )
     print(f"wrote {output}")
     return payload
 
@@ -813,6 +1209,26 @@ def build_parser():
         type=int,
         default=DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
         help="Maximum primary InvalidAction attempts for one policy clock tick.",
+    )
+    evaluator.add_argument(
+        "--release",
+        choices=("v3", "v4"),
+        default="v3",
+        help="Evaluation release gate; V4 requires formal episode video capture.",
+    )
+    evaluator.add_argument(
+        "--record-v4-evaluation-videos",
+        action="store_true",
+        help=(
+            "Stream front RGB from the actual formal V4 episodes and retain "
+            "the fixed outcome-stratified sample; disabled by default for V3."
+        ),
+    )
+    evaluator.add_argument(
+        "--v4-evaluation-video-root",
+        type=Path,
+        default=DEFAULT_V4_EVALUATION_VIDEO_ROOT,
+        help="Root for V4 formal evaluation video cells.",
     )
     evaluator.add_argument("--output", type=Path, required=True)
     display = evaluator.add_mutually_exclusive_group()

@@ -1,0 +1,43 @@
+{
+  "schema": "rlbench-dynamac-coordination-intervention-v4",
+  "release": "v4",
+  "task": "bimanual_handover_item_dynamic",
+  "scenarios": [
+    "coordination_hand_left",
+    "coordination_hand_right"
+  ],
+  "trigger": {
+    "clock": "successfully_committed_policy_ticks",
+    "global_tick": 235,
+    "application_timing": "before_requesting_policy_action_at_global_tick"
+  },
+  "motion": {
+    "measurement_source": "current_observation_gripper_pose",
+    "translation_frame": "world",
+    "translation_m": [
+      0.0,
+      0.0,
+      0.03
+    ],
+    "cartesian_substeps": 10,
+    "orientation": "fixed_at_measured_pre_intervention_orientation",
+    "other_arm": "hold_current_measured_pose_each_substep",
+    "both_grippers": "hold_current_discrete_state_each_substep",
+    "application": "one_shot_then_resume_unmodified_policy",
+    "persistent_policy_target_offset": false
+  },
+  "clock_semantics": {
+    "policy_requests_during_substeps": 0,
+    "policy_clock_advances_during_substeps": false,
+    "observation_refreshed_after_substeps": true
+  },
+  "invalid_action": {
+    "max_attempts_per_cartesian_substep": 3,
+    "solver": "v4_collision_aware_jacobian_then_sampling",
+    "exhaustion_reason": "coordination_intervention_retry_exhausted"
+  },
+  "provenance": {
+    "result_based_retuning_forbidden": true,
+    "legacy_v3_profile_unchanged": true
+  }
+}

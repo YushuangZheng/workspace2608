@@ -1,0 +1,114 @@
+{
+  "schema": "dynamac-rlbench-model-release-plan-v4",
+  "release": "v4",
+  "source_release": "v3",
+  "models_root": "integrations/rlbench/models/v4",
+  "copy_or_training_performed_by_manifest_api": false,
+  "entries": [
+    {
+      "model_id": "bimanual_put_bottle_in_fridge",
+      "task": "bimanual_put_bottle_in_fridge",
+      "mode": "retrained_store_bottle_v4",
+      "source": null,
+      "target": "bimanual_put_bottle_in_fridge",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json"
+      ]
+    },
+    {
+      "model_id": "bimanual_handover_item",
+      "task": "bimanual_handover_item",
+      "mode": "inherited_v3_byte_for_byte",
+      "source": "bimanual_handover_item",
+      "target": "bimanual_handover_item",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json"
+      ]
+    },
+    {
+      "model_id": "bimanual_lift_tray",
+      "task": "bimanual_lift_tray",
+      "mode": "inherited_v3_byte_for_byte",
+      "source": "bimanual_lift_tray",
+      "target": "bimanual_lift_tray",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json"
+      ]
+    },
+    {
+      "model_id": "bimanual_sweep_to_dustpan",
+      "task": "bimanual_sweep_to_dustpan",
+      "mode": "inherited_v3_byte_for_byte",
+      "source": "bimanual_sweep_to_dustpan",
+      "target": "bimanual_sweep_to_dustpan",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json"
+      ]
+    },
+    {
+      "model_id": "open_microwave",
+      "task": "open_microwave",
+      "mode": "inherited_v3_byte_for_byte",
+      "source": "open_microwave",
+      "target": "open_microwave",
+      "required_artifacts": [
+        "model.npz",
+        "training.json"
+      ]
+    },
+    {
+      "model_id": "place_cups",
+      "task": "place_cups",
+      "mode": "inherited_v3_byte_for_byte",
+      "source": "place_cups",
+      "target": "place_cups",
+      "required_artifacts": [
+        "model.npz",
+        "training.json"
+      ]
+    },
+    {
+      "model_id": "stack_wine",
+      "task": "stack_wine",
+      "mode": "inherited_v3_byte_for_byte",
+      "source": "stack_wine",
+      "target": "stack_wine",
+      "required_artifacts": [
+        "model.npz",
+        "training.json"
+      ]
+    },
+    {
+      "model_id": "wipe_desk",
+      "task": "wipe_desk",
+      "mode": "inherited_v3_byte_for_byte",
+      "source": "wipe_desk",
+      "target": "wipe_desk",
+      "required_artifacts": [
+        "model.npz",
+        "training.json"
+      ]
+    },
+    {
+      "model_id": "table_iii/bimanual_handover_item",
+      "task": "bimanual_handover_item_dynamic",
+      "mode": "inherited_v3_byte_for_byte",
+      "source": "table_iii/bimanual_handover_item",
+      "target": "table_iii/bimanual_handover_item",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json",
+        "segmentation.png"
+      ]
+    }
+  ]
+}
