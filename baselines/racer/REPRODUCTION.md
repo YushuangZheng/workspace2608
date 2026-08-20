@@ -224,6 +224,11 @@ the application's GLX path on the NVIDIA EGL device. No NVIDIA Xorg server,
 `vglserver_config`, root access, reboot, simulator patch, or policy patch is
 used.
 
+The graphics probe is stronger than checking `nvidia-smi`: the launcher runs
+`glxinfo -B` through the selected VirtualGL EGL device, records it in the run
+directory, requires `OpenGL vendor string: NVIDIA Corporation`, and rejects
+`llvmpipe`, `softpipe`, or `swrast` before starting either model service.
+
 `scripts/bootstrap_user_virtualgl.sh` pins the official amd64 Debian artifact
 and SHA-256, then extracts it under `/data/yukun/.cache/racer`. The physical
 actor GPU is mapped to an explicit VirtualGL `eglN` identifier through
@@ -243,8 +248,10 @@ identical.
 
 Runtime state is written atomically to
 `runtime/<supervisor-id>/status.tsv`. A failed EGL gate leaves the 75-episode
-target locked. At most one later process-isolation gate may be attempted; the
-known A-K2 Mesa workarounds remain permanently excluded.
+target locked and records `egl_gate_failed_fallback_not_implemented`. Process
+isolation is not delivered by this branch; at most one such gate may be added
+after separate review. The known A-K2 Mesa workarounds remain permanently
+excluded.
 
 Key provenance:
 

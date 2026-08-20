@@ -51,3 +51,9 @@ bash baselines/racer/scripts/bootstrap_user_virtualgl.sh
 
 The official RACER, PyRep, RLBench, CoppeliaSim, policy, and evaluation code is
 not patched by this graphics-transport retry.
+
+The proposed process-isolation fallback is not implemented in this branch. If
+the EGL episode gate fails, the supervisor records
+`egl_gate_failed_fallback_not_implemented`, keeps the 75-episode run locked,
+and exits. A later fallback may run at most one isolated episode only after its
+adapter and observation-equivalence checks are reviewed separately.

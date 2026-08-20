@@ -106,7 +106,8 @@
     "bootstrap_script_sha256": "ef22115279caeff76dcf99b4073d117a8dc7aaefb45a8be94efbfbbc05508134",
     "device_mapper_sha256": "d7b7d921d6a905ada756b8cc6595785090faefd4a98c5cd5fe99657d5758c89f",
     "single_episode_validator_sha256": "472ade2fc552237f56366007ddc0dd261cff2a6c754fb965bc82b36a80995003",
-    "supervisor_sha256": "e871cb53ff2f76ec27f7c2c3d4839de46fe68753271bf50961abf5288230232e"
+    "supervisor_sha256": "3f1f8fb6dfbf9fff86dc727811618392e754a3edc3516e92b20ac16b267c9547",
+    "tmux_session_probe_sha256": "68b711318d3bb75e3506d4430b6a5c83c2028f0efb893f48bd5b30115474aeea"
   },
   "language_service_port_adapter": {
     "wrapper": "scripts/racer_lm_server.py",
@@ -164,7 +165,8 @@
     "unlock_condition": "one metrics record, one terminal marker, four nonempty camera GIFs, and no native-renderer failure signature",
     "full_target": "three tasks x 25 fixed episodes; starts only after the gate passes",
     "resource_gate": "SPR and Guardian tmux sessions terminated and GPUs 1-4 idle for three consecutive checks",
-    "fallback_limit": "at most one process-isolated single-episode attempt if VirtualGL EGL fails; never auto-unlock the 75-episode run"
+    "fallback_limit": "at most one process-isolated single-episode attempt if VirtualGL EGL fails; never auto-unlock the 75-episode run",
+    "fallback_delivery": "not implemented in this branch; EGL failure records egl_gate_failed_fallback_not_implemented and exits"
   },
   "recommended_display_backend": "NVIDIA-backed Xorg or VirtualGL, followed by one exact end-to-end episode with natural status 0 and four-view fidelity validation before the 75-episode run.",
   "first_target": "Three-task, 75-episode released-checkpoint evaluation",

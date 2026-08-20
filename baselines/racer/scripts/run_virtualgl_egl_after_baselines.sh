@@ -5,6 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 RACER_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 WORKTREE_ROOT=$(git -C "$RACER_ROOT" rev-parse --show-toplevel)
 ACTOR_PY='/data/yukun/miniconda3/envs/dynamac-racer/bin/python'
+SESSION_PROBE="$SCRIPT_DIR/tmux_session_has_live_pane.sh"
 SUPERVISOR_ID=${RACER_SUPERVISOR_ID:-virtualgl_egl_$(date +%Y%m%d_%H%M%S)}
 SUPERVISOR_RUNTIME="$RACER_ROOT/runtime/$SUPERVISOR_ID"
 STATUS_FILE="$SUPERVISOR_RUNTIME/status.tsv"
@@ -60,6 +61,7 @@ fail_terminal() {
 [[ -z "$(git -C "$WORKTREE_ROOT" status --porcelain --untracked-files=no)" ]] || \
   fail_terminal dirty_worktree 'tracked worktree changes detected'
 [[ -x "$ACTOR_PY" ]] || fail_terminal missing_actor_python "$ACTOR_PY"
+[[ -x "$SESSION_PROBE" ]] || fail_terminal missing_session_probe "$SESSION_PROBE"
 
 for run_id in "$GATE_RUN_ID" "$FULL_RUN_ID"; do
   [[ ! -e "$RACER_ROOT/runtime/$run_id" ]] || \
@@ -72,7 +74,7 @@ set_state waiting_for_baselines 'waiting for SPR and Guardian tmux sessions to t
 while :; do
   active=()
   for session in "${WAIT_SESSIONS[@]}"; do
-    if tmux has-session -t "$session" 2>/dev/null; then
+    if "$SESSION_PROBE" "$session"; then
       active+=("$session")
     fi
   done
@@ -135,7 +137,8 @@ if ! env "${common_environment[@]}" \
   RACER_LOG_NAME="$GATE_LOG_NAME" \
   bash "$SCRIPT_DIR/run_three_task_eval.sh" \
   >"$SUPERVISOR_RUNTIME/gate_driver.log" 2>&1; then
-  fail_terminal egl_gate_failed "see $SUPERVISOR_RUNTIME/gate_driver.log"
+  fail_terminal egl_gate_failed_fallback_not_implemented \
+    "full run locked; process-isolation fallback is not delivered in this PR; see $SUPERVISOR_RUNTIME/gate_driver.log"
 fi
 
 GATE_METRICS="$RACER_ROOT/results/$GATE_RUN_ID/$GATE_LOG_NAME/metrics.json"
