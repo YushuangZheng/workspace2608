@@ -214,11 +214,37 @@ status 0. No A-K2 workaround meets reset stability, observation fidelity, and
 clean shutdown together. The local Xvfb/Mesa path is therefore closed rather
 than used to manufacture a nominal result.
 
-For a future retry, use an NVIDIA-backed Xorg display or VirtualGL on the
-already allocated actor GPU. Before launching 75 episodes, require one exact
-official end-to-end episode (services, actor action, fixed data, and output)
-with a natural status 0, and compare its four observations against a clean
-reference produced by the same renderer.
+## Queued VirtualGL EGL retry
+
+The user-space retry uses VirtualGL 3.1.5's EGL backend rather than another
+Mesa load-order workaround. The server already permits this account to open
+`/dev/nvidia*`, and NVIDIA EGL 1.5 exposes the required surfaceless and
+no-config-context extensions. Xvfb remains the 2D X server; VirtualGL emulates
+the application's GLX path on the NVIDIA EGL device. No NVIDIA Xorg server,
+`vglserver_config`, root access, reboot, simulator patch, or policy patch is
+used.
+
+`scripts/bootstrap_user_virtualgl.sh` pins the official amd64 Debian artifact
+and SHA-256, then extracts it under `/data/yukun/.cache/racer`. The physical
+actor GPU is mapped to an explicit VirtualGL `eglN` identifier through
+NVIDIA's `EGL_CUDA_DEVICE_NV` attribute, checked against the physical
+`nvidia-smi` index; the script never assumes CUDA and EGL numbering are
+identical.
+
+`scripts/run_virtualgl_egl_after_baselines.sh` enforces this order:
+
+1. wait until both pre-existing SPR and Guardian tmux sessions terminate;
+2. require GPUs 1-4 to be idle for three consecutive checks;
+3. run exactly `place_cups` fixed episode 0 through the official evaluator;
+4. require natural status 0, one valid metrics record, one terminal marker,
+   and four nonempty camera GIFs with no native-renderer failure signature;
+5. only then run the three tasks x 25 fixed episodes and generate the paper
+   comparison.
+
+Runtime state is written atomically to
+`runtime/<supervisor-id>/status.tsv`. A failed EGL gate leaves the 75-episode
+target locked. At most one later process-isolation gate may be attempted; the
+known A-K2 Mesa workarounds remain permanently excluded.
 
 Key provenance:
 

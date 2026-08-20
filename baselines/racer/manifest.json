@@ -93,11 +93,26 @@
     "binary_sha256": "cf71d78eab8321f7c568271053af449f966a75422140117ea1f244bf72a7e81e",
     "note": "The conda Xvfb builds tested here did not expose a usable GLX visual; the Ubuntu-matched package is extracted without sudo."
   },
+  "user_space_virtualgl_egl": {
+    "version": "3.1.5",
+    "release_url": "https://github.com/VirtualGL/virtualgl/releases/tag/3.1.5",
+    "package": "virtualgl_3.1.5_amd64.deb",
+    "package_bytes": 1721678,
+    "package_sha256": "df3f7788ce41b182a47c0d298e5cd6d2d63579522cb41825970b7726e825485e",
+    "install_root": "/data/yukun/.cache/racer/virtualgl-3.1.5-root",
+    "backend": "EGL device selected through EGL_CUDA_DEVICE_NV mapping to the physical nvidia-smi actor GPU",
+    "two_dimensional_display": "existing user-space Xvfb with GLX",
+    "system_changes": "none; Debian package is checksum-verified and extracted in user space",
+    "bootstrap_script_sha256": "ef22115279caeff76dcf99b4073d117a8dc7aaefb45a8be94efbfbbc05508134",
+    "device_mapper_sha256": "d7b7d921d6a905ada756b8cc6595785090faefd4a98c5cd5fe99657d5758c89f",
+    "single_episode_validator_sha256": "472ade2fc552237f56366007ddc0dd261cff2a6c754fb965bc82b36a80995003",
+    "supervisor_sha256": "e871cb53ff2f76ec27f7c2c3d4839de46fe68753271bf50961abf5288230232e"
+  },
   "language_service_port_adapter": {
     "wrapper": "scripts/racer_lm_server.py",
     "wrapper_sha256": "e62f42252ab86ed7a7abeba8cf4efc27ed0d06cd045a507879682b41cc833bae",
     "launcher": "scripts/run_three_task_eval.sh",
-    "launcher_sha256": "8923414cc4c22b023e7d64f2740a9e9e7d0888ac1c34a2d91c06b67af4a7a9ff",
+    "launcher_sha256": "a697ec9e0141b948ce5d7f53c62191e6da00bf2d7a32bce0485ca44b1dd223f4",
     "official_entry_point": "upstream/Open-LLaVA-NeXT/deploy/lm_server.py",
     "default_host": "127.0.0.1",
     "default_port": 18000,
@@ -139,6 +154,17 @@
       "conclusion": "Using one Conda X11 closure preserves the functional passes but does not remove the post-atexit invalid free."
     },
     "stop_decision": "No tested Xvfb/software-Mesa adapter provides reset stability, observation fidelity, and natural status 0 together; do not run the 75-episode target on this renderer."
+  },
+  "queued_virtualgl_egl_retry": {
+    "as_of": "2026-08-21",
+    "branch": "repro/racer-egl",
+    "base_branch": "yukun",
+    "state": "waiting_for_existing_baselines",
+    "gate": "one fixed place_cups episode 0 through the official evaluator with natural status 0",
+    "unlock_condition": "one metrics record, one terminal marker, four nonempty camera GIFs, and no native-renderer failure signature",
+    "full_target": "three tasks x 25 fixed episodes; starts only after the gate passes",
+    "resource_gate": "SPR and Guardian tmux sessions terminated and GPUs 1-4 idle for three consecutive checks",
+    "fallback_limit": "at most one process-isolated single-episode attempt if VirtualGL EGL fails; never auto-unlock the 75-episode run"
   },
   "recommended_display_backend": "NVIDIA-backed Xorg or VirtualGL, followed by one exact end-to-end episode with natural status 0 and four-view fidelity validation before the 75-episode run.",
   "first_target": "Three-task, 75-episode released-checkpoint evaluation",

@@ -12,8 +12,8 @@ required for this stage.
 
 See [manifest.json](manifest.json) for immutable revisions, artifact identities,
 and run provenance. See [REPRODUCTION.md](REPRODUCTION.md) for the environments,
-four-GPU layout, validated component checks, formal failure, and diagnostic
-boundary.
+four-GPU layout, validated component checks, formal failure, diagnostic
+boundary, and the queued NVIDIA EGL retry.
 
 ## Current result
 
@@ -31,6 +31,23 @@ cleanly, so the 75-episode run is intentionally stopped under this renderer.
 
 Port 8000 belongs to a resident external XPolicy Eval service and was left
 untouched. The tracked infrastructure-only wrapper imports the same official
-language-service app and binds it to port 18000; it does not change model or
-inference logic. A future retry should first use an NVIDIA-backed Xorg or
-VirtualGL display and pass one exact end-to-end episode with a natural status 0.
+language-service app and binds it to a selectable local port; it does not
+change model or inference logic.
+
+The next bounded retry uses VirtualGL 3.1.5's EGL backend. Xvfb remains only the
+2D X server, while VirtualGL redirects GLX rendering to the NVIDIA EGL device
+that maps to the actor GPU. The retry is fail-closed: one fixed `place_cups`
+episode 0 must complete with a natural status 0 and four nonempty camera GIFs
+before the three-task 75-episode evaluation can start. It also waits for the
+existing SPR and Guardian tmux jobs to terminate and for GPUs 1-4 to remain
+idle. See `scripts/run_virtualgl_egl_after_baselines.sh`.
+
+VirtualGL is downloaded from its official release, checksum-verified, and
+extracted under `/data/yukun/.cache/racer` without root or system changes:
+
+```bash
+bash baselines/racer/scripts/bootstrap_user_virtualgl.sh
+```
+
+The official RACER, PyRep, RLBench, CoppeliaSim, policy, and evaluation code is
+not patched by this graphics-transport retry.
