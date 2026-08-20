@@ -102,6 +102,43 @@ Keyframe PNGs: 12
 That local output-path/keyframe limit is a smoke-test boundary, not a paper
 protocol change and not evidence of AHA model quality.
 
+## Bounded official-list FailGen run
+
+The released `examples/ex_data_generator_eval.sh` names ten eval tasks. The
+bounded runner preserves that task order while deliberately limiting the work
+to one generated episode per task and one `get_failure()` call (`max_tries=1`).
+For each task it selects the first supported failure in the official
+`FAILURES_LIST` order and the first configured waypoint. This is a coverage run
+of the released failure generator, not the upstream 100-episode-per-task data
+collection protocol and not an AHA model evaluation.
+
+Each task runs in its own process and X display. A failed attempt may start the
+task once more, so the maximum is one CoppeliaSim restart per task. Attempts are
+limited to five minutes, each task to ten minutes, and the complete ten-task
+run to two hours. Tasks remain sequential. The launcher waits until all tmux
+sessions whose names begin with `dynamac_spr` or `dynamac_guardian` have ended,
+then sets an empty `CUDA_VISIBLE_DEVICES` and forces software GL rendering.
+
+Run the source/protocol check without launching CoppeliaSim:
+
+```bash
+bash scripts/run_failgen_eval10.sh --static-check
+```
+
+Start the gated run (it waits if SPR or Guardian is still active):
+
+```bash
+bash scripts/run_failgen_eval10.sh
+```
+
+Large outputs stay under ignored `results/failgen_eval10_<UTC timestamp>/`.
+After every task, `events.jsonl` receives and stdout yields a complete task
+record. The final `summary.json` and `summary.csv` include the selected failure
+type, waypoint, attempts, restart count, failure class, PNG count, and counts
+for the `front`, `overhead`, and `wrist` streams. Image acceptance requires all
+three streams, equal nonzero and contiguous frame counts, valid decodable PNGs,
+positive dimensions, and a recorded SHA-256 digest for every file.
+
 ## Paper-level blockers
 
 1. The final AHA checkpoint is not released.
