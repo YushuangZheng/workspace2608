@@ -8,8 +8,32 @@ spr_session="${SPR_TMUX_SESSION:-dynamac_spr_full_20260821}"
 guardian_session="${GUARDIAN_TMUX_SESSION:-dynamac_guardian_full_20260821}"
 wait_mode=false
 poll_seconds="${FAIL_DETECT_GATE_POLL_SECONDS:-60}"
+tmux_cmd=(tmux)
+if [[ -n "${FAIL_DETECT_TMUX_SOCKET:-}" ]]; then
+  tmux_cmd+=(-L "$FAIL_DETECT_TMUX_SOCKET")
+fi
 
-if [[ "${1:-}" == "--wait" ]]; then
+session_active() {
+  local session="$1"
+  local pane_states
+  if ! "${tmux_cmd[@]}" has-session -t "$session" 2>/dev/null; then
+    return 1
+  fi
+  if ! pane_states="$("${tmux_cmd[@]}" list-panes -t "$session" -F '#{pane_dead}' 2>/dev/null)"; then
+    # A known session whose panes cannot be inspected is conservatively active.
+    return 0
+  fi
+  grep -qx '0' <<<"$pane_states"
+}
+
+if [[ "${1:-}" == "--session-active" ]]; then
+  if [[ $# -ne 2 ]]; then
+    echo "usage: $0 --session-active SESSION" >&2
+    exit 2
+  fi
+  session_active "$2"
+  exit $?
+elif [[ "${1:-}" == "--wait" ]]; then
   wait_mode=true
 elif [[ $# -ne 0 ]]; then
   echo "usage: $0 [--wait]" >&2
@@ -20,7 +44,7 @@ check_gate() {
   local blockers=()
   local session
   for session in "$spr_session" "$guardian_session"; do
-    if tmux has-session -t "$session" 2>/dev/null; then
+    if session_active "$session"; then
       blockers+=("tmux:$session")
     fi
   done

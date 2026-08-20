@@ -62,11 +62,34 @@ def head(url):
     return parse_headers(proc.stdout)
 
 
+def tmux_session_active(session):
+    command = ["tmux"]
+    socket = os.environ.get("FAIL_DETECT_TMUX_SOCKET")
+    if socket:
+        command.extend(["-L", socket])
+    exists = subprocess.run(
+        command + ["has-session", "-t", session],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if exists.returncode != 0:
+        return False
+    panes = subprocess.run(
+        command + ["list-panes", "-t", session, "-F", "#{pane_dead}"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if panes.returncode != 0:
+        return True
+    return any(line.strip() == "0" for line in panes.stdout.splitlines())
+
+
 def require_resource_gate(gpu_index, sessions):
     blockers = []
     for session in sessions:
-        proc = subprocess.run(["tmux", "has-session", "-t", session], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if proc.returncode == 0:
+        if tmux_session_active(session):
             blockers.append("tmux:" + session)
 
     proc = subprocess.run(

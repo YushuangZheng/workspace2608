@@ -1,8 +1,15 @@
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 import tempfile
+import time
 import unittest
+import uuid
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 BASELINE = Path(__file__).resolve().parents[1]
@@ -56,6 +63,69 @@ class QuantProtocolTest(unittest.TestCase):
         lower, upper = summarize.wilson_interval(7, 10)
         self.assertLess(lower, 0.7)
         self.assertGreater(upper, 0.7)
+
+    def test_python_gate_treats_dead_panes_as_inactive(self):
+        prepare = load_script("prepare_official_artifacts.py")
+        with mock.patch.object(prepare.subprocess, "run") as run:
+            run.side_effect = [
+                SimpleNamespace(returncode=0),
+                SimpleNamespace(returncode=0, stdout="1\n"),
+            ]
+            self.assertFalse(prepare.tmux_session_active("finished"))
+
+    def test_python_gate_treats_any_live_pane_as_active(self):
+        prepare = load_script("prepare_official_artifacts.py")
+        with mock.patch.object(prepare.subprocess, "run") as run:
+            run.side_effect = [
+                SimpleNamespace(returncode=0),
+                SimpleNamespace(returncode=0, stdout="1\n0\n"),
+            ]
+            self.assertTrue(prepare.tmux_session_active("running"))
+
+
+@unittest.skipUnless(shutil.which("tmux"), "tmux is required for the integration gate test")
+class TmuxGateIntegrationTest(unittest.TestCase):
+    def setUp(self):
+        self.socket = "fail-detect-test-" + uuid.uuid4().hex
+        self.tmux = ["tmux", "-L", self.socket]
+        self.script = BASELINE / "scripts/resource_gate.sh"
+        self.env = dict(os.environ, FAIL_DETECT_TMUX_SOCKET=self.socket)
+
+    def tearDown(self):
+        subprocess.run(
+            self.tmux + ["kill-server"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+    def state(self, session):
+        return subprocess.run(
+            ["bash", str(self.script), "--session-active", session],
+            env=self.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+
+    def test_alive_and_remain_on_exit_dead_sessions(self):
+        subprocess.run(self.tmux + ["new-session", "-d", "-s", "alive", "sleep 30"], check=True)
+        self.assertEqual(self.state("alive"), 0)
+
+        subprocess.run(self.tmux + ["new-session", "-d", "-s", "dead"], check=True)
+        subprocess.run(self.tmux + ["set-option", "-w", "-t", "dead", "remain-on-exit", "on"], check=True)
+        subprocess.run(self.tmux + ["send-keys", "-t", "dead", "exit", "Enter"], check=True)
+        for _ in range(30):
+            pane_dead = subprocess.check_output(
+                self.tmux + ["list-panes", "-t", "dead", "-F", "#{pane_dead}"],
+                text=True,
+            ).strip()
+            if pane_dead == "1":
+                break
+            time.sleep(0.1)
+        self.assertEqual(pane_dead, "1")
+        self.assertEqual(self.state("dead"), 1)
+        self.assertEqual(self.state("missing"), 1)
 
 
 if __name__ == "__main__":
