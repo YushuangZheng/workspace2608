@@ -1,0 +1,29 @@
+{
+  "schema": "dynamac-fail-detect-quant-artifacts-v1",
+  "protocol_label": "upstream_release_external_dp_checkpoint",
+  "fail_detect_source": {
+    "url": "https://github.com/CXU-TRI/FAIL-Detect.git",
+    "commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed"
+  },
+  "artifacts": {
+    "robomimic_image": {
+      "url": "https://diffusion-policy.cs.columbia.edu/data/training/robomimic_image.zip",
+      "content_length": 84754919326,
+      "etag": "\"13bbc96f9e-5f5baa7f3842d\"",
+      "last_modified": "Tue, 28 Feb 2023 04:01:54 GMT",
+      "destination": "baselines/fail_detect/datasets/cache/robomimic_image.zip",
+      "archive_member": "robomimic/datasets/transport/ph/image_abs.hdf5",
+      "extracted_destination": "baselines/fail_detect/datasets/transport/ph/image_abs.hdf5",
+      "upstream_link": "baselines/fail_detect/upstream/data/robomimic/datasets/transport/ph/image_abs.hdf5"
+    },
+    "transport_ph_dp_checkpoint": {
+      "url": "https://diffusion-policy.cs.columbia.edu/data/experiments/image/transport_ph/diffusion_policy_cnn/train_0/checkpoints/epoch=2750-test_mean_score=1.000.ckpt",
+      "content_length": 5291781897,
+      "etag": "\"13b6a2f09-5f5dd8b65dfda\"",
+      "last_modified": "Wed, 01 Mar 2023 21:39:18 GMT",
+      "destination": "baselines/fail_detect/checkpoints/transport_ph_dp_train0_epoch2750.ckpt",
+      "upstream_link": "baselines/fail_detect/upstream/data/outputs/train_diffusion_unet_visual_transport_image/checkpoints/latest.ckpt"
+    }
+  },
+  "claim_boundary": "The policy checkpoint is an official Diffusion Policy artifact, not a FAIL-Detect checkpoint. Results must not be presented as the paper's 300-epoch Transport policy reproduction."
+}

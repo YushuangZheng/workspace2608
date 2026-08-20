@@ -1,14 +1,15 @@
 # FAIL-Detect reproduction status
 
-Verified on 2026-08-19 against upstream commit
+Originally verified on 2026-08-19 and bounded quantitative path added on
+2026-08-21 against upstream commit
 `b758e55f7c0c988188f2e4876ffc03ae8a3c30ed` and the RSS 2025 paper
 *Can We Detect Failures Without Failure Data? Uncertainty-Aware Runtime Failure
 Detection for Imitation Learning Policies*.
 
 ## Current result and boundary
 
-The local reproduction currently reaches an **environment and model-construction
-smoke test**, not policy training or paper evaluation:
+The environment/model-construction smoke test is complete. A resource-gated
+bounded quantitative run is now defined, but it is not paper evaluation:
 
 - the isolated Python 3.9 / CUDA 11.6 environment imports the official policy,
   simulator, and uncertainty dependencies;
@@ -27,9 +28,10 @@ a source for:
 data/robomimic/datasets/transport/ph/image_abs.hdf5
 ```
 
-The approximately 85 GB Diffusion Policy image bundle is a plausible data
-source, but it is not treated as author-confirmed FAIL-Detect data. Training or
-evaluation must remain blocked until the dataset provenance is resolved.
+For the bounded run only, the exact file is extracted from the official
+Diffusion Policy image archive and paired with its official Transport-PH
+checkpoint. These external artifacts are never represented as author-confirmed
+FAIL-Detect artifacts.
 
 ## Fixed provenance
 
@@ -42,6 +44,55 @@ evaluation must remain blocked until the dataset provenance is resolved.
 - Official checkpoint: none released.
 - Official dataset artifact for the configured `image_abs.hdf5`: none
   identified by the release.
+
+## Bounded quantitative protocol
+
+Start the detached pipeline from the FAIL-Detect reproduction branch/worktree:
+
+```bash
+bash baselines/fail_detect/scripts/launch_quant_tmux.sh
+```
+
+It waits without downloading or claiming a GPU until both
+`dynamac_spr_full_20260821` and `dynamac_guardian_full_20260821` have ended and
+GPU 5 has no compute process and at most 512 MiB allocated. After that resource
+gate opens, the whole download/train/evaluate sequence is limited to 24 hours.
+
+The fixed stages are:
+
+1. Pin the official FAIL-Detect source and route only its documented missing
+   config symlink.
+2. Download, metadata-check, SHA-lock, and extract Transport `image_abs.hdf5`
+   from the official Diffusion Policy archive. Use its official Transport-PH
+   diffusion checkpoint, not an invented FAIL-Detect checkpoint.
+3. Validate HDF5 magic, demonstrations, four 84x84 RGB streams, raw action
+   dimension 14, released absolute-action dimension 20, and strict model/EMA
+   loading.
+4. Run released `save_data.py`, validate `(N,548)` condition and `(N,320)`
+   action tensors, train only logpZO with released `EPOCHS = 200`, and
+   strict-load the detector.
+5. Evaluate paired seeds for 10 ID + 10 OOD rollouts. Continue only if the
+   trajectories are finite/equal-length, at least four successful ID rollouts
+   are available for calibration, both outcome classes exist after calibration,
+   and ID policy success is at least 7/10. Detector performance is deliberately
+   not a continuation threshold.
+6. Extend the same outputs and seeds to a total 50 ID + 50 OOD rollouts. Use
+   the first 20 successful ID trajectories as 6 mean / 14 band trajectories for
+   the released upper `FunctionalPredictor(Tfunc, Mean)` band at alpha 0.05.
+
+The report records ID/OOD success with Wilson 95% intervals, TP/TN/FP/FN,
+TPR/TNR/balanced accuracy, and mean true-positive detection step with standard
+error. Calibration successes are excluded from detection testing. OOD preserves
+the released Transport threshold `t >= 50` with delta 0.1 (the first 8-step
+decision boundary reached is step 56). Only the
+released logpZO-on-`global_cond` score is evaluated; other detectors and STAC's
+costly resampling are outside this thin run.
+
+Ignored status and outputs are under
+`baselines/fail_detect/runtime/quant_pipeline/` and
+`baselines/fail_detect/results/external_dp_logpzo_v1/`. Stop rather than broaden
+the claim if the 24-hour deadline fires, a strict/schema gate fails, resources
+are reclaimed, or a second reactive compatibility repair would be required.
 
 ## Isolated environment and verified commands
 
@@ -128,8 +179,8 @@ The public code is not silently presented as the exact paper protocol:
 | SPARC | discussed in the paper comparison but absent from the released implementation | report it as unavailable rather than assigning a zero or fabricated result |
 | randomization | released training/evaluation commands use seed `1103`; no complete multi-seed paper batch protocol is published | a single released-code run cannot reproduce paper uncertainty |
 
-Accordingly, future quantitative artifacts must carry either the
-`upstream_release` or `paper_aligned` protocol label and record the exact
-dataset identity, policy checkpoint, split counts, alpha settings, epochs, and
-seed. Until the missing author-side artifacts are identified, the verified
-environment/model smoke is the complete reproducible result.
+Accordingly, quantitative artifacts must carry `upstream_release`,
+`upstream_release_external_dp_checkpoint`, or `paper_aligned`, and record the
+exact dataset identity, policy checkpoint, split counts, alpha settings, epochs,
+and seeds. The external-checkpoint result can validate the released mechanism,
+but it cannot reproduce or refute the paper's reported number.
