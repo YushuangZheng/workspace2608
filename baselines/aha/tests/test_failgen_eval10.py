@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import subprocess
 import time
 from pathlib import Path
 
@@ -204,3 +205,76 @@ def test_worker_failure_classification_is_conservative():
         MODULE.classify_worker_failure(1, {"error": "ordinary Python error"})
         == "simulator_or_worker_error"
     )
+
+
+@pytest.mark.parametrize(
+    ("renderer", "expected"),
+    (
+        ("llvmpipe (LLVM 15.0.7, 256 bits)", True),
+        ("NVIDIA GeForce RTX 4090/PCIe/SSE2", False),
+    ),
+)
+def test_graphics_probe_requires_llvmpipe(
+    monkeypatch, tmp_path, renderer, expected
+):
+    completed = subprocess.CompletedProcess(
+        args=["glxinfo", "-B"],
+        returncode=0,
+        stdout=f"OpenGL renderer string: {renderer}\n",
+        stderr="original stderr\n",
+    )
+    monkeypatch.setattr(MODULE.subprocess, "run", lambda *args, **kwargs: completed)
+    raw_output = tmp_path / "glxinfo_B.txt"
+
+    result = MODULE.probe_graphics_renderer({}, raw_output, 5)
+
+    assert result["renderer"] == renderer
+    assert result["verified_llvmpipe"] is expected
+    assert result["stdout"] == completed.stdout
+    assert result["stderr"] == completed.stderr
+    assert completed.stdout in raw_output.read_text(encoding="utf-8")
+    assert completed.stderr in raw_output.read_text(encoding="utf-8")
+
+
+def test_worker_never_starts_when_llvmpipe_probe_fails(monkeypatch, tmp_path):
+    class FinishedXvfb:
+        pid = 999
+
+        @staticmethod
+        def poll():
+            return 0
+
+    monkeypatch.setattr(
+        MODULE,
+        "launch_xvfb",
+        lambda *unused: (FinishedXvfb(), 120, 12345),
+    )
+    monkeypatch.setattr(MODULE, "worker_environment", lambda *unused: {})
+    monkeypatch.setattr(
+        MODULE,
+        "probe_graphics_renderer",
+        lambda *unused: {
+            "return_code": 0,
+            "renderer": "NVIDIA GeForce RTX 4090/PCIe/SSE2",
+            "verified_llvmpipe": False,
+            "stdout": "gpu renderer",
+            "stderr": "",
+        },
+    )
+
+    def forbidden_worker_start(*args, **kwargs):
+        raise AssertionError("worker must not start without llvmpipe")
+
+    monkeypatch.setattr(MODULE.subprocess, "Popen", forbidden_worker_start)
+    result = MODULE.run_worker(
+        argparse.Namespace(), "stack_chairs", tmp_path / "attempt_1", 30
+    )
+    assert result["status"] == "failed"
+    assert result["failure_class"] == "graphics_probe_failed"
+    assert result["graphics_probe"]["verified_llvmpipe"] is False
+
+
+def test_summary_uses_actual_cli_deadline(tmp_path):
+    summary = MODULE.write_summary(tmp_path, [], "start", deadline_seconds=123)
+    assert summary["deadline_seconds"] == 123
+    assert summary["total_timeout_seconds"] == 123

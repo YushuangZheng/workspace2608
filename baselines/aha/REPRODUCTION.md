@@ -120,7 +120,10 @@ ten minutes, and the complete ten-task run to two hours. Tasks remain
 sequential. The launcher waits until every live pane in tmux sessions whose
 names begin with `dynamac_spr` or `dynamac_guardian` has ended. Dead panes kept
 by tmux's `remain-on-exit` setting do not block AHA. It then sets an empty
-`CUDA_VISIBLE_DEVICES` and forces software GL rendering.
+`CUDA_VISIBLE_DEVICES` and requests software GL rendering. Before every worker
+process, the runner executes `glxinfo -B` under the same display and environment
+and requires the reported OpenGL renderer to contain `llvmpipe`; otherwise the
+attempt fails closed without starting the worker.
 
 Run the source/protocol check without launching CoppeliaSim:
 
@@ -140,7 +143,10 @@ record. The final `summary.json` and `summary.csv` include the selected failure
 type, waypoint, attempts, restart count, failure class, PNG count, and counts
 for the `front`, `overhead`, and `wrist` streams. Image acceptance requires all
 three streams, equal nonzero and contiguous frame counts, valid decodable PNGs,
-positive dimensions, and a recorded SHA-256 digest for every file.
+positive dimensions, and a recorded SHA-256 digest for every file. Each attempt
+also preserves raw `glxinfo -B` stdout/stderr and the parsed renderer in its
+task record; the final summary aggregates all observed renderer probes and uses
+the actual CLI deadline rather than assuming the default two-hour value.
 
 ## Paper-level blockers
 

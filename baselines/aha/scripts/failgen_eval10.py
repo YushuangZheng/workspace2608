@@ -35,6 +35,9 @@ MAX_TOTAL_SECONDS = 2 * 60 * 60
 MAX_TASK_SECONDS = 10 * 60
 MAX_ATTEMPT_SECONDS = 5 * 60
 PNG_NAME = re.compile(r"^(front|overhead|wrist)_(\d+)\.png$")
+OPENGL_RENDERER = re.compile(
+    r"^OpenGL renderer string:\s*(.+?)\s*$", flags=re.IGNORECASE | re.MULTILINE
+)
 SIMULATOR_CRASH = re.compile(
     r"(?:coppeliasim|remote.?api).*(?:crash|died|lost|closed|disconnect|"
     r"terminated|stopped)|failed to connect.*(?:coppeliasim|remote.?api)",
@@ -242,6 +245,37 @@ def worker_environment(args: argparse.Namespace, display: int) -> dict[str, str]
     return environment
 
 
+def probe_graphics_renderer(
+    environment: dict[str, str], output_path: Path, timeout_seconds: float
+) -> dict[str, Any]:
+    result = subprocess.run(
+        ["glxinfo", "-B"],
+        env=environment,
+        text=True,
+        capture_output=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    combined = f"=== stdout ===\n{result.stdout}\n=== stderr ===\n{result.stderr}"
+    output_path.write_text(combined, encoding="utf-8")
+    match = OPENGL_RENDERER.search(result.stdout)
+    renderer = match.group(1) if match is not None else None
+    verified = (
+        result.returncode == 0
+        and renderer is not None
+        and "llvmpipe" in renderer.lower()
+    )
+    return {
+        "command": ["glxinfo", "-B"],
+        "return_code": result.returncode,
+        "renderer": renderer,
+        "verified_llvmpipe": verified,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "raw_output_path": str(output_path.resolve()),
+    }
+
+
 def classify_worker_failure(
     return_code: int, worker_payload: dict[str, Any]
 ) -> str:
@@ -284,6 +318,29 @@ def run_worker(
             xvfb, display, xvfb_ticks = launch_xvfb(
                 args, xvfb_stream, max(0.1, attempt_deadline - time.monotonic())
             )
+            environment = worker_environment(args, display)
+            try:
+                probe_budget = min(15.0, attempt_deadline - time.monotonic())
+                if probe_budget <= 0:
+                    raise subprocess.TimeoutExpired(["glxinfo", "-B"], 0)
+                graphics_probe = probe_graphics_renderer(
+                    environment,
+                    attempt_dir / "glxinfo_B.txt",
+                    probe_budget,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                outcome["failure_class"] = "graphics_probe_failed"
+                outcome["error"] = f"{type(exc).__name__}: {exc}"
+                return outcome
+            outcome["graphics_probe"] = graphics_probe
+            if not graphics_probe["verified_llvmpipe"]:
+                outcome["failure_class"] = "graphics_probe_failed"
+                outcome["error"] = (
+                    "glxinfo -B did not verify an llvmpipe renderer; "
+                    f"observed={graphics_probe['renderer']!r}, "
+                    f"rc={graphics_probe['return_code']}"
+                )
+                return outcome
             with worker_log.open("wb") as worker_stream:
                 child = subprocess.Popen(
                     [
@@ -298,7 +355,7 @@ def run_worker(
                         "--max-tries",
                         "1",
                     ],
-                    env=worker_environment(args, display),
+                    env=environment,
                     stdout=worker_stream,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
@@ -492,9 +549,18 @@ def run_task(
 
 
 def write_summary(
-    output_root: Path, results: list[dict[str, Any]], started: str
+    output_root: Path,
+    results: list[dict[str, Any]],
+    started: str,
+    deadline_seconds: int,
 ) -> dict[str, Any]:
     successes = sum(result["status"] == "success" for result in results)
+    probes = [
+        attempt["graphics_probe"]
+        for result in results
+        for attempt in result.get("attempts", ())
+        if "graphics_probe" in attempt
+    ]
     summary = {
         "schema_version": 1,
         "protocol": "aha_released_failgen_eval10_bounded_v1",
@@ -502,9 +568,30 @@ def write_summary(
         "episodes_per_task": 1,
         "max_tries": 1,
         "max_coppelia_restarts_per_task": 1,
-        "total_timeout_seconds": MAX_TOTAL_SECONDS,
+        "deadline_seconds": deadline_seconds,
+        "total_timeout_seconds": deadline_seconds,
         "renderer": "opengl3",
-        "compute": "CPU/llvmpipe; CUDA_VISIBLE_DEVICES is empty",
+        "compute": (
+            "CUDA_VISIBLE_DEVICES is empty; every worker launch is gated by "
+            "a same-environment glxinfo llvmpipe check"
+        ),
+        "graphics_verification": {
+            "required_renderer": "llvmpipe",
+            "probe_count": len(probes),
+            "verified_probe_count": sum(
+                probe.get("verified_llvmpipe") is True for probe in probes
+            ),
+            "all_observed_probes_verified": bool(probes)
+            and all(probe.get("verified_llvmpipe") is True for probe in probes),
+            "observed_renderers": sorted(
+                {
+                    str(probe["renderer"])
+                    for probe in probes
+                    if probe.get("renderer") is not None
+                }
+            ),
+            "probes": probes,
+        },
         "started_at_utc": started,
         "finished_at_utc": utc_now(),
         "tasks_attempted": len(results),
@@ -616,7 +703,9 @@ def main() -> int:
             results.append(result)
             append_event(events, result)
     finally:
-        summary = write_summary(args.output_root, results, started)
+        summary = write_summary(
+            args.output_root, results, started, args.total_timeout_seconds
+        )
     return 0 if summary["all_tasks_succeeded"] else 1
 
 
