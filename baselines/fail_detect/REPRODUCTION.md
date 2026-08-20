@@ -15,7 +15,7 @@ bounded quantitative run is now defined, but it is not paper evaluation:
   simulator, and uncertainty dependencies;
 - `pip check`, the official entry-point help paths, and an RTX 4090 CUDA tensor
   test pass;
-- the released Transport flow-policy Hydra configuration composes;
+- the released Transport policy Hydra configuration composes;
 - its 308,292,372-parameter policy constructs on an RTX 4090 and allocates
   1,239,120,896 CUDA bytes before batch activations.
 
@@ -39,8 +39,9 @@ FAIL-Detect artifacts.
   `b758e55f7c0c988188f2e4876ffc03ae8a3c30ed`.
 - Paper: RSS 2025 proceedings paper `p073`; the local indexed copy is
   `papers/FAIL-Detect.pdf`.
-- First target: Robomimic `Transport`, flow-matching policy, because it is the
-  released task closest to bimanual manipulation.
+- Bounded target: Robomimic `Transport` with the diffusion-policy checkpoint,
+  because it is the released task closest to bimanual manipulation with an
+  official external checkpoint path.
 - Official checkpoint: none released.
 - Official dataset artifact for the configured `image_abs.hdf5`: none
   identified by the release.
@@ -70,7 +71,11 @@ The fixed stages are:
    loading.
 4. Run released `save_data.py`, validate `(N,548)` condition and `(N,320)`
    action tensors, train only logpZO with released `EPOCHS = 200`, and
-   strict-load the detector.
+   strict-load the detector. A valid checkpoint below epoch 200 follows the
+   official resume path. A corrupt/non-resumable checkpoint or partial feature
+   file is moved to ignored quarantine before rebuilding, consuming the single
+   permitted reactive compatibility repair; file size alone is never accepted
+   as completeness.
 5. Evaluate paired seeds for 10 ID + 10 OOD rollouts. Continue only if the
    trajectories are finite/equal-length, at least four successful ID rollouts
    are available for calibration, both outcome classes exist after calibration,
@@ -80,19 +85,26 @@ The fixed stages are:
    the first 20 successful ID trajectories as 6 mean / 14 band trajectories for
    the released upper `FunctionalPredictor(Tfunc, Mean)` band at alpha 0.05.
 
-The report records ID/OOD success with Wilson 95% intervals, TP/TN/FP/FN,
-TPR/TNR/balanced accuracy, and mean true-positive detection step with standard
-error. Calibration successes are excluded from detection testing. OOD preserves
+The report records ID/OOD success, TPR, and TNR with Wilson 95% intervals,
+TP/TN/FP/FN, balanced accuracy, and mean true-positive detection step with
+standard error. Balanced accuracy is a mean of two class-conditional
+proportions, so it is not assigned a single Wilson interval. Calibration
+successes are excluded from detection testing. OOD preserves
 the released Transport threshold `t >= 50` with delta 0.1 (the first 8-step
 decision boundary reached is step 56). Only the
 released logpZO-on-`global_cond` score is evaluated; other detectors and STAC's
 costly resampling are outside this thin run.
 
-Ignored status and outputs are under
+Ignored status and full outputs are under
 `baselines/fail_detect/runtime/quant_pipeline/` and
-`baselines/fail_detect/results/external_dp_logpzo_v1/`. Stop rather than broaden
-the claim if the 24-hour deadline fires, a strict/schema gate fails, resources
-are reclaimed, or a second reactive compatibility repair would be required.
+`baselines/fail_detect/results/external_dp_logpzo_v1/`. The summarizer writes a
+small reviewable hash/protocol record to
+`baselines/fail_detect/provenance/external_dp_logpzo_v1.json`; large artifacts
+remain ignored. The outer deadline runner is the sole owner of final status,
+and a TERM marker plus GNU timeout exit 124 can only yield `stopped/deadline`,
+never `complete`. Stop rather than broaden the claim if the 24-hour deadline
+fires, a strict/schema gate fails, resources are reclaimed, or a second
+reactive compatibility repair would be required.
 
 ## Isolated environment and verified commands
 

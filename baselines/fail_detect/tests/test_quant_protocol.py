@@ -1,8 +1,10 @@
 import importlib.util
+import io
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -10,6 +12,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+from contextlib import redirect_stdout
 
 
 BASELINE = Path(__file__).resolve().parents[1]
@@ -57,12 +60,43 @@ class QuantProtocolTest(unittest.TestCase):
         self.assertEqual(result["confusion"], {"tp": 1, "tn": 1, "fp": 1, "fn": 1})
         self.assertEqual(result["true_positive_detection_step_mean"], 8)
         self.assertEqual(result["balanced_accuracy"], 0.5)
+        self.assertEqual(result["true_positive_rate_wilson_95"], summarize.wilson_interval(1, 2))
+        self.assertEqual(result["true_negative_rate_wilson_95"], summarize.wilson_interval(1, 2))
+        self.assertIsNone(result["balanced_accuracy_interval"])
+        self.assertIn("No single Wilson", result["balanced_accuracy_interval_note"])
 
     def test_wilson_interval_contains_rate(self):
         summarize = load_script("summarize_logpzo.py")
         lower, upper = summarize.wilson_interval(7, 10)
         self.assertLess(lower, 0.7)
         self.assertGreater(upper, 0.7)
+
+    @unittest.skipUnless(shutil.which("timeout"), "GNU timeout is required")
+    def test_timeout_exit_124_cannot_write_complete(self):
+        deadline_runner = BASELINE / "scripts/deadline_runner.sh"
+        status_script = BASELINE / "scripts/quant_status.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            status_file = root / "status.json"
+            marker = root / "deadline.triggered"
+            proc = subprocess.run(
+                [
+                    "bash", str(deadline_runner),
+                    "--status-script", str(status_script),
+                    "--status-file", str(status_file),
+                    "--deadline-marker", str(marker),
+                    "--duration", "0.2s",
+                    "--kill-after", "1s",
+                    "--", "bash", "-c", "trap 'exit 0' TERM; while :; do sleep 1; done",
+                ],
+                check=False,
+                timeout=5,
+            )
+            payload = json.loads(status_file.read_text(encoding="utf-8"))
+        self.assertEqual(proc.returncode, 124)
+        self.assertEqual(payload["state"], "stopped")
+        self.assertEqual(payload["stage"], "deadline")
+        self.assertNotIn("complete", [event["state"] for event in payload["history"]])
 
     def test_python_gate_treats_dead_panes_as_inactive(self):
         prepare = load_script("prepare_official_artifacts.py")
@@ -81,6 +115,48 @@ class QuantProtocolTest(unittest.TestCase):
                 SimpleNamespace(returncode=0, stdout="1\n0\n"),
             ]
             self.assertTrue(prepare.tmux_session_active("running"))
+
+    def test_generated_detector_states_are_distinct(self):
+        artifact_state = load_script("generated_artifact_state.py")
+        classify = artifact_state.classify_detector_metadata
+        self.assertEqual(classify(200, 199, True), "complete")
+        self.assertEqual(classify(73, 72, True), "resumable")
+        self.assertEqual(classify(73, 71, True), "damaged")
+        self.assertEqual(classify(200, 198, True), "damaged")
+        self.assertEqual(classify(73, 72, False), "damaged")
+
+    def test_feature_missing_and_nonempty_invalid_are_not_complete(self):
+        artifact_state = load_script("generated_artifact_state.py")
+        validator = mock.Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "features.pt"
+            with self.assertRaises(SystemExit) as missing, redirect_stdout(io.StringIO()):
+                artifact_state.inspect_features(path, validator)
+            self.assertEqual(missing.exception.code, artifact_state.EXIT_MISSING)
+            path.write_bytes(b"partial")
+            validator.validate_features.side_effect = RuntimeError("truncated")
+            with self.assertRaises(SystemExit) as damaged, redirect_stdout(io.StringIO()):
+                artifact_state.inspect_features(path, validator)
+            self.assertEqual(damaged.exception.code, artifact_state.EXIT_DAMAGED)
+
+    def test_only_one_compatibility_repair_can_be_registered(self):
+        script = BASELINE / "scripts/compatibility_repair.py"
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "repairs.json"
+            first = subprocess.run(
+                [sys.executable, str(script), str(state), "register", "first repair"],
+                check=False,
+            )
+            second = subprocess.run(
+                [sys.executable, str(script), str(state), "register", "second repair"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            payload = json.loads(state.read_text(encoding="utf-8"))
+        self.assertEqual(first.returncode, 0)
+        self.assertNotEqual(second.returncode, 0)
+        self.assertEqual(len(payload["repairs"]), 1)
 
 
 @unittest.skipUnless(shutil.which("tmux"), "tmux is required for the integration gate test")

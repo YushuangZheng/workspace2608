@@ -161,8 +161,12 @@ def detection_stats(records, band):
     return {
         "confusion": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
         "true_positive_rate": tpr,
+        "true_positive_rate_wilson_95": wilson_interval(tp, tp + fn),
         "true_negative_rate": tnr,
+        "true_negative_rate_wilson_95": wilson_interval(tn, tn + fp),
         "balanced_accuracy": (tpr + tnr) / 2.0,
+        "balanced_accuracy_interval": None,
+        "balanced_accuracy_interval_note": "No single Wilson interval is reported for the mean of two class-conditional proportions.",
         "true_positive_detection_step_mean": mean_step,
         "true_positive_detection_step_standard_error": standard_error,
         "outcomes": outcomes,
@@ -174,6 +178,8 @@ def render_markdown(summary):
     ood_stats = summary["policy"]["ood"]
     detection = summary["detection"]
     confusion = detection["confusion"]
+    tpr_ci = detection["true_positive_rate_wilson_95"]
+    tnr_ci = detection["true_negative_rate_wilson_95"]
     detection_step = detection["true_positive_detection_step_mean"]
     detection_step_text = "n/a" if detection_step is None else "{:.1f}".format(detection_step)
     return """# FAIL-Detect bounded Transport result
@@ -185,7 +191,9 @@ def render_markdown(summary):
 - OOD policy success: {ood_success}/{limit} ({ood_rate:.3f})
 - logpZO calibration: {calibration} successful ID trajectories ({mean_count} mean / {band_count} band), alpha={alpha}
 - Detection test confusion: TP={tp}, TN={tn}, FP={fp}, FN={fn}
-- TPR / TNR / balanced accuracy: {tpr:.3f} / {tnr:.3f} / {balanced:.3f}
+- TPR: {tpr:.3f} (Wilson 95% CI [{tpr_low:.3f}, {tpr_high:.3f}])
+- TNR: {tnr:.3f} (Wilson 95% CI [{tnr_low:.3f}, {tnr_high:.3f}])
+- Balanced accuracy: {balanced:.3f}; no single Wilson interval is assigned to this mean of two class-conditional proportions.
 - Mean true-positive detection step: {detection_step}
 - Gate decision: `{gate_decision}`
 """.format(
@@ -204,7 +212,11 @@ def render_markdown(summary):
         fp=confusion["fp"],
         fn=confusion["fn"],
         tpr=detection["true_positive_rate"],
+        tpr_low=tpr_ci[0],
+        tpr_high=tpr_ci[1],
         tnr=detection["true_negative_rate"],
+        tnr_low=tnr_ci[0],
+        tnr_high=tnr_ci[1],
         balanced=detection["balanced_accuracy"],
         detection_step=detection_step_text,
         gate_decision=summary["gate"]["decision"],
@@ -218,6 +230,9 @@ def main():
     parser.add_argument("--ood-rollouts", type=Path, required=True)
     parser.add_argument("--output-json", type=Path, required=True)
     parser.add_argument("--output-md", type=Path, required=True)
+    parser.add_argument("--output-provenance", type=Path, required=True)
+    parser.add_argument("--artifact-lock", type=Path, required=True)
+    parser.add_argument("--input-validation", type=Path, required=True)
     parser.add_argument("--limit", type=int, required=True)
     parser.add_argument("--calibration-successes", type=int, required=True)
     parser.add_argument("--alpha", type=float, default=0.05)
@@ -231,6 +246,10 @@ def main():
 
     repo_root = args.repo_root.resolve()
     upstream = repo_root / "baselines/fail_detect/upstream"
+    with args.artifact_lock.open("r", encoding="utf-8") as handle:
+        artifact_lock = json.load(handle)
+    with args.input_validation.open("r", encoding="utf-8") as handle:
+        input_validation = json.load(handle)
     id_payload, id_records, id_length = load_rollouts(args.id_rollouts, False, args.limit)
     ood_payload, ood_records, ood_length = load_rollouts(args.ood_rollouts, True, args.limit)
     if id_length != ood_length:
@@ -240,6 +259,14 @@ def main():
     for key in ("policy_checkpoint_sha256", "dataset_sha256", "logpzo_checkpoint_sha256"):
         if id_payload.get(key) != ood_payload.get(key):
             raise RuntimeError("ID/OOD provenance mismatch for {}".format(key))
+    expected_hashes = {
+        "policy_checkpoint_sha256": artifact_lock["artifacts"]["transport_ph_dp_checkpoint"]["sha256"],
+        "dataset_sha256": artifact_lock["artifacts"]["transport_image_abs"]["sha256"],
+        "logpzo_checkpoint_sha256": input_validation["detector_sha256"],
+    }
+    for key, expected in expected_hashes.items():
+        if id_payload.get(key) != expected:
+            raise RuntimeError("rollout provenance does not match runtime validation for {}".format(key))
 
     successful_id = [record for record in id_records if record["success"]]
     band, calibration, mean_count, band_count = build_upper_band(
@@ -302,6 +329,59 @@ def main():
     }
     atomic_json(args.output_json, summary)
     atomic_text(args.output_md, render_markdown(summary))
+    archive = artifact_lock["artifacts"]["robomimic_image"]
+    checkpoint = artifact_lock["artifacts"]["transport_ph_dp_checkpoint"]
+    dataset = artifact_lock["artifacts"]["transport_image_abs"]
+    provenance = {
+        "schema": "dynamac-fail-detect-quant-provenance-v1",
+        "generated_at": summary["created_at"],
+        "protocol_label": PROTOCOL_LABEL,
+        "claim_boundary": summary["claim_boundary"],
+        "upstream": {
+            "url": "https://github.com/CXU-TRI/FAIL-Detect.git",
+            "commit": id_payload["upstream_commit"],
+        },
+        "official_artifacts": {
+            "robomimic_image_archive": {
+                "url": archive["url"],
+                "bytes": archive["bytes"],
+                "sha256": archive["sha256"],
+                "remote": archive["remote"],
+            },
+            "transport_image_abs": {
+                "archive_member": dataset["archive_member"],
+                "bytes": dataset["bytes"],
+                "sha256": dataset["sha256"],
+            },
+            "transport_ph_dp_checkpoint": {
+                "url": checkpoint["url"],
+                "bytes": checkpoint["bytes"],
+                "sha256": checkpoint["sha256"],
+                "remote": checkpoint["remote"],
+            },
+        },
+        "generated_artifacts": {
+            "features": {
+                "sha256": input_validation["feature_sha256"],
+                **input_validation["features"],
+            },
+            "logpzo_detector": {
+                "sha256": input_validation["detector_sha256"],
+                **input_validation["detector"],
+            },
+        },
+        "evaluation": {
+            "rollouts_per_domain": args.limit,
+            "paired_start_seed": id_payload["start_seed"],
+            "num_inference_steps": id_payload["num_inference_steps"],
+            "calibration_successes": args.calibration_successes,
+            "calibration_mean_count": mean_count,
+            "calibration_band_count": band_count,
+            "alpha": args.alpha,
+            "gate_decision": decision,
+        },
+    }
+    atomic_json(args.output_provenance, provenance)
     print(json.dumps(summary, indent=2, sort_keys=True))
     if args.gate and decision != "pass":
         raise SystemExit(4)

@@ -12,6 +12,8 @@ repair_file="$runtime/compatibility_repair.json"
 validation_file="$runtime/artifact_validation.json"
 feature_validation_file="$runtime/feature_validation.json"
 detector_validation_file="$runtime/detector_validation.json"
+deadline_marker="$runtime/deadline.triggered"
+provenance_file="$baseline/provenance/external_dp_logpzo_v1.json"
 upstream="$baseline/upstream"
 conda_bin="${FAIL_DETECT_CONDA_BIN:-/data/yukun/miniconda3/bin/conda}"
 conda_env="${FAIL_DETECT_CONDA_ENV:-dynamac-fail-detect}"
@@ -37,6 +39,30 @@ run_conda() {
   "$conda_bin" run --no-capture-output -n "$conda_env" "$@"
 }
 
+inspect_generated() {
+  local kind="$1"
+  local path="$2"
+  artifact_state_rc=0
+  run_conda python "$scripts/generated_artifact_state.py" \
+    --repo-root "$repo_root" --kind "$kind" --path "$path" || artifact_state_rc=$?
+}
+
+quarantine_damaged() {
+  local label="$1"
+  local path="$2"
+  local destination="$runtime/quarantine/$3"
+  [[ -e "$path" ]]
+  if [[ -e "$destination" ]]; then
+    echo "refusing to overwrite prior quarantine artifact: $destination" >&2
+    return 1
+  fi
+  mkdir -p "$runtime/quarantine"
+  python3 "$scripts/compatibility_repair.py" "$repair_file" register \
+    "quarantine and rebuild damaged $label artifact"
+  mv -- "$path" "$destination"
+  status running compatibility_repair "moved damaged $label to ignored quarantine before rebuild"
+}
+
 ensure_upstream() {
   if [[ ! -d "$upstream/.git" ]]; then
     git clone --no-checkout https://github.com/CXU-TRI/FAIL-Detect.git "$upstream"
@@ -50,6 +76,82 @@ ensure_upstream() {
     ln -s configs_robomimic "$config_link"
   fi
   [[ -L "$config_link" && "$(readlink "$config_link")" == "configs_robomimic" ]]
+}
+
+export_features() {
+  check_resources
+  status running features "extracting released global_cond/action training tensors"
+  (
+    cd "$upstream"
+    CUDA_VISIBLE_DEVICES="$gpu_index" run_conda python save_data.py \
+      --config-dir=diffusion_policy/configs_robomimic \
+      --config-name=image_transport_ph_visual_diffusion_policy_cnn.yaml \
+      training.seed=1103 training.device=cuda:0 \
+      "hydra.run.dir=$runtime/hydra/save_data"
+  )
+}
+
+ensure_features() {
+  local repaired=false
+  inspect_generated features "$features"
+  case "$artifact_state_rc" in
+    0) return ;;
+    10) ;;
+    12)
+      quarantine_damaged features "$features" "transport_data_diffusion.partial.pt"
+      repaired=true
+      ;;
+    *) echo "unexpected feature artifact state exit: $artifact_state_rc" >&2; return 1 ;;
+  esac
+  export_features
+  inspect_generated features "$features"
+  if [[ "$artifact_state_rc" -eq 0 ]]; then
+    return
+  fi
+  if [[ "$artifact_state_rc" -eq 12 && "$repaired" == false ]]; then
+    quarantine_damaged features "$features" "transport_data_diffusion.partial.pt"
+    export_features
+    inspect_generated features "$features"
+  fi
+  [[ "$artifact_state_rc" -eq 0 ]]
+}
+
+train_detector() {
+  check_resources
+  (
+    cd "$upstream/UQ_baselines/logpZO"
+    CUDA_VISIBLE_DEVICES="$gpu_index" run_conda python train.py \
+      --policy_type=diffusion --type=transport
+  )
+}
+
+ensure_detector() {
+  local repaired=false
+  inspect_generated detector "$detector"
+  case "$artifact_state_rc" in
+    0) return ;;
+    10) status running logpzo_train "starting released logpZO EPOCHS=200 training" ;;
+    11) status running logpzo_resume "invoking the official train.py checkpoint resume path" ;;
+    12)
+      quarantine_damaged detector "$detector" "transport_diffusion.partial.ckpt"
+      repaired=true
+      status running logpzo_train "restarting released logpZO training after damaged checkpoint"
+      ;;
+    *) echo "unexpected detector artifact state exit: $artifact_state_rc" >&2; return 1 ;;
+  esac
+  train_detector
+  inspect_generated detector "$detector"
+  if [[ "$artifact_state_rc" -eq 0 ]]; then
+    return
+  fi
+  if [[ "$repaired" == false && ( "$artifact_state_rc" -eq 11 || "$artifact_state_rc" -eq 12 ) ]]; then
+    quarantine_damaged detector "$detector" "transport_diffusion.partial.ckpt"
+    repaired=true
+    status running logpzo_train "restarting once after official resume did not yield a complete checkpoint"
+    train_detector
+    inspect_generated detector "$detector"
+  fi
+  [[ "$artifact_state_rc" -eq 0 ]]
 }
 
 evaluate() {
@@ -80,7 +182,13 @@ if [[ "${1:-}" == "--wait" ]]; then
   status waiting resource_gate "waiting for SPR and Guardian tmux sessions to end and GPU5 to become idle"
   FAIL_DETECT_STATUS_FILE="$status_file" FAIL_DETECT_GPU_INDEX="$gpu_index" \
     bash "$scripts/resource_gate.sh" --wait
-  exec timeout --signal=TERM --kill-after=5m 24h "$0" --run
+  exec "$scripts/deadline_runner.sh" \
+    --status-script "$scripts/quant_status.py" \
+    --status-file "$status_file" \
+    --deadline-marker "$deadline_marker" \
+    --duration "${FAIL_DETECT_DEADLINE:-24h}" \
+    --kill-after "${FAIL_DETECT_KILL_AFTER:-5m}" \
+    -- "$0" --run
 elif [[ "${1:-}" != "--run" ]]; then
   echo "usage: $0 --wait|--run" >&2
   exit 2
@@ -93,19 +201,17 @@ if ! mkdir "$runtime/run.lock" 2>/dev/null; then
 fi
 printf '%s\n' "$$" >"$runtime/run.lock/pid"
 
-finish() {
-  local rc="$?"
+cleanup() {
   rm -f "$runtime/run.lock/pid"
   rmdir "$runtime/run.lock" 2>/dev/null || true
-  if [[ "$rc" -eq 0 ]]; then
-    status complete complete "bounded 50+50 evaluation completed"
-  elif [[ "$rc" -eq 124 || "$rc" -eq 137 || "$rc" -eq 143 ]]; then
-    status stopped deadline "24-hour post-gate deadline reached"
-  else
-    status stopped failed "pipeline exited with code $rc; at most one recorded compatibility repair may be attempted"
-  fi
 }
-trap finish EXIT
+mark_deadline() {
+  : >"$deadline_marker"
+  status stopping deadline "inner pipeline received TERM; outer deadline runner owns final state"
+  exit 124
+}
+trap cleanup EXIT
+trap mark_deadline TERM INT
 
 status running preflight "post-gate 24-hour clock started"
 check_resources
@@ -129,31 +235,12 @@ run_conda python "$scripts/validate_quant_artifacts.py" \
   --artifact-lock "$artifact_lock" \
   --output "$validation_file"
 
-if [[ ! -s "$features" ]]; then
-  check_resources
-  status running features "extracting released global_cond/action training tensors"
-  (
-    cd "$upstream"
-    CUDA_VISIBLE_DEVICES="$gpu_index" run_conda python save_data.py \
-      --config-dir=diffusion_policy/configs_robomimic \
-      --config-name=image_transport_ph_visual_diffusion_policy_cnn.yaml \
-      training.seed=1103 training.device=cuda:0 \
-      "hydra.run.dir=$runtime/hydra/save_data"
-  )
-fi
+ensure_features
 status running feature_validation "validating generated feature tensor schema"
 run_conda python "$scripts/validate_logpzo_inputs.py" \
   --repo-root "$repo_root" --features "$features" --output "$feature_validation_file"
 
-if [[ ! -s "$detector" ]]; then
-  check_resources
-  status running logpzo_train "running released logpZO EPOCHS=200 training"
-  (
-    cd "$upstream/UQ_baselines/logpZO"
-    CUDA_VISIBLE_DEVICES="$gpu_index" run_conda python train.py \
-      --policy_type=diffusion --type=transport
-  )
-fi
+ensure_detector
 status running detector_validation "strict-loading released logpZO checkpoint"
 run_conda python "$scripts/validate_logpzo_inputs.py" \
   --repo-root "$repo_root" --features "$features" --checkpoint "$detector" \
@@ -167,6 +254,8 @@ status running gate_statistics "validating the technical gate without detector-p
 run_conda python "$scripts/summarize_logpzo.py" \
   --repo-root "$repo_root" --id-rollouts "$id_rollouts" --ood-rollouts "$ood_rollouts" \
   --output-json "$results/gate_summary.json" --output-md "$results/gate_summary.md" \
+  --output-provenance "$provenance_file" --artifact-lock "$artifact_lock" \
+  --input-validation "$detector_validation_file" \
   --limit 10 --calibration-successes 4 --alpha 0.05 --gate \
   --minimum-id-success-rate 0.7
 
@@ -178,4 +267,6 @@ status running final_statistics "computing Wilson intervals and released conform
 run_conda python "$scripts/summarize_logpzo.py" \
   --repo-root "$repo_root" --id-rollouts "$id_rollouts" --ood-rollouts "$ood_rollouts" \
   --output-json "$results/final_summary.json" --output-md "$results/final_summary.md" \
+  --output-provenance "$provenance_file" --artifact-lock "$artifact_lock" \
+  --input-validation "$detector_validation_file" \
   --limit 50 --calibration-successes 20 --alpha 0.05

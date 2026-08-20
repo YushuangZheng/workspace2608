@@ -41,7 +41,11 @@ official Transport checkpoint must pass a strict-load gate. Run
 SPR and Guardian jobs and GPU 5, then trains only released logpZO with
 `EPOCHS = 200`, runs a 10+10 technical gate, and extends the same seeds to a
 total 50+50 evaluation. It has a 24-hour post-gate deadline and permits at most
-one explicitly recorded reactive compatibility repair.
+one explicitly recorded reactive compatibility repair. Generated features and
+detectors are schema-classified as complete, officially resumable, or damaged;
+damaged partials are quarantined rather than accepted by file size. A small
+reviewable provenance JSON records runtime SHA-256 values while all large
+artifacts remain ignored.
 
 See [REPRODUCTION.md](REPRODUCTION.md) for the exact verified commands, the
 released pipeline and output paths, compatibility repairs, and the boundary
