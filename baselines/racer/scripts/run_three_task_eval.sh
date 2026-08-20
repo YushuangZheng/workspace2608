@@ -27,6 +27,7 @@ GL_BACKEND=${RACER_GL_BACKEND:-software}
 EGL_DEVICE=${RACER_EGL_DEVICE:-}
 START_EPISODE=${RACER_START_EPISODE:-0}
 EVAL_EPISODES=${RACER_EVAL_EPISODES:-25}
+RETRY_INVALID_ACTION_ERROR=${RACER_RETRY_FOR_INVALID_ACTION_ERROR:-5}
 TASKS=${RACER_TASKS:-place_cups,place_wine_at_rack_location,sweep_to_dustpan_of_size}
 LOG_NAME=${RACER_LOG_NAME:-official_ckpt_three_task}
 RUNTIME_DIR="$RACER_ROOT/runtime/$RUN_ID"
@@ -81,6 +82,8 @@ command -v glxinfo >/dev/null || fail 'glxinfo is unavailable.'
 [[ "$DISPLAY_ID" =~ ^[0-9]+$ ]] || fail 'RACER_DISPLAY_ID must be numeric.'
 [[ "$START_EPISODE" =~ ^[0-9]+$ ]] || fail 'RACER_START_EPISODE must be nonnegative.'
 [[ "$EVAL_EPISODES" =~ ^[1-9][0-9]*$ ]] || fail 'RACER_EVAL_EPISODES must be positive.'
+[[ "$RETRY_INVALID_ACTION_ERROR" =~ ^[0-9]+$ ]] || \
+  fail 'RACER_RETRY_FOR_INVALID_ACTION_ERROR must be nonnegative.'
 (( 10#$START_EPISODE + 10#$EVAL_EPISODES <= 25 )) || \
   fail 'RACER_START_EPISODE + RACER_EVAL_EPISODES must not exceed the 25 fixed episodes.'
 [[ "$TASKS" =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]] || \
@@ -93,6 +96,14 @@ command -v glxinfo >/dev/null || fail 'glxinfo is unavailable.'
 case "$GL_BACKEND" in
   software)
     ;;
+  spawn-isolated-software)
+    [[ -f "$SCRIPT_DIR/isolated_rollout.py" ]] || \
+      fail 'spawn-isolated evaluator wrapper is missing.'
+    [[ -f "$SCRIPT_DIR/isolated_simulator_proxy.py" ]] || \
+      fail 'spawn-isolated simulator proxy is missing.'
+    [[ -f "$SCRIPT_DIR/isolated_simulator_worker.py" ]] || \
+      fail 'spawn-isolated simulator worker is missing.'
+    ;;
   virtualgl-egl)
     [[ "$EGL_DEVICE" =~ ^egl[0-9]+$ ]] || \
       fail 'RACER_EGL_DEVICE must be an explicit VirtualGL EGL device such as egl4.'
@@ -104,7 +115,7 @@ case "$GL_BACKEND" in
       fail "NVIDIA EGL vendor manifest is missing: $NVIDIA_EGL_VENDOR"
     ;;
   *)
-    fail 'RACER_GL_BACKEND must be software or virtualgl-egl.'
+    fail 'RACER_GL_BACKEND must be software, spawn-isolated-software, or virtualgl-egl.'
     ;;
 esac
 
@@ -326,14 +337,20 @@ start_epoch=$(date +%s)
     QT_XCB_GL_INTEGRATION=xcb_glx
   )
   actor_wrapper=()
+  actor_program=("$ACTOR_PY" -u racer/evaluation/rollout.py)
   if [[ "$GL_BACKEND" == 'virtualgl-egl' ]]; then
     actor_environment+=(__EGL_VENDOR_LIBRARY_FILENAMES="$NVIDIA_EGL_VENDOR")
     actor_wrapper=("$VGLRUN" -ld "$VGL_LIBDIR" -d "$EGL_DEVICE")
   else
     actor_environment+=(LIBGL_ALWAYS_SOFTWARE=1)
+    if [[ "$GL_BACKEND" == 'spawn-isolated-software' ]]; then
+      mkdir -p "$RUNTIME_DIR/isolation"
+      actor_environment+=(RACER_ISOLATION_RUNTIME_DIR="$RUNTIME_DIR/isolation")
+      actor_program=("$ACTOR_PY" -u "$SCRIPT_DIR/isolated_rollout.py")
+    fi
   fi
   exec setsid "${actor_environment[@]}" "${actor_wrapper[@]}" \
-    "$ACTOR_PY" -u racer/evaluation/rollout.py \
+    "${actor_program[@]}" \
       --model-folder "$UPSTREAM/racer/runs/racer-visuomotor-policy-rich" \
       --model-name model_17.pth \
       --eval-datafolder "$UPSTREAM/racer/data/rlbench/test" \
@@ -341,7 +358,7 @@ start_epoch=$(date +%s)
       --start-episode "$START_EPISODE" \
       --eval-episodes "$EVAL_EPISODES" \
       --episode-length 30 \
-      --retry-for-InvalidActionError 5 \
+      --retry-for-InvalidActionError "$RETRY_INVALID_ACTION_ERROR" \
       --log-name "$LOG_NAME" \
       --eval-log-dir "$RESULT_DIR" \
       --lm-address "http://127.0.0.1:$LM_PORT/encode/" \

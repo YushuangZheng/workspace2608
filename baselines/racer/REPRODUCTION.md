@@ -240,18 +240,34 @@ identical.
 
 1. wait until both pre-existing SPR and Guardian tmux sessions terminate;
 2. require GPUs 1-4 to be idle for three consecutive checks;
-3. run exactly `place_cups` fixed episode 0 through the official evaluator;
+3. run exactly `place_cups` fixed episode 0 through the official evaluator,
+   with zero evaluator retries;
 4. require natural status 0, one valid metrics record, one terminal marker,
    and four nonempty camera GIFs with no native-renderer failure signature;
 5. only then run the three tasks x 25 fixed episodes and generate the paper
    comparison.
 
 Runtime state is written atomically to
-`runtime/<supervisor-id>/status.tsv`. A failed EGL gate leaves the 75-episode
-target locked and records `egl_gate_failed_fallback_not_implemented`. Process
-isolation is not delivered by this branch; at most one such gate may be added
-after separate review. The known A-K2 Mesa workarounds remain permanently
-excluded.
+`runtime/<supervisor-id>/status.tsv`. If EGL device mapping, execution, or
+strict validation fails, the supervisor may enter one fallback path, with no
+loop or automatic retry:
+
+1. a direct clean process resets fixed `place_cups` episode 0 and records
+   stable dtype/shape/byte-hash fingerprints for every numeric observation;
+2. a parent that has imported the official RACER rollout/policy stack performs
+   the same reset through a clean spawned simulator worker;
+3. both captures and the worker must exit naturally with status 0, all values
+   must be finite/supported, and both complete snapshots must match exactly;
+4. only then may one spawn-isolated episode 0 run, with zero evaluator retries;
+5. only a natural evaluator and worker status 0 plus the strict single-episode
+   artifact validator unlocks 3 x 25 under that same isolated backend.
+
+Any initialization mismatch, unsupported value, timeout, abnormal exit, or
+episode-gate failure records a terminal isolation state and leaves the
+75-episode target locked. The adapter replaces only the rollout module's
+`RLBenchSim` symbol; the official policy, evaluator loop, simulator, RLBench,
+PyRep, and CoppeliaSim sources remain unchanged. The known A-K2 Mesa
+load-order/context workarounds remain permanently excluded.
 
 Key provenance:
 

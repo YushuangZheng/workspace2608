@@ -50,10 +50,17 @@ bash baselines/racer/scripts/bootstrap_user_virtualgl.sh
 ```
 
 The official RACER, PyRep, RLBench, CoppeliaSim, policy, and evaluation code is
-not patched by this graphics-transport retry.
+not patched by this graphics-transport retry. The launcher-owned isolation
+adapter changes only where `RLBenchSim` executes: policy/PyTorch3D remains in
+the evaluator parent and the official simulator runs in a clean spawned Python
+worker.
 
-The proposed process-isolation fallback is not implemented in this branch. If
-the EGL episode gate fails, the supervisor records
-`egl_gate_failed_fallback_not_implemented`, keeps the 75-episode run locked,
-and exits. A later fallback may run at most one isolated episode only after its
-adapter and observation-equivalence checks are reviewed separately.
+If the EGL episode gate fails, the supervisor has exactly one fail-closed
+fallback path. It first compares complete numeric fingerprints from a direct
+fixed reset and a policy-loaded-parent/spawn-isolated fixed reset, and requires
+both capture processes plus the simulator worker to exit naturally with status
+0. Only an exact initialization-observation match permits one isolated
+`place_cups` episode 0 attempt. That attempt has zero evaluator retries and
+must pass the same metrics/marker/four-GIF/native-failure validator before it
+can unlock 3 x 25 under the same isolated backend. Any mismatch, abnormal exit,
+or episode failure stops without retry and leaves the full run locked.

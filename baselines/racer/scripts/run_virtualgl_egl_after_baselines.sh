@@ -10,10 +10,12 @@ SUPERVISOR_ID=${RACER_SUPERVISOR_ID:-virtualgl_egl_$(date +%Y%m%d_%H%M%S)}
 SUPERVISOR_RUNTIME="$RACER_ROOT/runtime/$SUPERVISOR_ID"
 STATUS_FILE="$SUPERVISOR_RUNTIME/status.tsv"
 PIPELINE_LOG="$SUPERVISOR_RUNTIME/pipeline.log"
-GATE_RUN_ID="${SUPERVISOR_ID}_gate"
+EGL_GATE_RUN_ID="${SUPERVISOR_ID}_egl_gate"
+ISOLATION_CONSISTENCY_RUN_ID="${SUPERVISOR_ID}_isolation_consistency"
+ISOLATION_GATE_RUN_ID="${SUPERVISOR_ID}_isolation_gate"
 FULL_RUN_ID="${SUPERVISOR_ID}_full"
-GATE_LOG_NAME='egl_gate_place_cups_ep0'
-FULL_LOG_NAME='official_ckpt_three_task_virtualgl_egl'
+EGL_GATE_LOG_NAME='egl_gate_place_cups_ep0'
+ISOLATION_GATE_LOG_NAME='spawn_isolation_gate_place_cups_ep0'
 LM_GPU=1
 VLM_GPUS='2,3'
 ACTOR_GPU=4
@@ -54,6 +56,16 @@ fail_terminal() {
   exit 1
 }
 
+claim_once() {
+  local name=$1
+  local marker="$SUPERVISOR_RUNTIME/${name}.claimed"
+  if ! (set -o noclobber; printf '%s\n' "$(date --iso-8601=seconds)" >"$marker") \
+      2>/dev/null; then
+    fail_terminal duplicate_attempt_blocked \
+      "$name was already claimed for supervisor $SUPERVISOR_ID; no retry is allowed"
+  fi
+}
+
 [[ "$WORKTREE_ROOT" == '/data/yukun/worktrees/essay2608-racer-egl' ]] || \
   fail_terminal invalid_worktree "unexpected worktree: $WORKTREE_ROOT"
 [[ "$(git -C "$WORKTREE_ROOT" branch --show-current)" == 'repro/racer-egl' ]] || \
@@ -63,7 +75,8 @@ fail_terminal() {
 [[ -x "$ACTOR_PY" ]] || fail_terminal missing_actor_python "$ACTOR_PY"
 [[ -x "$SESSION_PROBE" ]] || fail_terminal missing_session_probe "$SESSION_PROBE"
 
-for run_id in "$GATE_RUN_ID" "$FULL_RUN_ID"; do
+for run_id in "$EGL_GATE_RUN_ID" "$ISOLATION_CONSISTENCY_RUN_ID" \
+  "$ISOLATION_GATE_RUN_ID" "$FULL_RUN_ID"; do
   [[ ! -e "$RACER_ROOT/runtime/$run_id" ]] || \
     fail_terminal target_exists "runtime/$run_id"
   [[ ! -e "$RACER_ROOT/results/$run_id" ]] || \
@@ -107,19 +120,7 @@ while (( idle_checks < 3 )); do
   (( idle_checks == 3 )) || sleep 10
 done
 
-set_state resolving_egl_device "mapping physical NVIDIA GPU $ACTOR_GPU"
-EGL_DEVICE=$(
-  "$ACTOR_PY" "$SCRIPT_DIR/resolve_virtualgl_device.py" \
-    --gpu "$ACTOR_GPU" --print-device
-) || fail_terminal egl_mapping_failed "could not map GPU $ACTOR_GPU"
-"$ACTOR_PY" "$SCRIPT_DIR/resolve_virtualgl_device.py" --gpu "$ACTOR_GPU" \
-  >"$SUPERVISOR_RUNTIME/egl_device_map.json" || \
-  fail_terminal egl_mapping_failed "could not record GPU $ACTOR_GPU mapping"
-echo "Selected $EGL_DEVICE for physical NVIDIA GPU $ACTOR_GPU."
-
 common_environment=(
-  RACER_GL_BACKEND=virtualgl-egl
-  RACER_EGL_DEVICE="$EGL_DEVICE"
   RACER_LM_GPU="$LM_GPU"
   RACER_VLM_GPUS="$VLM_GPUS"
   RACER_ACTOR_GPU="$ACTOR_GPU"
@@ -128,39 +129,112 @@ common_environment=(
   RACER_DISPLAY_ID="$DISPLAY_ID"
 )
 
-set_state egl_gate_running 'fixed place_cups episode 0; full run remains locked'
-if ! env "${common_environment[@]}" \
-  RACER_RUN_ID="$GATE_RUN_ID" \
-  RACER_TASKS=place_cups \
-  RACER_START_EPISODE=0 \
-  RACER_EVAL_EPISODES=1 \
-  RACER_LOG_NAME="$GATE_LOG_NAME" \
-  bash "$SCRIPT_DIR/run_three_task_eval.sh" \
-  >"$SUPERVISOR_RUNTIME/gate_driver.log" 2>&1; then
-  fail_terminal egl_gate_failed_fallback_not_implemented \
-    "full run locked; process-isolation fallback is not delivered in this PR; see $SUPERVISOR_RUNTIME/gate_driver.log"
+selected_backend=''
+selected_egl_device=''
+egl_failure_detail=''
+
+set_state resolving_egl_device "mapping physical NVIDIA GPU $ACTOR_GPU"
+if EGL_DEVICE=$(
+    "$ACTOR_PY" "$SCRIPT_DIR/resolve_virtualgl_device.py" \
+      --gpu "$ACTOR_GPU" --print-device \
+      2>"$SUPERVISOR_RUNTIME/egl_device_mapping_error.log"
+  ) && "$ACTOR_PY" "$SCRIPT_DIR/resolve_virtualgl_device.py" --gpu "$ACTOR_GPU" \
+    >"$SUPERVISOR_RUNTIME/egl_device_map.json"; then
+  echo "Selected $EGL_DEVICE for physical NVIDIA GPU $ACTOR_GPU."
+  set_state egl_gate_running 'one fixed place_cups episode 0 with zero evaluator retries; full run remains locked'
+  if env "${common_environment[@]}" \
+    RACER_GL_BACKEND=virtualgl-egl \
+    RACER_EGL_DEVICE="$EGL_DEVICE" \
+    RACER_RUN_ID="$EGL_GATE_RUN_ID" \
+    RACER_TASKS=place_cups \
+    RACER_START_EPISODE=0 \
+    RACER_EVAL_EPISODES=1 \
+    RACER_RETRY_FOR_INVALID_ACTION_ERROR=0 \
+    RACER_LOG_NAME="$EGL_GATE_LOG_NAME" \
+    bash "$SCRIPT_DIR/run_three_task_eval.sh" \
+    >"$SUPERVISOR_RUNTIME/egl_gate_driver.log" 2>&1; then
+    EGL_GATE_METRICS="$RACER_ROOT/results/$EGL_GATE_RUN_ID/$EGL_GATE_LOG_NAME/metrics.json"
+    EGL_GATE_ACTOR_LOG="$RACER_ROOT/runtime/$EGL_GATE_RUN_ID/actor_eval.log"
+    if "$ACTOR_PY" "$SCRIPT_DIR/validate_single_episode.py" \
+      --metrics "$EGL_GATE_METRICS" --actor-log "$EGL_GATE_ACTOR_LOG" \
+      >"$SUPERVISOR_RUNTIME/egl_gate_validation.json"; then
+      selected_backend='virtualgl-egl'
+      selected_egl_device="$EGL_DEVICE"
+      set_state egl_gate_passed '1/1 episode completed with natural status 0 and no retry'
+    else
+      egl_failure_detail="strict EGL gate validation failed; see $SUPERVISOR_RUNTIME/egl_gate_validation.json"
+    fi
+  else
+    egl_failure_detail="EGL episode process failed; see $SUPERVISOR_RUNTIME/egl_gate_driver.log"
+  fi
+else
+  egl_failure_detail="EGL device mapping failed; see $SUPERVISOR_RUNTIME/egl_device_mapping_error.log"
 fi
 
-GATE_METRICS="$RACER_ROOT/results/$GATE_RUN_ID/$GATE_LOG_NAME/metrics.json"
-GATE_ACTOR_LOG="$RACER_ROOT/runtime/$GATE_RUN_ID/actor_eval.log"
-if ! "$ACTOR_PY" "$SCRIPT_DIR/validate_single_episode.py" \
-  --metrics "$GATE_METRICS" --actor-log "$GATE_ACTOR_LOG" \
-  >"$SUPERVISOR_RUNTIME/gate_validation.json"; then
-  fail_terminal egl_gate_validation_failed \
-    "see $SUPERVISOR_RUNTIME/gate_validation.json"
+if [[ -z "$selected_backend" ]]; then
+  claim_once spawn_isolation_fallback
+  set_state egl_gate_failed_starting_isolation_consistency \
+    "$egl_failure_detail; running the one allowed spawn-isolation fallback path"
+  if ! env "${common_environment[@]}" \
+    RACER_RUN_ID="$ISOLATION_CONSISTENCY_RUN_ID" \
+    RACER_TASKS=place_cups \
+    RACER_START_EPISODE=0 \
+    bash "$SCRIPT_DIR/run_spawn_isolation_consistency.sh" \
+    >"$SUPERVISOR_RUNTIME/isolation_consistency_driver.log" 2>&1; then
+    fail_terminal isolation_consistency_failed \
+      "full run locked; no retry; see $SUPERVISOR_RUNTIME/isolation_consistency_driver.log"
+  fi
+
+  set_state isolation_consistency_passed \
+    'direct and isolated initialization observations match exactly; worker closed naturally with status 0'
+  set_state isolation_gate_running \
+    'the only spawn-isolated place_cups episode 0 attempt; zero evaluator retries; full run remains locked'
+  if ! env "${common_environment[@]}" \
+    RACER_GL_BACKEND=spawn-isolated-software \
+    RACER_RUN_ID="$ISOLATION_GATE_RUN_ID" \
+    RACER_TASKS=place_cups \
+    RACER_START_EPISODE=0 \
+    RACER_EVAL_EPISODES=1 \
+    RACER_RETRY_FOR_INVALID_ACTION_ERROR=0 \
+    RACER_LOG_NAME="$ISOLATION_GATE_LOG_NAME" \
+    bash "$SCRIPT_DIR/run_three_task_eval.sh" \
+    >"$SUPERVISOR_RUNTIME/isolation_gate_driver.log" 2>&1; then
+    fail_terminal isolation_gate_failed \
+      "full run locked; no retry; see $SUPERVISOR_RUNTIME/isolation_gate_driver.log"
+  fi
+
+  ISOLATION_GATE_METRICS="$RACER_ROOT/results/$ISOLATION_GATE_RUN_ID/$ISOLATION_GATE_LOG_NAME/metrics.json"
+  ISOLATION_GATE_ACTOR_LOG="$RACER_ROOT/runtime/$ISOLATION_GATE_RUN_ID/actor_eval.log"
+  if ! "$ACTOR_PY" "$SCRIPT_DIR/validate_single_episode.py" \
+    --metrics "$ISOLATION_GATE_METRICS" --actor-log "$ISOLATION_GATE_ACTOR_LOG" \
+    >"$SUPERVISOR_RUNTIME/isolation_gate_validation.json"; then
+    fail_terminal isolation_gate_validation_failed \
+      "full run locked; no retry; see $SUPERVISOR_RUNTIME/isolation_gate_validation.json"
+  fi
+  selected_backend='spawn-isolated-software'
+  set_state isolation_gate_passed \
+    '1/1 isolated episode completed with natural evaluator and simulator-worker status 0; no retry'
 fi
 
-set_state egl_gate_passed '1/1 episode completed with natural status 0; unlocking 3x25'
 for gpu in 1 2 3 4; do
   gpu_is_idle "$gpu" || fail_terminal gpu_reoccupied "GPU $gpu became busy after gate"
 done
 
-set_state full_running 'three tasks x 25 fixed episodes'
-if ! env "${common_environment[@]}" \
+backend_environment=(RACER_GL_BACKEND="$selected_backend")
+if [[ "$selected_backend" == 'virtualgl-egl' ]]; then
+  backend_environment+=(RACER_EGL_DEVICE="$selected_egl_device")
+  FULL_LOG_NAME='official_ckpt_three_task_virtualgl_egl'
+else
+  FULL_LOG_NAME='official_ckpt_three_task_spawn_isolated'
+fi
+
+set_state full_running "three tasks x 25 fixed episodes; backend=$selected_backend"
+if ! env "${common_environment[@]}" "${backend_environment[@]}" \
   RACER_RUN_ID="$FULL_RUN_ID" \
   RACER_TASKS=place_cups,place_wine_at_rack_location,sweep_to_dustpan_of_size \
   RACER_START_EPISODE=0 \
   RACER_EVAL_EPISODES=25 \
+  RACER_RETRY_FOR_INVALID_ACTION_ERROR=5 \
   RACER_LOG_NAME="$FULL_LOG_NAME" \
   bash "$SCRIPT_DIR/run_three_task_eval.sh" \
   >"$SUPERVISOR_RUNTIME/full_driver.log" 2>&1; then
@@ -174,4 +248,4 @@ for artifact in metrics.json comparison.json comparison.csv comparison.md paper_
 done
 
 terminal_state=1
-set_state complete "gate and 3x25 completed; outputs: $FULL_OUTPUT"
+set_state complete "backend=$selected_backend; gate and 3x25 completed; outputs: $FULL_OUTPUT"
