@@ -105,7 +105,7 @@
     "system_changes": "none; Debian package is checksum-verified and extracted in user space",
     "bootstrap_script_sha256": "ef22115279caeff76dcf99b4073d117a8dc7aaefb45a8be94efbfbbc05508134",
     "device_mapper_sha256": "d7b7d921d6a905ada756b8cc6595785090faefd4a98c5cd5fe99657d5758c89f",
-    "single_episode_validator_sha256": "a146ed96a99a1bf6a6f541ddf1e8fb129e667eb2ed854418f2cc71d2152cbe05",
+    "single_episode_validator_sha256": "096c7bc5c4b76fc303c13da259890dd36151035e1126b10740b5b132029ef02c",
     "supervisor_sha256": "151ba2f7bfcd3469124c4edb1349281b6a416ac1a47b0310df68a0a4c99b5460",
     "tmux_session_probe_sha256": "68b711318d3bb75e3506d4430b6a5c83c2028f0efb893f48bd5b30115474aeea"
   },
@@ -127,8 +127,8 @@
     "point_cloud_evidence_sha256": "cadd171006c329403be23882c8eb23761cab5aab757b26bc2ef4aba684fda60e",
     "direct_gate_adapter_sha256": "e82d0813d418157addb604a4bd423b8d9a3b322ec2360f2980ccc106e9cf8876",
     "owned_process_audit_sha256": "219040b2f2d51bacd3df94f5ef2986beed98f1d4b56748085360110ddf944c89",
-    "protocol_test_sha256": "090c7e2371657d83769d139a922481e334931756076319d00b6e454e69ed801e",
-    "protocol_test_result": "14/14 passed in the actor environment without launching CoppeliaSim or using a GPU; includes success=false, fake/wrong-size GIF, wrong-shape/non-finite/degenerate point cloud, timeout and residual-process negatives plus natural worker-lifecycle evidence"
+    "protocol_test_sha256": "3faccccd6abbaf39ee0dc1b9fff6002764d1defda964593ae3fa77129c8d8cfb",
+    "protocol_test_result": "15/15 passed in the actor environment without launching CoppeliaSim or using a GPU; includes success=false, fake/wrong-size/black-camera-with-nonblack-overlay GIF, wrong-shape/non-finite/degenerate point cloud, timeout and residual-process negatives plus natural worker-lifecycle evidence"
   },
   "language_service_port_adapter": {
     "wrapper": "scripts/racer_lm_server.py",
@@ -186,7 +186,7 @@
     "unlock_condition": "success=true, one metrics record, one success marker, four nonempty camera GIFs, and no native-renderer failure signature",
     "full_target": "three tasks x 25 fixed episodes with retry-for-InvalidActionError=5; starts only after the gate passes",
     "full_retry_protocol": "5 is the released rollout.py default and official scripts/eval_racer.sh does not override it; gates deliberately override it to 0",
-    "rgb_gate_evidence": "all four GIFs must decode with Pillow as 256x346 GIF images with at least one readable nondegenerate frame",
+    "rgb_gate_evidence": "all four GIFs must decode with Pillow as 256x346 images with at least one readable frame and finite/nondegenerate pixels in the top 256x256 camera region; the lower 90px text overlay is excluded from pixel validity",
     "point_cloud_gate_evidence": "all four raw pre-policy point clouds are stored in an ignored NPZ and independently revalidated as finite, nondegenerate float32 arrays with shape (3,512,512) and matching SHA-256 values",
     "bounded_gate_timeouts": "600 seconds per direct/isolated initialization capture and 3600 seconds per episode-0 evaluator, then TERM and a 30-second KILL window",
     "checkout_lock": "exact startup HEAD is recorded and the clean repro/racer-egl checkout is rechecked after dependency wait and before subsequent gates/full run",

@@ -74,8 +74,10 @@ that default unchanged. Thus the fidelity run preserves the released protocol,
 while the unlock decision cannot be satisfied by a retried gate episode.
 
 The gate validator opens and decodes every GIF, requires the official
-256x346 rendered-frame size, at least one readable nondegenerate frame, and an
-exact success marker. A thin rollout adapter also saves the four raw reset
+256x346 rendered-frame size, at least one readable frame, and nondegenerate
+pixels specifically within the top 256x256 camera region; the lower 90px text
+overlay cannot satisfy this check. It also requires an exact success marker. A
+thin rollout adapter saves the four raw reset
 point clouds before policy preprocessing. The validator reloads that NPZ and
 requires exactly four float32 arrays of shape `(3, 512, 512)`, all finite and
 nondegenerate, with matching array and archive hashes. This records evidence

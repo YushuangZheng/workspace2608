@@ -243,8 +243,9 @@ identical.
 3. run exactly `place_cups` fixed episode 0 through the official evaluator,
    with zero evaluator retries;
 4. require natural status 0, `success: true`, one valid metrics record, one
-   success marker, four Pillow-verified 256x346 camera GIFs with readable,
-   nondegenerate pixels, and four raw float32 `(3, 512, 512)` point clouds that
+   success marker, four Pillow-verified 256x346 camera GIFs with readable frames
+   and nondegenerate pixels in the top 256x256 camera region (excluding the
+   lower 90px text overlay), and four raw float32 `(3, 512, 512)` point clouds that
    are finite and nondegenerate, with no native-renderer failure signature;
 5. only then run the three tasks x 25 fixed episodes and generate the paper
    comparison.

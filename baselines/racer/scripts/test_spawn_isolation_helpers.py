@@ -230,6 +230,17 @@ class SingleEpisodeValidatorTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("size", result.stderr)
 
+    def test_black_camera_with_nonblack_text_overlay_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            metrics, actor_log, evidence = self._fixture(Path(temporary), True)
+            bad_gif = metrics.parent / "place_cups" / "0" / "front_rgb.gif"
+            pixels = np.zeros((346, 256, 3), dtype=np.uint8)
+            pixels[300, 20, :] = 255
+            Image.fromarray(pixels, mode="RGB").save(bad_gif, format="GIF")
+            result = self._validate(metrics, actor_log, evidence)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("camera pixels are degenerate", result.stderr)
+
     def test_wrong_shape_point_cloud_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

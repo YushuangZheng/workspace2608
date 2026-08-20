@@ -42,8 +42,8 @@ def validate_gif(path: Path):
             image.verify()
 
         frame_count = 0
-        pixel_min = 255
-        pixel_max = 0
+        camera_pixel_min = 255
+        camera_pixel_max = 0
         with Image.open(path) as image:
             for frame in ImageSequence.Iterator(image):
                 if frame.size != EXPECTED_GIF_SIZE:
@@ -55,20 +55,23 @@ def validate_gif(path: Path):
                 array = np.asarray(rgb)
                 if array.shape != (EXPECTED_GIF_SIZE[1], EXPECTED_GIF_SIZE[0], 3):
                     raise ValueError(f"decoded frame shape is invalid: {array.shape}")
-                pixel_min = min(pixel_min, int(array.min()))
-                pixel_max = max(pixel_max, int(array.max()))
+                camera_pixels = array[:256, :, :]
+                if not np.isfinite(camera_pixels).all():
+                    raise ValueError("camera pixels contain non-finite values")
+                camera_pixel_min = min(camera_pixel_min, int(camera_pixels.min()))
+                camera_pixel_max = max(camera_pixel_max, int(camera_pixels.max()))
                 frame_count += 1
         if frame_count < 1:
             raise ValueError("GIF has no decodable frames")
-        if pixel_max <= pixel_min:
-            raise ValueError("decoded pixels are degenerate")
+        if camera_pixel_max <= camera_pixel_min:
+            raise ValueError("decoded 256x256 camera pixels are degenerate")
     except (OSError, SyntaxError, ValueError) as error:
         raise SystemExit(f"invalid camera GIF {path}: {error}") from error
     return {
         "frames": frame_count,
         "size": list(EXPECTED_GIF_SIZE),
-        "pixel_min": pixel_min,
-        "pixel_max": pixel_max,
+        "camera_pixel_min": camera_pixel_min,
+        "camera_pixel_max": camera_pixel_max,
     }
 
 
