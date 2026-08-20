@@ -11,7 +11,7 @@ The result must be labelled **released-code evaluator reproduction**. The
 released evaluator implements the progress-count trigger but does not include
 the paper-described eight-step trajectory-stagnation trigger.
 
-## First quantitative target
+## First quantitative result
 
 - Suite: LIBERO-Long (`--task 10`)
 - Task: ID 0, `put both the alphabet soup and the tomato sauce in the basket`
@@ -28,6 +28,21 @@ The paper does not publish task-level LIBERO-Long values. Table 2 reports only
 the ten-task subset aggregate, and the evaluation section states that this is
 50 episodes per task across ten tasks. Therefore a paper-matched quantitative
 comparison requires task IDs 0-9, not task 0 alone.
+
+The canonical complete rerun launched at `20260820_070434` produced 41
+successes in 50 episodes (82.0%). This is a task-0 released-code result, not a
+direct match to the paper's ten-task 82.8% aggregate. The verified artifacts
+are:
+
+- Official log:
+  `baselines/spr/results/released_code_libero10_task0/20260820_070434.log`
+- Annotations, raw videos, and annotated videos:
+  `baselines/spr/results/released_code_libero10_task0/rollouts/2026_08_20/`
+- Validation: 50 official outcomes, 50 annotation JSON files, 50 raw videos,
+  and 50 annotated videos, all with matching success labels
+
+An earlier run that was externally terminated at 35/50 is diagnostic only and
+is excluded from the quantitative result.
 
 ## Commands
 
@@ -61,36 +76,23 @@ annotation JSON files and both video streams. It also verifies the clean
 upstream commit, evaluator/parser/launcher hashes, checkpoint index, and - with
 `--full-verify-checkpoint` - every 16 GB checkpoint shard hash.
 
-After task 0 completes and GPU scheduling is explicitly confirmed, the frozen
-follow-up queue for task IDs 1-9 is:
+## Final execution scope
 
-```bash
-SPR_CUDA_VISIBLE_DEVICES=1,2,3,4 \
-  bash baselines/spr/scripts/run_libero10_tasks1to9.sh
-```
+Task 0 is the only complete quantitative SPR result. Its official log,
+annotations, 50 raw videos, and 50 annotated videos agree exactly on all 50
+episode outcomes: 41 successes and 9 failures (82.0%).
 
-Each queued task invokes the unmodified official CLI for its own fixed 50
-episodes. It intentionally reloads the model between task IDs instead of
-introducing a custom in-process evaluator.
+The task-1 continuation was deliberately stopped to satisfy the user's scope
+closure request. Exactly one episode completed before that stop and it was a
+success; the log, annotation, raw video, and annotated video are retained at:
 
-Before every queued task, the launcher inspects each selected GPU separately.
-After a completed task it allows only residual `dynamac-spr` workers up to 60
-seconds to exit naturally. An external process, an inspection error, or an SPR
-worker that remains after 60 seconds fails closed; the launcher never kills or
-waits on an unrelated workload.
+`baselines/spr/results/released_code_libero10_task1_partial_user_scope_stop_20260820_215730/`
 
-After all ten tasks finish, validate every run, compute the 500-episode
-aggregate and Wilson 95% confidence interval, then render the frozen chart:
-
-```bash
-baselines/spr/scripts/aggregate_libero10.py
-baselines/spr/scripts/plot_libero10.py
-```
-
-The aggregator refuses partial runs and requires exact agreement among each
-official log, 50 annotation JSON files, and both 50-video streams. It then
-rehashes the evaluator, parser, and all four checkpoint shards before writing
-the ignored aggregate result. The plotter likewise refuses unverified input.
+This 1-episode partial is diagnostic evidence only. It is not a task-1 success
+rate and is excluded from task-0 and suite-level metrics. Task IDs 2-9 were not
+run. Consequently no 500-episode ten-task aggregate, Wilson interval, or chart
+was generated, and no local value is directly comparable with the paper's
+82.8% ten-task aggregate. No further SPR evaluation is scheduled or active.
 
 One- or two-GPU execution is not selected for the paper-matched run. The 7B
 BF16 checkpoint may fit on fewer 24 GB cards, but the paper reports 4x RTX 4090

@@ -93,6 +93,54 @@
     "binary_sha256": "cf71d78eab8321f7c568271053af449f966a75422140117ea1f244bf72a7e81e",
     "note": "The conda Xvfb builds tested here did not expose a usable GLX visual; the Ubuntu-matched package is extracted without sudo."
   },
+  "language_service_port_adapter": {
+    "wrapper": "scripts/racer_lm_server.py",
+    "wrapper_sha256": "e62f42252ab86ed7a7abeba8cf4efc27ed0d06cd045a507879682b41cc833bae",
+    "launcher": "scripts/run_three_task_eval.sh",
+    "launcher_sha256": "8923414cc4c22b023e7d64f2740a9e9e7d0888ac1c34a2d91c06b67af4a7a9ff",
+    "official_entry_point": "upstream/Open-LLaVA-NeXT/deploy/lm_server.py",
+    "default_host": "127.0.0.1",
+    "default_port": 18000,
+    "reason": "Port 8000 is occupied by the resident XPolicy Eval service on this workstation.",
+    "semantic_boundary": "The wrapper imports the official app and changes only the Uvicorn host and port; model loading, routes, request schema, and inference remain unchanged."
+  },
+  "local_reproduction_status": {
+    "as_of": "2026-08-20",
+    "status": "blocked_before_episode_0",
+    "target_episodes": 75,
+    "completed_episodes": 0,
+    "local_success_rate": null,
+    "paper_comparison_generated": false,
+    "formal_run_id": "after_spr_task0_restart_20260820_070434_retry2",
+    "runtime_path": "runtime/after_spr_task0_restart_20260820_070434_retry2",
+    "result_path": "results/after_spr_task0_restart_20260820_070434_retry2/official_ckpt_three_task",
+    "exit_status": 139,
+    "failure_boundary": "After model services, actor checkpoint load, and Agent Reset; during the first RLBench reset and before any episode-0 result.",
+    "native_stack": "libcoppeliaSim.so.1 -> /usr/lib/x86_64-linux-gnu/dri/swrast_dri.so",
+    "actor_log_sha256": "c4b19c453debe4b257363d231a1ad40dda656ec53a2c7078fec8564fb94c63e3"
+  },
+  "renderer_diagnostics": {
+    "range": "A-K2",
+    "code_changes": "none to pinned RACER, RLBench, PyRep, CoppeliaSim, or DynaMAC",
+    "i1": {
+      "path": "runtime/glx_diag_I1_two_lifecycles_20260820_213700",
+      "exit_status": 0,
+      "conclusion": "A real pre-policy task render avoids the reset crash but changes 3 of 4 RGB observations, so it is not semantics-neutral."
+    },
+    "k1": {
+      "path": "runtime/glx_diag_K1_supported_glx_context_20260820_214306",
+      "exit_status": 134,
+      "conclusion": "A tiny supported GLX context lets random and fixed resets pass, but the process aborts after atexit with an invalid free."
+    },
+    "k2": {
+      "path": "runtime/glx_diag_K2_conda_x11_context_20260820_214708",
+      "exit_status": 134,
+      "smoke_log_sha256": "a367bc17f42a982cdb7b49a31d8727af4a276e745267ea2f4625b0bfa3d5e9db",
+      "conclusion": "Using one Conda X11 closure preserves the functional passes but does not remove the post-atexit invalid free."
+    },
+    "stop_decision": "No tested Xvfb/software-Mesa adapter provides reset stability, observation fidelity, and natural status 0 together; do not run the 75-episode target on this renderer."
+  },
+  "recommended_display_backend": "NVIDIA-backed Xorg or VirtualGL, followed by one exact end-to-end episode with natural status 0 and four-view fidelity validation before the 75-episode run.",
   "first_target": "Three-task, 75-episode released-checkpoint evaluation",
   "paper_reference": "paper_reference.json",
   "reproduction_boundary": "The paper reports five-seed means and standard deviations, while the release provides one actor checkpoint."

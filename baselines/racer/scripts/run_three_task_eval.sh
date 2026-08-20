@@ -14,7 +14,7 @@ HF_HOME='/data/yukun/.cache/huggingface-racer/llava-runtime'
 LM_GPU=${RACER_LM_GPU:-1}
 VLM_GPUS=${RACER_VLM_GPUS:-2,3}
 ACTOR_GPU=${RACER_ACTOR_GPU:-4}
-LM_PORT=${RACER_LM_PORT:-8000}
+LM_PORT=${RACER_LM_PORT:-18000}
 VLM_PORT=${RACER_VLM_PORT:-21002}
 DISPLAY_ID=${RACER_DISPLAY_ID:-95}
 HEALTH_ONLY=${RACER_HEALTH_ONLY:-0}
@@ -69,9 +69,11 @@ command -v glxinfo >/dev/null || fail 'glxinfo is unavailable.'
 [[ -x "$ACTOR_PY" ]] || fail "actor interpreter missing: $ACTOR_PY"
 [[ -x "$LLAVA_PY" ]] || fail "LLaVA interpreter missing: $LLAVA_PY"
 [[ -x "$XVFB" ]] || fail "user-space Xvfb missing; run $SCRIPT_DIR/bootstrap_user_xvfb.sh"
+[[ -f "$SCRIPT_DIR/racer_lm_server.py" ]] || fail 'RACER language-service wrapper is missing.'
 [[ "$DISPLAY_ID" =~ ^[0-9]+$ ]] || fail 'RACER_DISPLAY_ID must be numeric.'
-[[ "$LM_PORT" == '8000' ]] || \
-  fail 'The unchanged official lm_server.py is fixed to port 8000; RACER_LM_PORT must remain 8000.'
+[[ "$LM_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || \
+  fail 'RACER_LM_PORT must be an integer between 1 and 65535.'
+(( 10#$LM_PORT <= 65535 )) || fail 'RACER_LM_PORT must be at most 65535.'
 
 IFS=',' read -r VLM_GPU_A VLM_GPU_B VLM_GPU_EXTRA <<<"$VLM_GPUS"
 [[ -n "$VLM_GPU_A" && -n "$VLM_GPU_B" && -z "${VLM_GPU_EXTRA:-}" ]] || \
@@ -183,7 +185,10 @@ echo "Starting T5-11B/CLIP service on GPU $LM_GPU, port $LM_PORT..."
   export HF_HOME
   export TRANSFORMERS_CACHE="$HF_HOME/hub"
   export TOKENIZERS_PARALLELISM=false
-  exec "$LLAVA_PY" -u deploy/lm_server.py
+  exec "$LLAVA_PY" -u "$SCRIPT_DIR/racer_lm_server.py" \
+    --open-llava-root "$OPEN_LLAVA" \
+    --host 127.0.0.1 \
+    --port "$LM_PORT"
 ) >"$RUNTIME_DIR/lm_server.log" 2>&1 &
 lm_pid=$!
 children+=("$lm_pid")
