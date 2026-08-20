@@ -35,6 +35,12 @@ MAX_TOTAL_SECONDS = 2 * 60 * 60
 MAX_TASK_SECONDS = 10 * 60
 MAX_ATTEMPT_SECONDS = 5 * 60
 PNG_NAME = re.compile(r"^(front|overhead|wrist)_(\d+)\.png$")
+SIMULATOR_CRASH = re.compile(
+    r"(?:coppeliasim|remote.?api).*(?:crash|died|lost|closed|disconnect|"
+    r"terminated|stopped)|failed to connect.*(?:coppeliasim|remote.?api)",
+    flags=re.IGNORECASE,
+)
+RETRYABLE_FAILURE_CLASSES = frozenset(("simulator_crash", "worker_signal"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -236,6 +242,22 @@ def worker_environment(args: argparse.Namespace, display: int) -> dict[str, str]
     return environment
 
 
+def classify_worker_failure(
+    return_code: int, worker_payload: dict[str, Any]
+) -> str:
+    if return_code < 0:
+        return "worker_signal"
+    error_type = worker_payload.get("error_type", "")
+    if error_type == "FailGenNotProduced":
+        return "failgen_not_produced"
+    if error_type == "ReleasedConfigurationError":
+        return "released_configuration"
+    error = str(worker_payload.get("error", ""))
+    if SIMULATOR_CRASH.search(error):
+        return "simulator_crash"
+    return "simulator_or_worker_error"
+
+
 def run_worker(
     args: argparse.Namespace,
     task: str,
@@ -312,15 +334,9 @@ def run_worker(
             outcome["status"] = "worker_success"
             outcome["failure_class"] = None
             return outcome
-        error_type = worker_payload.get("error_type", "")
-        if error_type == "FailGenNotProduced":
-            outcome["failure_class"] = "failgen_not_produced"
-        elif error_type == "ReleasedConfigurationError":
-            outcome["failure_class"] = "released_configuration"
-        elif return_code < 0:
-            outcome["failure_class"] = "worker_signal"
-        else:
-            outcome["failure_class"] = "simulator_or_worker_error"
+        outcome["failure_class"] = classify_worker_failure(
+            return_code, worker_payload
+        )
         return outcome
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         outcome["failure_class"] = "xvfb_or_runner_startup"
@@ -440,6 +456,9 @@ def run_task(
                 attempt["status"] = "failed"
                 attempt["failure_class"] = "image_integrity"
                 attempt["error"] = f"{type(exc).__name__}: {exc}"
+                break
+        if attempt["failure_class"] not in RETRYABLE_FAILURE_CLASSES:
+            break
     if result is None:
         failure_class = (
             attempts[-1]["failure_class"] if attempts else "task_timeout"

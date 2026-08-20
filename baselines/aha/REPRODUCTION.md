@@ -112,12 +112,15 @@ For each task it selects the first supported failure in the official
 of the released failure generator, not the upstream 100-episode-per-task data
 collection protocol and not an AHA model evaluation.
 
-Each task runs in its own process and X display. A failed attempt may start the
-task once more, so the maximum is one CoppeliaSim restart per task. Attempts are
-limited to five minutes, each task to ten minutes, and the complete ten-task
-run to two hours. Tasks remain sequential. The launcher waits until all tmux
-sessions whose names begin with `dynamac_spr` or `dynamac_guardian` have ended,
-then sets an empty `CUDA_VISIBLE_DEVICES` and forces software GL rendering.
+Each task runs in its own process and X display. Only an explicit CoppeliaSim
+crash or worker signal permits one restart; generation misses, released-config
+errors, image-integrity failures, timeouts, Xvfb startup failures, and generic
+worker errors do not retry. Attempts are limited to five minutes, each task to
+ten minutes, and the complete ten-task run to two hours. Tasks remain
+sequential. The launcher waits until every live pane in tmux sessions whose
+names begin with `dynamac_spr` or `dynamac_guardian` has ended. Dead panes kept
+by tmux's `remain-on-exit` setting do not block AHA. It then sets an empty
+`CUDA_VISIBLE_DEVICES` and forces software GL rendering.
 
 Run the source/protocol check without launching CoppeliaSim:
 

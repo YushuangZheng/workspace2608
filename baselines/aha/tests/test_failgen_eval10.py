@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import time
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,12 @@ SPEC = importlib.util.spec_from_file_location("failgen_eval10", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+GATE_SCRIPT = Path(__file__).parents[1] / "scripts" / "tmux_gate.py"
+GATE_SPEC = importlib.util.spec_from_file_location("tmux_gate", GATE_SCRIPT)
+assert GATE_SPEC is not None and GATE_SPEC.loader is not None
+GATE = importlib.util.module_from_spec(GATE_SPEC)
+GATE_SPEC.loader.exec_module(GATE)
 
 
 def fixed_args(**overrides):
@@ -73,3 +80,127 @@ def test_png_integrity_requires_complete_equal_camera_streams(tmp_path):
     (artifacts / "wrist_1.png").unlink()
     with pytest.raises(ValueError, match="counts differ"):
         MODULE.verify_pngs(artifacts, attempt)
+
+
+def test_tmux_gate_ignores_dead_remain_on_exit_panes(tmp_path):
+    (tmp_path / "111").mkdir()
+    (tmp_path / "444").mkdir()
+    rows = (
+        "dynamac_spr_full_20260821\t1\t222",
+        "dynamac_guardian_full_20260821\t0\t111",
+        "dynamac_spr_stale_pid\t0\t333",
+        "unrelated_session\t0\t444",
+    )
+    assert GATE.live_blocking_sessions(rows, proc_root=tmp_path) == (
+        "dynamac_guardian_full_20260821",
+    )
+
+
+def task_args(tmp_path):
+    return fixed_args(
+        output_root=tmp_path,
+        task_timeout_seconds=60,
+        attempt_timeout_seconds=30,
+    )
+
+
+@pytest.mark.parametrize(
+    "failure_class",
+    (
+        "failgen_not_produced",
+        "released_configuration",
+        "image_integrity",
+        "timeout",
+        "xvfb_or_runner_startup",
+        "simulator_or_worker_error",
+    ),
+)
+def test_non_retryable_failure_runs_once(monkeypatch, tmp_path, failure_class):
+    calls = []
+
+    def fake_run_worker(args, task, attempt_dir, timeout_seconds):
+        calls.append(attempt_dir)
+        if failure_class == "image_integrity":
+            return {
+                "status": "worker_success",
+                "failure_class": None,
+                "worker": {
+                    "artifact_dir": str(attempt_dir / "artifacts"),
+                    "failure_type": "grasp",
+                    "waypoint": 1,
+                    "renderer": "opengl3",
+                },
+            }
+        return {"status": "failed", "failure_class": failure_class}
+
+    monkeypatch.setattr(MODULE, "run_worker", fake_run_worker)
+    if failure_class == "image_integrity":
+        monkeypatch.setattr(
+            MODULE,
+            "verify_pngs",
+            lambda *unused: (_ for _ in ()).throw(ValueError("bad png")),
+        )
+
+    result = MODULE.run_task(
+        task_args(tmp_path), "stack_chairs", 1, time.monotonic() + 60
+    )
+    assert len(calls) == 1
+    assert result["attempts_used"] == 1
+    assert result["coppelia_restart_count"] == 0
+    assert result["failure_class"] == failure_class
+
+
+@pytest.mark.parametrize("retryable", ("worker_signal", "simulator_crash"))
+def test_only_explicit_crashes_get_one_restart(
+    monkeypatch, tmp_path, retryable
+):
+    calls = []
+
+    def fake_run_worker(args, task, attempt_dir, timeout_seconds):
+        calls.append(attempt_dir)
+        if len(calls) == 1:
+            return {"status": "failed", "failure_class": retryable}
+        return {
+            "status": "worker_success",
+            "failure_class": None,
+            "worker": {
+                "artifact_dir": str(attempt_dir / "artifacts"),
+                "failure_type": "grasp",
+                "waypoint": 1,
+                "renderer": "opengl3",
+            },
+        }
+
+    monkeypatch.setattr(MODULE, "run_worker", fake_run_worker)
+    monkeypatch.setattr(
+        MODULE,
+        "verify_pngs",
+        lambda *unused: {
+            "status": "complete",
+            "png_count": 3,
+            "camera_counts": {"front": 1, "overhead": 1, "wrist": 1},
+            "files": [],
+        },
+    )
+
+    result = MODULE.run_task(
+        task_args(tmp_path), "stack_chairs", 1, time.monotonic() + 60
+    )
+    assert len(calls) == 2
+    assert result["status"] == "success"
+    assert result["attempts_used"] == 2
+    assert result["coppelia_restart_count"] == 1
+
+
+def test_worker_failure_classification_is_conservative():
+    assert MODULE.classify_worker_failure(-11, {}) == "worker_signal"
+    assert (
+        MODULE.classify_worker_failure(
+            1, {"error": "Remote API connection to CoppeliaSim was lost"}
+        )
+        == "simulator_crash"
+    )
+    assert (
+        MODULE.classify_worker_failure(1, {"error": "ordinary Python error"})
+        == "simulator_or_worker_error"
+    )

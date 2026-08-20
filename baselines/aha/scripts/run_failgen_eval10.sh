@@ -80,8 +80,7 @@ trap cleanup_claim EXIT
 
 echo "Waiting for all current SPR and Guardian tmux sessions to terminate."
 while true; do
-  active_sessions="$({ tmux list-sessions -F '#S' 2>/dev/null || true; } \
-    | awk '/^dynamac_(spr|guardian)/ {print}')"
+  active_sessions="$(python "$script_dir/tmux_gate.py")"
   if [[ -z "$active_sessions" ]]; then
     break
   fi
@@ -90,8 +89,7 @@ while true; do
 done
 
 # Recheck immediately before launching the first simulator process.
-active_sessions="$({ tmux list-sessions -F '#S' 2>/dev/null || true; } \
-  | awk '/^dynamac_(spr|guardian)/ {print}')"
+active_sessions="$(python "$script_dir/tmux_gate.py")"
 if [[ -n "$active_sessions" ]]; then
   echo "Gate changed during launch; refusing to start AHA." >&2
   exit 4
