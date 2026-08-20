@@ -14,6 +14,7 @@ VGL_ROOT=${RACER_VGL_ROOT:-/data/yukun/.cache/racer/virtualgl-3.1.5-root}
 VGLRUN="$VGL_ROOT/opt/VirtualGL/bin/vglrun"
 VGL_LIBDIR="$VGL_ROOT/usr/lib"
 NVIDIA_EGL_VENDOR='/usr/share/glvnd/egl_vendor.d/10_nvidia.json'
+OWNED_PROCESS_AUDIT="$SCRIPT_DIR/audit_owned_processes.py"
 
 LM_GPU=${RACER_LM_GPU:-1}
 VLM_GPUS=${RACER_VLM_GPUS:-2,3}
@@ -30,8 +31,10 @@ EVAL_EPISODES=${RACER_EVAL_EPISODES:-25}
 RETRY_INVALID_ACTION_ERROR=${RACER_RETRY_FOR_INVALID_ACTION_ERROR:-5}
 TASKS=${RACER_TASKS:-place_cups,place_wine_at_rack_location,sweep_to_dustpan_of_size}
 LOG_NAME=${RACER_LOG_NAME:-official_ckpt_three_task}
+GATE_EVIDENCE_REQUIRED=${RACER_GATE_EVIDENCE_REQUIRED:-0}
 RUNTIME_DIR="$RACER_ROOT/runtime/$RUN_ID"
 RESULT_DIR="$RACER_ROOT/results/$RUN_ID"
+POINT_CLOUD_EVIDENCE="$RUNTIME_DIR/gate_point_cloud_evidence.json"
 
 # The model services are local even if the interactive shell has proxy-on set.
 export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"
@@ -60,6 +63,22 @@ cleanup() {
     kill -TERM "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
+  audit_status=1
+  if [[ -x "$ACTOR_PY" && -f "$OWNED_PROCESS_AUDIT" ]]; then
+    for _ in $(seq 1 10); do
+      if env -u RACER_RUN_ID "$ACTOR_PY" "$OWNED_PROCESS_AUDIT" \
+        --value "$RUN_ID" --ignore-pid "$$" \
+        --output "$RUNTIME_DIR/cleanup_process_audit.json" >/dev/null 2>&1; then
+        audit_status=0
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+  if (( audit_status != 0 )); then
+    echo "ERROR: owned processes remain after launcher cleanup; see $RUNTIME_DIR/cleanup_process_audit.json" >&2
+    (( status != 0 )) || status=1
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -79,6 +98,7 @@ command -v glxinfo >/dev/null || fail 'glxinfo is unavailable.'
 [[ -x "$LLAVA_PY" ]] || fail "LLaVA interpreter missing: $LLAVA_PY"
 [[ -x "$XVFB" ]] || fail "user-space Xvfb missing; run $SCRIPT_DIR/bootstrap_user_xvfb.sh"
 [[ -f "$SCRIPT_DIR/racer_lm_server.py" ]] || fail 'RACER language-service wrapper is missing.'
+[[ -f "$OWNED_PROCESS_AUDIT" ]] || fail 'owned-process audit helper is missing.'
 [[ "$DISPLAY_ID" =~ ^[0-9]+$ ]] || fail 'RACER_DISPLAY_ID must be numeric.'
 [[ "$START_EPISODE" =~ ^[0-9]+$ ]] || fail 'RACER_START_EPISODE must be nonnegative.'
 [[ "$EVAL_EPISODES" =~ ^[1-9][0-9]*$ ]] || fail 'RACER_EVAL_EPISODES must be positive.'
@@ -89,6 +109,8 @@ command -v glxinfo >/dev/null || fail 'glxinfo is unavailable.'
 [[ "$TASKS" =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]] || \
   fail 'RACER_TASKS must be a comma-separated task list without spaces.'
 [[ "$LOG_NAME" =~ ^[A-Za-z0-9_.-]+$ ]] || fail 'RACER_LOG_NAME contains unsafe characters.'
+[[ "$GATE_EVIDENCE_REQUIRED" == '0' || "$GATE_EVIDENCE_REQUIRED" == '1' ]] || \
+  fail 'RACER_GATE_EVIDENCE_REQUIRED must be 0 or 1.'
 [[ "$LM_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || \
   fail 'RACER_LM_PORT must be an integer between 1 and 65535.'
 (( 10#$LM_PORT <= 65535 )) || fail 'RACER_LM_PORT must be at most 65535.'
@@ -118,6 +140,14 @@ case "$GL_BACKEND" in
     fail 'RACER_GL_BACKEND must be software, spawn-isolated-software, or virtualgl-egl.'
     ;;
 esac
+if [[ "$GATE_EVIDENCE_REQUIRED" == '1' ]]; then
+  [[ -f "$SCRIPT_DIR/point_cloud_evidence.py" ]] || \
+    fail 'point-cloud evidence helper is missing.'
+  if [[ "$GL_BACKEND" != 'spawn-isolated-software' ]]; then
+    [[ -f "$SCRIPT_DIR/instrumented_rollout.py" ]] || \
+      fail 'instrumented gate evaluator wrapper is missing.'
+  fi
+fi
 
 IFS=',' read -r VLM_GPU_A VLM_GPU_B VLM_GPU_EXTRA <<<"$VLM_GPUS"
 [[ -n "$VLM_GPU_A" && -n "$VLM_GPU_B" && -z "${VLM_GPU_EXTRA:-}" ]] || \
@@ -349,6 +379,12 @@ start_epoch=$(date +%s)
       actor_program=("$ACTOR_PY" -u "$SCRIPT_DIR/isolated_rollout.py")
     fi
   fi
+  if [[ "$GATE_EVIDENCE_REQUIRED" == '1' ]]; then
+    actor_environment+=(RACER_POINT_CLOUD_EVIDENCE="$POINT_CLOUD_EVIDENCE")
+    if [[ "$GL_BACKEND" != 'spawn-isolated-software' ]]; then
+      actor_program=("$ACTOR_PY" -u "$SCRIPT_DIR/instrumented_rollout.py")
+    fi
+  fi
   exec setsid "${actor_environment[@]}" "${actor_wrapper[@]}" \
     "${actor_program[@]}" \
       --model-folder "$UPSTREAM/racer/runs/racer-visuomotor-policy-rich" \
@@ -401,6 +437,12 @@ fi
 
 METRICS="$RESULT_DIR/$LOG_NAME/metrics.json"
 [[ -f "$METRICS" ]] || fail "evaluator exited without metrics: $METRICS"
+if [[ "$GATE_EVIDENCE_REQUIRED" == '1' ]]; then
+  [[ -s "$POINT_CLOUD_EVIDENCE" ]] || \
+    fail "evaluator exited without point-cloud evidence: $POINT_CLOUD_EVIDENCE"
+  [[ -s "$RUNTIME_DIR/gate_point_clouds.npz" ]] || \
+    fail "evaluator exited without raw point clouds: $RUNTIME_DIR/gate_point_clouds.npz"
+fi
 if [[ "$TASKS" == 'place_cups,place_wine_at_rack_location,sweep_to_dustpan_of_size' \
       && "$START_EPISODE" == '0' && "$EVAL_EPISODES" == '25' ]]; then
   "$ACTOR_PY" "$SCRIPT_DIR/summarize_three_task.py" "$METRICS" \

@@ -38,7 +38,8 @@ The next bounded retry uses VirtualGL 3.1.5's EGL backend. Xvfb remains only the
 2D X server, while VirtualGL redirects GLX rendering to the NVIDIA EGL device
 that maps to the actor GPU. The retry is fail-closed: one fixed `place_cups`
 episode 0 must complete with a natural status 0 and four nonempty camera GIFs
-before the three-task 75-episode evaluation can start. It also waits for the
+and must report `success: true` before the three-task 75-episode evaluation can
+start. It also waits for the
 existing SPR and Guardian tmux jobs to terminate and for GPUs 1-4 to remain
 idle. See `scripts/run_virtualgl_egl_after_baselines.sh`.
 
@@ -61,6 +62,29 @@ fixed reset and a policy-loaded-parent/spawn-isolated fixed reset, and requires
 both capture processes plus the simulator worker to exit naturally with status
 0. Only an exact initialization-observation match permits one isolated
 `place_cups` episode 0 attempt. That attempt has zero evaluator retries and
-must pass the same metrics/marker/four-GIF/native-failure validator before it
-can unlock 3 x 25 under the same isolated backend. Any mismatch, abnormal exit,
-or episode failure stops without retry and leaves the full run locked.
+must report `success: true` and pass the same
+metrics/marker/four-GIF/native-failure validator before it can unlock 3 x 25
+under the same isolated backend. Any mismatch, abnormal exit, or unsuccessful
+episode stops without retry and leaves the full run locked.
+
+Both one-episode gates override InvalidActionError retries to zero. After a
+successful gate, the 3 x 25 evaluation explicitly uses five retries, matching
+the released `rollout.py` default; the official `scripts/eval_racer.sh` leaves
+that default unchanged. Thus the fidelity run preserves the released protocol,
+while the unlock decision cannot be satisfied by a retried gate episode.
+
+The gate validator opens and decodes every GIF, requires the official
+256x346 rendered-frame size, at least one readable nondegenerate frame, and an
+exact success marker. A thin rollout adapter also saves the four raw reset
+point clouds before policy preprocessing. The validator reloads that NPZ and
+requires exactly four float32 arrays of shape `(3, 512, 512)`, all finite and
+nondegenerate, with matching array and archive hashes. This records evidence
+only; it does not alter observations passed to the released policy.
+
+The supervisor freezes the exact Git HEAD at startup and checks the same clean
+checkout again after the dependency wait and before later stages. Direct and
+isolated reset captures each have a 600-second wall-clock limit; either
+episode-0 gate has a 3600-second limit. Every capture/evaluation stage records
+an exact environment-owned `/proc` audit after cleanup, including CoppeliaSim,
+worker, model-service, evaluator, and Xvfb descendants. Any timeout, checkout
+change, or residual owned process fails closed.

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import secrets
 import subprocess
@@ -63,6 +64,7 @@ class SpawnIsolatedRLBenchSim:
         if os.environ.get("RACER_ISOLATION_WORKER_SELF_TEST") == "1":
             command.append("--self-test")
         self.worker_log_path = self.runtime_dir / f"simulator_worker_{os.getpid()}.log"
+        self.worker_status_path = self.runtime_dir / f"simulator_worker_{os.getpid()}.json"
         self._worker_log = self.worker_log_path.open("ab", buffering=0)
         self.worker = subprocess.Popen(
             command,
@@ -71,6 +73,7 @@ class SpawnIsolatedRLBenchSim:
             stderr=subprocess.STDOUT,
             close_fds=True,
         )
+        self._write_worker_status("running", natural_exit=None, reason=None)
         atexit.register(self._best_effort_cleanup)
         try:
             self._connect()
@@ -113,6 +116,24 @@ class SpawnIsolatedRLBenchSim:
         raise IsolatedSimulatorError(
             f"simulator worker connection timed out: {last_error}; see {self.worker_log_path}"
         )
+
+    def _write_worker_status(self, state: str, *, natural_exit, reason) -> None:
+        payload = {
+            "schema": "racer_isolated_worker_lifecycle_v1",
+            "state": state,
+            "pid": self.worker.pid,
+            "returncode": self.worker_returncode,
+            "natural_exit": natural_exit,
+            "reason": reason,
+            "log": self.worker_log_path.name,
+        }
+        temporary = self.worker_status_path.with_name(
+            f".{self.worker_status_path.name}.tmp.{os.getpid()}"
+        )
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary, self.worker_status_path)
 
     def _request(self, operation: str, arguments: dict[str, Any] | None = None):
         if self.closed or self.connection is None:
@@ -196,6 +217,18 @@ class SpawnIsolatedRLBenchSim:
             self._worker_log.close()
             self.socket_path.unlink(missing_ok=True)
             atexit.unregister(self._best_effort_cleanup)
+        natural_exit = (
+            exit_error is None and request_error is None and self.worker_returncode == 0
+        )
+        self._write_worker_status(
+            "closed" if natural_exit else "abnormal_exit",
+            natural_exit=natural_exit,
+            reason=(
+                "explicit close and worker status 0"
+                if natural_exit
+                else "close request, timeout, or worker status was not successful"
+            ),
+        )
         if exit_error is not None:
             raise IsolatedSimulatorError(
                 f"simulator worker did not exit naturally; see {self.worker_log_path}"
@@ -231,3 +264,9 @@ class SpawnIsolatedRLBenchSim:
         socket_path = getattr(self, "socket_path", None)
         if socket_path is not None:
             socket_path.unlink(missing_ok=True)
+        if worker is not None:
+            self._write_worker_status(
+                "forced_cleanup",
+                natural_exit=False,
+                reason="best-effort cleanup without an explicit natural close",
+            )

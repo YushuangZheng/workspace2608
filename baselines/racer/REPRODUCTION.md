@@ -242,8 +242,10 @@ identical.
 2. require GPUs 1-4 to be idle for three consecutive checks;
 3. run exactly `place_cups` fixed episode 0 through the official evaluator,
    with zero evaluator retries;
-4. require natural status 0, one valid metrics record, one terminal marker,
-   and four nonempty camera GIFs with no native-renderer failure signature;
+4. require natural status 0, `success: true`, one valid metrics record, one
+   success marker, four Pillow-verified 256x346 camera GIFs with readable,
+   nondegenerate pixels, and four raw float32 `(3, 512, 512)` point clouds that
+   are finite and nondegenerate, with no native-renderer failure signature;
 5. only then run the three tasks x 25 fixed episodes and generate the paper
    comparison.
 
@@ -259,8 +261,9 @@ loop or automatic retry:
 3. both captures and the worker must exit naturally with status 0, all values
    must be finite/supported, and both complete snapshots must match exactly;
 4. only then may one spawn-isolated episode 0 run, with zero evaluator retries;
-5. only a natural evaluator and worker status 0 plus the strict single-episode
-   artifact validator unlocks 3 x 25 under that same isolated backend.
+5. only `success: true`, natural evaluator and worker status 0, and the strict
+   single-episode artifact validator unlock 3 x 25 under that same isolated
+   backend.
 
 Any initialization mismatch, unsupported value, timeout, abnormal exit, or
 episode-gate failure records a terminal isolation state and leaves the
@@ -268,6 +271,42 @@ episode-gate failure records a terminal isolation state and leaves the
 `RLBenchSim` symbol; the official policy, evaluator loop, simulator, RLBench,
 PyRep, and CoppeliaSim sources remain unchanged. The known A-K2 Mesa
 load-order/context workarounds remain permanently excluded.
+
+The EGL and isolation gates set `retry-for-InvalidActionError=0`, so each gate
+has exactly one episode attempt. The subsequent 3 x 25 run sets it to 5. This
+matches the released evaluator's default in `racer/evaluation/rollout.py`; the
+official `scripts/eval_racer.sh` invokes that evaluator without overriding the
+default. Keeping five only for the full evaluation therefore preserves the
+released evaluation protocol rather than weakening the one-shot unlock gate.
+
+Point-cloud evidence is captured by a thin simulator subclass at the return of
+the first `RLBenchSim.reset`, before `ModelRVTAgent` downsamples or copies the
+observation. It writes an ignored `gate_point_clouds.npz` plus JSON containing
+the task/episode, shapes, dtypes, axis spans, and SHA-256 values. The validator
+independently reloads the raw NPZ with pickle disabled and recomputes all
+conditions and hashes. The adapter returns the original observation objects
+unchanged, so this is observation-only instrumentation rather than a policy or
+simulator change.
+
+The bounded execution and provenance contract is:
+
+- freeze the exact 40-character Git HEAD at supervisor startup, record it in
+  `expected_head.txt`/`frozen_contract.tsv`, and require the same clean branch
+  after the dependency wait, before the episode gates, before fallback, and
+  before 3 x 25;
+- cap each direct/isolated initialization capture at 600 seconds and each
+  episode-0 evaluator gate at 3600 seconds, with TERM followed by KILL after a
+  30-second cleanup window;
+- tag every child with its exact run/owner token, then scan `/proc` after each
+  capture and evaluation stage; record the result and reject any remaining
+  CoppeliaSim, simulator-worker, model-service, evaluator, Xvfb, or other owned
+  process;
+- record isolated-worker PID, return code, and whether explicit close produced
+  a natural status 0.
+
+These limits apply to gates, not the official 3 x 25 runtime. The full run
+still fails if its launcher cleanup or supervisor audit finds an owned
+residual process.
 
 Key provenance:
 
