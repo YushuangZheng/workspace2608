@@ -55,8 +55,7 @@ def validate_features(path):
 def validate_detector(path, upstream):
     import torch
 
-    sys.path.insert(0, str(upstream / "UQ_baselines/logpZO"))
-    import net_CFM as Net
+    from logpzo_network import build_logpzo_network
 
     payload = torch.load(str(path), map_location="cpu")
     if payload.get("epoch") != 200:
@@ -68,7 +67,7 @@ def validate_detector(path, upstream):
         raise RuntimeError("released pre-epoch save semantics require 199 stored losses")
     if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in losses):
         raise RuntimeError("logpZO losses contain NaN or Inf")
-    network = Net.get_unet(20)
+    network = build_logpzo_network(upstream, 20)
     result = network.load_state_dict(payload["model"], strict=True)
     if result.missing_keys or result.unexpected_keys:
         raise RuntimeError("logpZO strict load reported incompatible keys")

@@ -98,6 +98,33 @@ class QuantProtocolTest(unittest.TestCase):
         self.assertEqual(payload["stage"], "deadline")
         self.assertNotIn("complete", [event["state"] for event in payload["history"]])
 
+    @unittest.skipUnless(shutil.which("timeout"), "GNU timeout is required")
+    def test_early_exit_137_is_failed_not_deadline(self):
+        deadline_runner = BASELINE / "scripts/deadline_runner.sh"
+        status_script = BASELINE / "scripts/quant_status.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            status_file = root / "status.json"
+            marker = root / "deadline.triggered"
+            proc = subprocess.run(
+                [
+                    "bash", str(deadline_runner),
+                    "--status-script", str(status_script),
+                    "--status-file", str(status_file),
+                    "--deadline-marker", str(marker),
+                    "--duration", "5s",
+                    "--kill-after", "1s",
+                    "--", "bash", "-c", "exit 137",
+                ],
+                check=False,
+                timeout=5,
+            )
+            payload = json.loads(status_file.read_text(encoding="utf-8"))
+        self.assertEqual(proc.returncode, 137)
+        self.assertEqual(payload["state"], "stopped")
+        self.assertEqual(payload["stage"], "failed")
+        self.assertFalse(marker.exists())
+
     def test_python_gate_treats_dead_panes_as_inactive(self):
         prepare = load_script("prepare_official_artifacts.py")
         with mock.patch.object(prepare.subprocess, "run") as run:

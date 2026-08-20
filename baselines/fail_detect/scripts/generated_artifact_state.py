@@ -51,8 +51,7 @@ def inspect_detector(path, upstream):
     try:
         import torch
 
-        sys.path.insert(0, str(upstream / "UQ_baselines/logpZO"))
-        import net_CFM as Net
+        from logpzo_network import build_logpzo_network
 
         payload = torch.load(str(path), map_location="cpu")
         epoch = payload.get("epoch")
@@ -61,7 +60,7 @@ def inspect_detector(path, upstream):
             raise RuntimeError("checkpoint epoch/losses schema is invalid")
         if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in losses):
             raise RuntimeError("checkpoint losses contain NaN or Inf")
-        network = Net.get_unet(20)
+        network = build_logpzo_network(upstream, 20)
         result = network.load_state_dict(payload["model"], strict=True)
         if result.missing_keys or result.unexpected_keys:
             raise RuntimeError("strict model load reported incompatible keys")

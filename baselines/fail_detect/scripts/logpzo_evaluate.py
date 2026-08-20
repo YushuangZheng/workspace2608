@@ -106,11 +106,9 @@ def load_policy(upstream, checkpoint, device, output_dir, episodes, start_seed, 
 def load_logpzo(upstream, checkpoint, device):
     import torch
 
-    logpzo_dir = upstream / "UQ_baselines/logpZO"
-    sys.path.insert(0, str(logpzo_dir))
-    import net_CFM as Net
+    from logpzo_network import build_logpzo_network
 
-    network = Net.get_unet(20).to(device)
+    network = build_logpzo_network(upstream, 20).to(device)
     payload = torch.load(str(checkpoint), map_location=device)
     result = network.load_state_dict(payload["model"], strict=True)
     if result.missing_keys or result.unexpected_keys:

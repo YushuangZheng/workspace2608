@@ -31,7 +31,7 @@ timeout --signal=TERM --kill-after="$kill_after" "$duration" "$@"
 rc=$?
 set -e
 
-if [[ "$rc" -eq 124 || "$rc" -eq 137 || "$rc" -eq 143 || -e "$deadline_marker" ]]; then
+if [[ "$rc" -eq 124 || -e "$deadline_marker" ]]; then
   : >"$deadline_marker"
   python3 "$status_script" "$status_file" update \
     --state stopped --stage deadline --detail "post-gate deadline reached; timeout exit=$rc"

@@ -69,7 +69,10 @@ The fixed stages are:
 3. Validate HDF5 magic, demonstrations, four 84x84 RGB streams, raw action
    dimension 14, released absolute-action dimension 20, and strict model/EMA
    loading.
-4. Run released `save_data.py`, validate `(N,548)` condition and `(N,320)`
+4. Import the real released `UQ_baselines/CFM/net_CFM.py` from the pinned
+   checkout, construct `get_unet(20)`, and strict-load its state into a second
+   instance before any large download. Then run released `save_data.py`,
+   validate `(N,548)` condition and `(N,320)`
    action tensors, train only logpZO with released `EPOCHS = 200`, and
    strict-load the detector. A valid checkpoint below epoch 200 follows the
    official resume path. A corrupt/non-resumable checkpoint or partial feature

@@ -221,6 +221,9 @@ python3 "$scripts/compatibility_repair.py" "$repair_file" check
 
 status running source "pinning official FAIL-Detect source"
 ensure_upstream
+status running module_smoke "importing real CFM.net_CFM and strict-loading logpZO architecture"
+CUDA_VISIBLE_DEVICES="" run_conda python "$scripts/smoke_logpzo_module.py" \
+  --upstream "$upstream" --expected-commit "$source_commit"
 
 status running artifacts "downloading and SHA-locking official external artifacts"
 python3 "$scripts/prepare_official_artifacts.py" \
