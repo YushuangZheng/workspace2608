@@ -1,0 +1,479 @@
+{
+  "schema": "dynamac-rlbench-model-release-manifest-v4",
+  "release": "v4",
+  "source_release": "v3",
+  "plan_sha256": "3d8ffe1af42bde575c6df5b4ac27ee81adc908fd2dec01daa1b40d8eaf743ecb",
+  "semantic_version": "store_bottle_clean_v4",
+  "semantic_fingerprint": "1cd04a4c39794884677fa43e7a88bc86e9b9e7f266ce573d8642d85631cc09cc",
+  "copy_or_training_performed": false,
+  "complete": true,
+  "status": "verified",
+  "entries": [
+    {
+      "model_id": "bimanual_put_bottle_in_fridge",
+      "task": "bimanual_put_bottle_in_fridge",
+      "mode": "retrained_store_bottle_v4",
+      "target": "bimanual_put_bottle_in_fridge",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "left.npz",
+            "bytes": 114524,
+            "sha256": "0f5a1934c23f8b4f6d14950d03dcdc0d896d698ea4e62f81d0a1417cb1f49d35"
+          },
+          {
+            "name": "right.npz",
+            "bytes": 62533,
+            "sha256": "277e0b62c6b370b46486da161022feffd5379194a58cdcc5bf2b378a276a61e8"
+          },
+          {
+            "name": "training.json",
+            "bytes": 55544,
+            "sha256": "46ed3b974abcc635114db12c1ba738edef0a09c00692694e7a9c49cbb82c9525"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": null,
+      "status": "retrained_store_bottle_v4_verified"
+    },
+    {
+      "model_id": "bimanual_handover_item",
+      "task": "bimanual_handover_item",
+      "mode": "inherited_v3_byte_for_byte",
+      "target": "bimanual_handover_item",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "left.npz",
+            "bytes": 97354,
+            "sha256": "6db90d9f8c94fc2e183ae04253fd54d69bbfb39b9576425f15c0f4edbc53e892"
+          },
+          {
+            "name": "right.npz",
+            "bytes": 67897,
+            "sha256": "809a1dd07769bb4c5f7830fbf33011b62473f152061741e5a267d1061ba751bb"
+          },
+          {
+            "name": "training.json",
+            "bytes": 88465,
+            "sha256": "58e1609232d54f801e19ced368d75e62913556262874a7cc3949adfbea7e522c"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": "bimanual_handover_item",
+      "source_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "left.npz",
+            "bytes": 97354,
+            "sha256": "6db90d9f8c94fc2e183ae04253fd54d69bbfb39b9576425f15c0f4edbc53e892"
+          },
+          {
+            "name": "right.npz",
+            "bytes": 67897,
+            "sha256": "809a1dd07769bb4c5f7830fbf33011b62473f152061741e5a267d1061ba751bb"
+          },
+          {
+            "name": "training.json",
+            "bytes": 88465,
+            "sha256": "58e1609232d54f801e19ced368d75e62913556262874a7cc3949adfbea7e522c"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "status": "inherited_v3_byte_for_byte_verified"
+    },
+    {
+      "model_id": "bimanual_lift_tray",
+      "task": "bimanual_lift_tray",
+      "mode": "inherited_v3_byte_for_byte",
+      "target": "bimanual_lift_tray",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "left.npz",
+            "bytes": 40585,
+            "sha256": "44d70d35dd83bbd2407950b2eb95ac50fdc0f80e902622168651a4bf66ce458b"
+          },
+          {
+            "name": "right.npz",
+            "bytes": 32553,
+            "sha256": "a2b4d9eddff92a353af1c257daa15cee3cfb85a25a407bdfdaee8365596f0d6c"
+          },
+          {
+            "name": "training.json",
+            "bytes": 51172,
+            "sha256": "dadfbe5f7fda74fe584be7fb94ac182c007b38bd4867fdbeea07ae64b4f2c129"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": "bimanual_lift_tray",
+      "source_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "left.npz",
+            "bytes": 40585,
+            "sha256": "44d70d35dd83bbd2407950b2eb95ac50fdc0f80e902622168651a4bf66ce458b"
+          },
+          {
+            "name": "right.npz",
+            "bytes": 32553,
+            "sha256": "a2b4d9eddff92a353af1c257daa15cee3cfb85a25a407bdfdaee8365596f0d6c"
+          },
+          {
+            "name": "training.json",
+            "bytes": 51172,
+            "sha256": "dadfbe5f7fda74fe584be7fb94ac182c007b38bd4867fdbeea07ae64b4f2c129"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "status": "inherited_v3_byte_for_byte_verified"
+    },
+    {
+      "model_id": "bimanual_sweep_to_dustpan",
+      "task": "bimanual_sweep_to_dustpan",
+      "mode": "retrained_sweep_dust_v4",
+      "target": "bimanual_sweep_to_dustpan",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "left.npz",
+            "bytes": 53391,
+            "sha256": "a997faff38e2ff042c5fb5eebf18e75fe66d299f33f48ab1b751fb4823d27c94"
+          },
+          {
+            "name": "right.npz",
+            "bytes": 54595,
+            "sha256": "c220fa619e8ae7a652da4762ecef8391261aaabdf0e3eb13f58a50433480c8b0"
+          },
+          {
+            "name": "training.json",
+            "bytes": 71817,
+            "sha256": "5ea03886dc76f5bb25ff79cfc5e4d145918af81a3e44a3ff2d76bab333699760"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": null,
+      "training_data_augmentation": {
+        "schema": "sweep-dust-cartesian-training-augmentation-v1",
+        "manifest_path": "integrations/rlbench/configs/v4/sweep_dust_training_data_augmented.json",
+        "manifest_sha256": "fe4230b1c328ae950eb7a936f9169a43361eda2a38b045c5206572dd04b146d0",
+        "data_root": "integrations/rlbench/data/v4/sweep_dust_augmented_v1",
+        "inputs": [
+          {
+            "episode": 0,
+            "sha256": "c033ce1831b10f3de73b099d5c42cd0e58562998a2c27d707d2bb5393d211e3f"
+          },
+          {
+            "episode": 1,
+            "sha256": "6e191ea1132888b49c2b572b5b390c6642caf42669af9ce24e05bce0882c556d"
+          },
+          {
+            "episode": 2,
+            "sha256": "4d73c468d3b9d0b988f335d752fa7ac71797dc4af12bc46ac86ff6168ee4b5aa"
+          },
+          {
+            "episode": 3,
+            "sha256": "f7435487a909f49cb23681a796b38dc853532681c605ee815db22d260e12a4da"
+          },
+          {
+            "episode": 4,
+            "sha256": "154ccb95c9231bf205f4a433f9532baa0f91f1a3e21bf85a8eba136551d14148"
+          }
+        ],
+        "status_at_fit": "PHYSICAL_TASK_FRAME_STRICT5_TRAINING_INPUT_V2"
+      },
+      "status": "retrained_sweep_dust_v4_verified"
+    },
+    {
+      "model_id": "open_microwave",
+      "task": "open_microwave",
+      "mode": "inherited_v3_byte_for_byte",
+      "target": "open_microwave",
+      "required_artifacts": [
+        "model.npz",
+        "training.json"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "model.npz",
+            "bytes": 39603,
+            "sha256": "4d915b599349c3dfb9e4babc88e549da84dee3232eb90396beb8c28811835d44"
+          },
+          {
+            "name": "training.json",
+            "bytes": 22918,
+            "sha256": "1f9e8d72986fe7e9d937f65ffbf9e6d8b57e18b2d95b7c6714d0cc568314a1cf"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": "open_microwave",
+      "source_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "model.npz",
+            "bytes": 39603,
+            "sha256": "4d915b599349c3dfb9e4babc88e549da84dee3232eb90396beb8c28811835d44"
+          },
+          {
+            "name": "training.json",
+            "bytes": 22918,
+            "sha256": "1f9e8d72986fe7e9d937f65ffbf9e6d8b57e18b2d95b7c6714d0cc568314a1cf"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "status": "inherited_v3_byte_for_byte_verified"
+    },
+    {
+      "model_id": "place_cups",
+      "task": "place_cups",
+      "mode": "inherited_v3_byte_for_byte",
+      "target": "place_cups",
+      "required_artifacts": [
+        "model.npz",
+        "training.json"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "model.npz",
+            "bytes": 60810,
+            "sha256": "d73e41138c087652bbbfab163ff498056e7b5aadd1c072f5a4a33b5497efe456"
+          },
+          {
+            "name": "training.json",
+            "bytes": 32053,
+            "sha256": "0f7098126d9ce34354616a5e0975b6222408adeebc954fd7e8fb77fa18a0e3d4"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": "place_cups",
+      "source_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "model.npz",
+            "bytes": 60810,
+            "sha256": "d73e41138c087652bbbfab163ff498056e7b5aadd1c072f5a4a33b5497efe456"
+          },
+          {
+            "name": "training.json",
+            "bytes": 32053,
+            "sha256": "0f7098126d9ce34354616a5e0975b6222408adeebc954fd7e8fb77fa18a0e3d4"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "status": "inherited_v3_byte_for_byte_verified"
+    },
+    {
+      "model_id": "stack_wine",
+      "task": "stack_wine",
+      "mode": "inherited_v3_byte_for_byte",
+      "target": "stack_wine",
+      "required_artifacts": [
+        "model.npz",
+        "training.json"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "model.npz",
+            "bytes": 48121,
+            "sha256": "6779ac3fc2f63fde6bbe9bc4e137eca3f9600a006e1e4c173a6dd7501bf6beac"
+          },
+          {
+            "name": "training.json",
+            "bytes": 27454,
+            "sha256": "aaba5e2393506f0a17f8faef7998ed0cb0f254be6061d91fc1a7676b32e20360"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": "stack_wine",
+      "source_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "model.npz",
+            "bytes": 48121,
+            "sha256": "6779ac3fc2f63fde6bbe9bc4e137eca3f9600a006e1e4c173a6dd7501bf6beac"
+          },
+          {
+            "name": "training.json",
+            "bytes": 27454,
+            "sha256": "aaba5e2393506f0a17f8faef7998ed0cb0f254be6061d91fc1a7676b32e20360"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "status": "inherited_v3_byte_for_byte_verified"
+    },
+    {
+      "model_id": "wipe_desk",
+      "task": "wipe_desk",
+      "mode": "inherited_v3_byte_for_byte",
+      "target": "wipe_desk",
+      "required_artifacts": [
+        "model.npz",
+        "training.json"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "model.npz",
+            "bytes": 60017,
+            "sha256": "5339d5958d651ee0e3fb678c2fe9f4ef9e172a6c50152385fef20a25deedad03"
+          },
+          {
+            "name": "training.json",
+            "bytes": 27983,
+            "sha256": "9c498ad74aca331d2377da3ed7ff76b03f41cc59ba22551113c230b7320df621"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": "wipe_desk",
+      "source_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "model.npz",
+            "bytes": 60017,
+            "sha256": "5339d5958d651ee0e3fb678c2fe9f4ef9e172a6c50152385fef20a25deedad03"
+          },
+          {
+            "name": "training.json",
+            "bytes": 27983,
+            "sha256": "9c498ad74aca331d2377da3ed7ff76b03f41cc59ba22551113c230b7320df621"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "status": "inherited_v3_byte_for_byte_verified"
+    },
+    {
+      "model_id": "table_iii/bimanual_handover_item",
+      "task": "bimanual_handover_item_dynamic",
+      "mode": "inherited_v3_byte_for_byte",
+      "target": "table_iii/bimanual_handover_item",
+      "required_artifacts": [
+        "left.npz",
+        "right.npz",
+        "training.json",
+        "segmentation.png"
+      ],
+      "target_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "left.npz",
+            "bytes": 107475,
+            "sha256": "bd6cc9a301d76de6f1a55e17589a69dde432ffc8bec101265c7681a2183a6cce"
+          },
+          {
+            "name": "right.npz",
+            "bytes": 64951,
+            "sha256": "82591a08d26d8acc3b1b9cd930fb0a945208c976ed60a1ec238dfd64691daa24"
+          },
+          {
+            "name": "training.json",
+            "bytes": 137835,
+            "sha256": "59af2513bfb459387b073fa26a95888dd892a6745441ae21b8166e5ffd27a335"
+          },
+          {
+            "name": "segmentation.png",
+            "bytes": 275346,
+            "sha256": "3f0158424ff114d062be70749c8c4c035dddd49c331e1b45e06a961c8881d3b5"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "source": "table_iii/bimanual_handover_item",
+      "source_inventory": {
+        "directory_present": true,
+        "artifacts": [
+          {
+            "name": "left.npz",
+            "bytes": 107475,
+            "sha256": "bd6cc9a301d76de6f1a55e17589a69dde432ffc8bec101265c7681a2183a6cce"
+          },
+          {
+            "name": "right.npz",
+            "bytes": 64951,
+            "sha256": "82591a08d26d8acc3b1b9cd930fb0a945208c976ed60a1ec238dfd64691daa24"
+          },
+          {
+            "name": "training.json",
+            "bytes": 137835,
+            "sha256": "59af2513bfb459387b073fa26a95888dd892a6745441ae21b8166e5ffd27a335"
+          },
+          {
+            "name": "segmentation.png",
+            "bytes": 275346,
+            "sha256": "3f0158424ff114d062be70749c8c4c035dddd49c331e1b45e06a961c8881d3b5"
+          }
+        ],
+        "missing": [],
+        "complete": true
+      },
+      "status": "inherited_v3_byte_for_byte_verified"
+    }
+  ],
+  "fingerprint": "a659e1d83e30eec3511eddbdf5eb64d2640e172be34c1e604c15b0e840feb558"
+}

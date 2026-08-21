@@ -38,7 +38,7 @@
     "training_manifest_path": "integrations/rlbench/models/v4/bimanual_put_bottle_in_fridge/training.json",
     "training_manifest_sha256": "46ed3b974abcc635114db12c1ba738edef0a09c00692694e7a9c49cbb82c9525",
     "training_identity_fingerprint": "45c6aaad0ab9df4610a8332f092d44b83df7ab5a6a40d0683380eacf286de4dc",
-    "collection_manifest_path": "integrations/rlbench/data/v4/store_bottle/collection_manifest.json",
+    "collection_manifest_path": "integrations/rlbench/data/training/main/bimanual_put_bottle_in_fridge/collection_manifest.json",
     "collection_manifest_sha256": "8b205d2190494e66a7f1083bb00fcc3572619f0e88cdf3f5748726344754668c",
     "checkpoint_skill0_duration": {
       "left": 115,

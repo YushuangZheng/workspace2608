@@ -81,10 +81,13 @@ _STORE_BOTTLE_EXPORTS = (
 )
 
 _EXPORT_MODULES = {
-    **{name: ".demo_adapter" for name in _DEMO_ADAPTER_EXPORTS},
-    **{name: ".tapas_segmentation" for name in _SEGMENTATION_EXPORTS},
-    **{name: ".task_specs" for name in _TASK_SPEC_EXPORTS},
-    **{name: ".store_bottle_semantics" for name in _STORE_BOTTLE_EXPORTS},
+    **{name: ".data.demo_adapter" for name in _DEMO_ADAPTER_EXPORTS},
+    **{name: ".data.tapas_segmentation" for name in _SEGMENTATION_EXPORTS},
+    **{name: ".core.task_specs" for name in _TASK_SPEC_EXPORTS},
+    **{
+        name: ".protocols.store_bottle_semantics"
+        for name in _STORE_BOTTLE_EXPORTS
+    },
 }
 
 __all__ = sorted(_EXPORT_MODULES)

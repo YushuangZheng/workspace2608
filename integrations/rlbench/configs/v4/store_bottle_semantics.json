@@ -3,7 +3,7 @@
   "semantic_version": "store_bottle_clean_v4",
   "release": {
     "name": "v4",
-    "training_data_root": "integrations/rlbench/data/v4/store_bottle",
+    "training_data_root": "integrations/rlbench/data/training/main/bimanual_put_bottle_in_fridge",
     "models_root": "integrations/rlbench/models/v4",
     "evaluation_set_id": "rlbench_eval_v2",
     "other_task_models": "inherit_v3_byte_for_byte_and_record_in_release_manifest"

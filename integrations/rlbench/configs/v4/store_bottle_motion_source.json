@@ -18,18 +18,14 @@
     }
   },
   "source_selection_max_attempts": 20,
-  "goal_sampling_max_attempts": 100,
+  "goal_sampling_max_attempts": 1000,
   "episode_mode_schedule": {
-    "formula": "episode_index_mod_3",
-    "mapping": {
-      "0": "bottle_only",
-      "1": "fridge_only",
-      "2": "both"
-    },
+    "formula": "fixed_bottle_only",
+    "mode": "bottle_only",
     "formal_n200_counts": {
-      "bottle_only": 67,
-      "fridge_only": 67,
-      "both": 66
+      "bottle_only": 200,
+      "fridge_only": 0,
+      "both": 0
     }
   },
   "entities": {

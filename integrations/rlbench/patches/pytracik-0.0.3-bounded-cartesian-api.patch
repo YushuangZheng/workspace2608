@@ -1,0 +1,125 @@
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -6,8 +6,8 @@
+ name = "pytracik"
+ description = "TracIK Python Bindings"
+ readme = "README.md"
+-requires-python = ">=3.9"
+-license = "MIT"
++requires-python = ">=3.8"
++license = { text = "MIT" }
+ authors = [
+     { name = "Hao Chen", email = "chen960216@gmail.com" },
+ ]
+--- a/setup.py
++++ b/setup.py
+@@ -40,7 +40,7 @@
+ 
+ version_file = os.path.join(_here, "trac_ik", "version.py")
+ with open(version_file, "r") as _f:
+-    version = ast.literal_eval(_f.read().strip().split("=")[-1])
++    version = ast.literal_eval(_f.read().strip().split("=")[-1].strip())
+ 
+ module_name = "pytracik"
+ src_dir = os.path.join(_here, "src")
+--- a/src/pytracik.cpp
++++ b/src/pytracik.cpp
+@@ -48,6 +48,50 @@
+ 	return result_array;
+ }
+ 
++py::array_t<double> CartToJntWithBounds(TRAC_IK::TRAC_IK& t,
++	py::array_t<double> init_q,
++	double x,
++	double y,
++	double z,
++	double qx,
++	double qy,
++	double qz,
++	double qw,
++	double bx,
++	double by,
++	double bz,
++	double brx,
++	double bry,
++	double brz) {
++
++	py::buffer_info init_q_buf = init_q.request();
++	double* init_q_buf_ptr = (double*)init_q_buf.ptr;
++	py::array_t<double> result_array = py::array_t<double>(init_q_buf.size + 1);
++	py::buffer_info result_array_buf = result_array.request();
++	double* result_array_buf_ptr = (double*)result_array_buf.ptr;
++
++	KDL::JntArray q(init_q_buf.size);
++	KDL::JntArray result(init_q_buf.size);
++	for (int i = 0; i < init_q_buf.size; i++)
++		q(i) = init_q_buf_ptr[i];
++
++	const KDL::Twist bounds(
++		KDL::Vector(bx, by, bz),
++		KDL::Vector(brx, bry, brz));
++	int r = t.CartToJnt(
++		q,
++		KDL::Frame(KDL::Rotation::Quaternion(qx, qy, qz, qw), KDL::Vector(x, y, z)),
++		result,
++		bounds);
++
++	result_array_buf_ptr[0] = (float)r;
++	if (r >= 0) {
++		for (int i = 0; i < init_q_buf.size; i++)
++			result_array_buf_ptr[i + 1] = result(i);
++	}
++	return result_array;
++}
++
+ py::array_t<double> JntToCart(TRAC_IK::TRAC_IK& t, py::array_t<double> cfg) {
+     // change input joint configuration to KDL::JntArray
+     py::buffer_info cfg_buf_info = cfg.request();
+@@ -139,6 +183,7 @@
+ 		.def("cart_to_jnt", &TRAC_IK::TRAC_IK::CartToJnt);
+ 	m.def("to_frame", &toKdlFrame)*/
+     m.def("ik", &CartToJnt)
++    .def("ik_with_bounds", &CartToJntWithBounds)
+     .def("get_num_joints", &getNrOfJointsInChain).
+     def("get_joint_lower_bounds", &getLowerBoundLimits).
+     def("get_joint_upper_bounds", &getUpperBoundLimits).
+--- a/trac_ik/trac_ik.py
++++ b/trac_ik/trac_ik.py
+@@ -183,6 +183,37 @@
+         else:
+             return None
+ 
++    def ik_with_bounds(self,
++                       tgt_pos: np.ndarray,
++                       tgt_rot: np.ndarray,
++                       seed_jnt_values: np.ndarray,
++                       bounds: np.ndarray) -> None or np.ndarray:
++        """Solve IK while allowing a Cartesian tolerance box.
++
++        ``bounds`` is ordered ``[x, y, z, rx, ry, rz]``. Translation values
++        are metres and rotation values are radians, matching KDL::Twist.
++        """
++        bounds = np.asarray(bounds, dtype=np.float64)
++        if bounds.shape != (6,):
++            raise ValueError(
++                f"bounds must have shape (6,), not {bounds.shape}"
++            )
++        if np.any(bounds < 0.0) or not np.all(np.isfinite(bounds)):
++            raise ValueError("bounds must contain finite, non-negative values")
++
++        qw, qx, qy, qz = quaternion_from_matrix(tgt_rot)
++        r = pytracik.ik_with_bounds(
++            self._ik_solver,
++            seed_jnt_values,
++            tgt_pos[0], tgt_pos[1], tgt_pos[2],
++            qx, qy, qz, qw,
++            bounds[0], bounds[1], bounds[2],
++            bounds[3], bounds[4], bounds[5],
++        )
++        if r[0] >= 0:
++            return r[1:]
++        return None
++
+     def fk(self, q: np.ndarray) -> (np.ndarray, np.ndarray):
+         """
+         Forward kinematics.

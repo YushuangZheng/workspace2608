@@ -1,11 +1,38 @@
-# Python caches and build products
-**/__pycache__/
-**/*.py[cod]
-**/*.egg-info/
+# Python caches, reports, and build products
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
 .pytest_cache/
+.mypy_cache/
+.pyright/
 .ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 build/
 dist/
+
+# Local Python environments and secrets
+.venv/
+venv/
+.direnv/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor and operating-system state
+.idea/
+.vscode/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
 
 # Pinned third-party research worktrees are fetched separately and must not be
 # vendored into this repository (see integrations/rlbench/THIRD_PARTY.md).
@@ -14,26 +41,71 @@ dist/
 /PyRep/
 /RoboTwin/
 /RoboDojo/
+/tapas_env/
+/tapas_venv/
 /CoppeliaSim_Edu_V4_1_0_Ubuntu20_04/
+/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04.tar
+/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04.tar.*
 
-# Reference papers and demonstration bundles stay local.
+# Reference papers and unrelated top-level data stay local.
 /DynaMAC.pdf
 /MiDiGaP.pdf
 /data/
 
-# Local experiment outputs
-outputs/
-integrations/rlbench/models/
-integrations/rlbench/results/
+# Local experiment outputs and release bundles
+/outputs/
+/artifacts/
+/release-artifacts/
+wandb/
+lightning_logs/
 *.log
+*.pid
 *.tmp
+*.temp
 
-# RLBench demonstrations are large, simulator-generated artifacts.  Keep only
-# the protocol note in Git; collection manifests belong with the local data.
-integrations/rlbench/data/**
-!integrations/rlbench/data/README.md
+# RLBench data: commit the complete sealed evaluation set and only the five
+# authenticated training manifests. Raw demonstration pickles are distributed
+# with the baseline release rather than through normal Git history.
+/integrations/rlbench/data/**
+!/integrations/rlbench/data/README.md
+!/integrations/rlbench/data/evaluation/
+!/integrations/rlbench/data/evaluation/manifest.json
+!/integrations/rlbench/data/evaluation/spec.json
+!/integrations/rlbench/data/evaluation/environment/
+!/integrations/rlbench/data/evaluation/environment/*.json
+!/integrations/rlbench/data/evaluation/coordination/
+!/integrations/rlbench/data/evaluation/coordination/*.json
+!/integrations/rlbench/data/training/
+!/integrations/rlbench/data/training/manifest.json
+!/integrations/rlbench/data/training/main/
+!/integrations/rlbench/data/training/main/collection_manifest.json
+!/integrations/rlbench/data/training/main/bimanual_put_bottle_in_fridge/
+!/integrations/rlbench/data/training/main/bimanual_put_bottle_in_fridge/collection_manifest.json
+!/integrations/rlbench/data/training/main/bimanual_sweep_to_dustpan/
+!/integrations/rlbench/data/training/main/bimanual_sweep_to_dustpan/augmentation_manifest.json
+!/integrations/rlbench/data/training/coordination/
+!/integrations/rlbench/data/training/coordination/collection_manifest.json
+
+# Model weights and per-task training metadata are release artifacts. Keep the
+# compact V4 inventory in Git so a checkout can authenticate downloaded models.
+/integrations/rlbench/models/**
+!/integrations/rlbench/models/v4/
+!/integrations/rlbench/models/v4/release_manifest.json
+
+# Raw formal results, diagnostics, replay manifests, and videos are generated
+# artifacts (some JSON files exceed GitHub's normal per-file limit). Publish
+# them as release assets; keep only the final human-readable baseline report.
+/integrations/rlbench/results/**
+!/integrations/rlbench/results/v4/
+!/integrations/rlbench/results/v4/reports/
+!/integrations/rlbench/results/v4/reports/full_22_cell.md
+
+# Only pinned notices and lock files belong under third_party. Source trees,
+# archives, conda prefixes, compiled extensions, and overlays remain local.
+/integrations/rlbench/third_party/**
+!/integrations/rlbench/third_party/pytracik/
+!/integrations/rlbench/third_party/pytracik/LICENSE
+!/integrations/rlbench/third_party/pytracik/conda-linux-64-cp38.lock
 
 # Local tooling
-.venv/
-.DS_Store
 ESSAY2608_FILE_TREE_*.json

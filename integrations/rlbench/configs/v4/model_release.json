@@ -44,8 +44,8 @@
     {
       "model_id": "bimanual_sweep_to_dustpan",
       "task": "bimanual_sweep_to_dustpan",
-      "mode": "inherited_v3_byte_for_byte",
-      "source": "bimanual_sweep_to_dustpan",
+      "mode": "retrained_sweep_dust_v4",
+      "source": null,
       "target": "bimanual_sweep_to_dustpan",
       "required_artifacts": [
         "left.npz",

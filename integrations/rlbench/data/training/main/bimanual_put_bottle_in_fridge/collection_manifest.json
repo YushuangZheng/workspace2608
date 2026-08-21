@@ -1,0 +1,164 @@
+{
+  "schema": "rlbench-store-bottle-v4-static-demonstrations-v1",
+  "protocol_id": "store_bottle_static_g5_seed4104000000_v4",
+  "semantic_version": "store_bottle_clean_v4",
+  "semantic_fingerprint": "1cd04a4c39794884677fa43e7a88bc86e9b9e7f266ce573d8642d85631cc09cc",
+  "policy_spec": {
+    "schema": "rlbench-store-bottle-policy-spec-v4",
+    "semantic_schema": "rlbench-store-bottle-semantic-scene-v4",
+    "semantic_version": "store_bottle_clean_v4",
+    "semantic_fingerprint": "1cd04a4c39794884677fa43e7a88bc86e9b9e7f266ce573d8642d85631cc09cc",
+    "task": "bimanual_put_bottle_in_fridge",
+    "paper_task_name": "StoreBottle",
+    "module": "integrations.rlbench.rlbench_dynamac.store_bottle_live_v4",
+    "class_name": "BimanualPutBottleInFridgeSemanticV4",
+    "bimanual": true,
+    "frame_names": [
+      "bottle",
+      "fridge"
+    ],
+    "frame_objects": [
+      {
+        "frame": "bottle",
+        "scene_object": "bottle"
+      },
+      {
+        "frame": "fridge",
+        "scene_object": "fridge_base"
+      }
+    ],
+    "pose_chunks": [
+      {
+        "name": "bottle",
+        "role": "operated_object",
+        "index": 0,
+        "source_slice": [
+          0,
+          7
+        ]
+      },
+      {
+        "name": "fridge",
+        "role": "physical_environment_reference",
+        "index": 1,
+        "source_slice": [
+          7,
+          14
+        ]
+      }
+    ],
+    "expected_low_dim_size": 14,
+    "source_expression": "BimanualPutBottleInFridgeSemanticV4.get_low_dim_state: [bottle, fridge_base as fridge]",
+    "source_status": "STORE_BOTTLE_SEMANTIC_V4_LIVE_TASK_EXACT",
+    "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
+    "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+    "segmentation_coordination": "independent",
+    "segmentation_coordination_source_status": "AUTHOR_EMAIL_EXPLICIT_STOREBOTTLE_INDEPENDENT_20260814",
+    "segmentation_debug_plots_required": false
+  },
+  "scenario": "static",
+  "environment_intervention": "none",
+  "demonstrations": 5,
+  "base_seed": 4104000000,
+  "variation": 0,
+  "success_authority": "RLBench Scene.get_demo raises DemoError unless task.success is true",
+  "evaluation_artifacts_included": false,
+  "episodes": [
+    {
+      "episode": 0,
+      "seed": 4104000000,
+      "variation": 0,
+      "observations": 246,
+      "success_verified": true,
+      "files": {
+        "low_dim_obs": {
+          "path": "all_variations/episodes/episode0/low_dim_obs.pkl",
+          "bytes": 144649,
+          "sha256": "28d2c3098d78683c4227df3f579ac49ecfb0849f77bb9705146b76219bcb8e9f"
+        },
+        "variation_number": {
+          "path": "all_variations/episodes/episode0/variation_number.pkl",
+          "bytes": 5,
+          "sha256": "641af9bbbd4b784e0009f34e46e39c48e44fc6fde2554d0ee8ffc92b8067a2ec"
+        }
+      }
+    },
+    {
+      "episode": 1,
+      "seed": 4104000001,
+      "variation": 0,
+      "observations": 312,
+      "success_verified": true,
+      "files": {
+        "low_dim_obs": {
+          "path": "all_variations/episodes/episode1/low_dim_obs.pkl",
+          "bytes": 182006,
+          "sha256": "4773414debde4e6688aa3b5c76f86d4ca1bd7c9ef140dc6fcbe7acf3b7c5f685"
+        },
+        "variation_number": {
+          "path": "all_variations/episodes/episode1/variation_number.pkl",
+          "bytes": 5,
+          "sha256": "641af9bbbd4b784e0009f34e46e39c48e44fc6fde2554d0ee8ffc92b8067a2ec"
+        }
+      }
+    },
+    {
+      "episode": 2,
+      "seed": 4104000002,
+      "variation": 0,
+      "observations": 264,
+      "success_verified": true,
+      "files": {
+        "low_dim_obs": {
+          "path": "all_variations/episodes/episode2/low_dim_obs.pkl",
+          "bytes": 155485,
+          "sha256": "2e2a9faf448377f90ad27f49b55523a980876478b2a3a81a7e7069d4955a8b96"
+        },
+        "variation_number": {
+          "path": "all_variations/episodes/episode2/variation_number.pkl",
+          "bytes": 5,
+          "sha256": "641af9bbbd4b784e0009f34e46e39c48e44fc6fde2554d0ee8ffc92b8067a2ec"
+        }
+      }
+    },
+    {
+      "episode": 3,
+      "seed": 4104000003,
+      "variation": 0,
+      "observations": 278,
+      "success_verified": true,
+      "files": {
+        "low_dim_obs": {
+          "path": "all_variations/episodes/episode3/low_dim_obs.pkl",
+          "bytes": 162273,
+          "sha256": "4d8764e9f11dfaed714959a8b5a63d322994ccbcc6bcc99b6fdf63ce5390f843"
+        },
+        "variation_number": {
+          "path": "all_variations/episodes/episode3/variation_number.pkl",
+          "bytes": 5,
+          "sha256": "641af9bbbd4b784e0009f34e46e39c48e44fc6fde2554d0ee8ffc92b8067a2ec"
+        }
+      }
+    },
+    {
+      "episode": 4,
+      "seed": 4104000004,
+      "variation": 0,
+      "observations": 280,
+      "success_verified": true,
+      "files": {
+        "low_dim_obs": {
+          "path": "all_variations/episodes/episode4/low_dim_obs.pkl",
+          "bytes": 169303,
+          "sha256": "88bb176ea27554b04e5292f636552b6259f8492976292a6dd3ea48e76a7576f4"
+        },
+        "variation_number": {
+          "path": "all_variations/episodes/episode4/variation_number.pkl",
+          "bytes": 5,
+          "sha256": "641af9bbbd4b784e0009f34e46e39c48e44fc6fde2554d0ee8ffc92b8067a2ec"
+        }
+      }
+    }
+  ],
+  "fingerprint": "ed05b3df094f1aac4c2658bd236bc0fe457437e45c8668ebee3f67119044b4ef"
+}

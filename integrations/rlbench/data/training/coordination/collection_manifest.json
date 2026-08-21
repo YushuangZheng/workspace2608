@@ -1,0 +1,49 @@
+{
+  "schema": "dynamac-table-iii-coordination-demos-v1",
+  "task": "bimanual_handover_item_dynamic",
+  "task_module": "rlbench.bimanual_tasks.bimanual_handover_item_dynamic",
+  "task_class": "BimanualHandoverItemDynamic",
+  "policy_task_alias": "bimanual_handover_item",
+  "demonstrations": 5,
+  "base_seed": 0,
+  "paper_cohort": false,
+  "paper_comparable": false,
+  "claim_boundary": "Live demonstrations from the public RLBench task; the paper's demonstration/seed manifest is unpublished.",
+  "episodes": [
+    {
+      "episode": 0,
+      "seed": 0,
+      "variation": 0,
+      "observations": 259,
+      "path": "bimanual_handover_item/all_variations/episodes/episode0/low_dim_obs.pkl"
+    },
+    {
+      "episode": 1,
+      "seed": 1,
+      "variation": 1,
+      "observations": 265,
+      "path": "bimanual_handover_item/all_variations/episodes/episode1/low_dim_obs.pkl"
+    },
+    {
+      "episode": 2,
+      "seed": 2,
+      "variation": 2,
+      "observations": 236,
+      "path": "bimanual_handover_item/all_variations/episodes/episode2/low_dim_obs.pkl"
+    },
+    {
+      "episode": 3,
+      "seed": 3,
+      "variation": 3,
+      "observations": 276,
+      "path": "bimanual_handover_item/all_variations/episodes/episode3/low_dim_obs.pkl"
+    },
+    {
+      "episode": 4,
+      "seed": 4,
+      "variation": 4,
+      "observations": 284,
+      "path": "bimanual_handover_item/all_variations/episodes/episode4/low_dim_obs.pkl"
+    }
+  ]
+}

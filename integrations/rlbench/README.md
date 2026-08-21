@@ -1,244 +1,225 @@
 # DynaMAC on RLBench
 
-This integration contains the maintained local reproduction for:
+This directory contains the current V4 RLBench reproduction. The formal release
+evaluates 22 cells over 200 held-out episodes each. Static results are local
+reproductions; dynamic-environment and arm-coordination results remain local
+diagnostics because the paper does not publish the exact DynaBench protocol.
 
-- Table I: StackWine, PlaceCups, OpenMicrowave, and WipeDesk;
-- Table II: StoreBottle, HandOver, SweepDust, and LiftTray;
-- Table III: local environment-motion and arm-coordination diagnostics.
+The normative execution and identity contract is [V4_PROTOCOL.md](V4_PROTOCOL.md).
+Pinned external revisions and licenses are in [THIRD_PARTY.md](THIRD_PARTY.md).
 
-Static cells use independent five-demonstration cohorts. Dynamic cells are explicitly non-comparable diagnostics because the paper does not publish the exact DynaBench movement and perturbation protocol.
+## Current artifact layout
 
-## Pinned dependencies
+| Artifact | Location | Contents |
+|---|---|---|
+| Training data | `data/training/` | 45 demonstrations in nine five-demo cohorts, plus the current SHA-256 manifest |
+| Evaluation data | `data/evaluation/` | sealed `rlbench_eval_v2` spec, manifest, eight environment batches, and one coordination initialization |
+| Models | `models/v4/` | eight main policies, the separate coordination HandOver policy, and `release_manifest.json` |
+| Formal results | `results/v4/` | the current 22-cell JSON results and reports |
+| Replay videos | `results/v4/replay_video/` | post-evaluation, outcome-stratified front/overhead replays |
+| Consolidated report | `results/v4/reports/full_22_cell.md` | validated status and metrics for all 22 cells |
 
-| Project | Revision |
+Training and evaluation data are disjoint. Evaluation artifacts contain no
+policy outcomes, reports, or videos. Result and replay files never modify the
+sealed evaluation set.
+
+The integration code under `rlbench_dynamac/` is grouped by responsibility:
+
+| Package | Responsibility |
 |---|---|
-| `vonHartz/RLBench` | `tapas@a51b4e609dc5c3e1a8c06046bd87a9da24723da4` |
-| `robot-learning-freiburg/TAPAS` | `52e35214b9baa7b190b87196c36b9e98f4006149` |
-| `vonHartz/PyRep` | `b8bd1d7a3182adcd570d001649c0849047ebf197` |
-| CoppeliaSim Edu | 4.1 |
+| `core/` | shared runtime, controller, IK, task schemas, and atomic records |
+| `data/` | demonstration adapters, collection, training, policy serving, and model release |
+| `protocols/` | inherited and task-scoped intervention/semantic contracts |
+| `eval/` | evaluation-set loading, evaluators, and the formal launcher |
+| `report/` | the 22-cell matrix, reports, video selection, and post-evaluation replay |
 
-See [PINNED_SOURCES.json](PINNED_SOURCES.json), [THIRD_PARTY.md](THIRD_PARTY.md), and [patches/](patches/) for exact provenance.
+`store_bottle_live_v4.py` intentionally remains at the package root because
+that exact import path is already part of the authenticated StoreBottle task
+identity. It is not an unclassified leftover.
+
+The JSON files in `configs/` are executable protocol inputs, not generated
+results. `tasks.json` defines low-dimensional task frames,
+`tapas_segmentation.json` defines demonstration segmentation, and
+`dynamac_rlbench_v3.json` is the policy configuration authenticated by the
+current training manifest and checkpoints. The filename retains `v3` because
+most V4 checkpoints inherit that exact fit identity. `v3_interventions.json`
+and `v3_motion_sources.json` are likewise the frozen baseline still consumed
+by current Table-I, HandOver, and SweepDust cells; task-scoped files under
+`configs/v4/` override that baseline for StoreBottle, LiftTray, and
+Coordination.
 
 ## Runtime setup
 
-Policy fitting and serving use Python 3.10. RLBench, PyRep, and CoppeliaSim use Python 3.8.
+Policy fitting and serving use Python 3.10. RLBench, PyRep, CoppeliaSim, and
+formal rollout use Python 3.8.
 
 ```bash
-export DYNAMAC_POLICY_PYTHON=/path/to/policy-python3.10
+export DYNAMAC_POLICY_PYTHON=/path/to/python3.10
+export DYNAMAC_SIM_PYTHON=/path/to/python3.8
 export COPPELIASIM_ROOT=/path/to/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04
 export LD_LIBRARY_PATH="$COPPELIASIM_ROOT:${LD_LIBRARY_PATH:-}"
 export QT_QPA_PLATFORM_PLUGIN_PATH="$COPPELIASIM_ROOT"
 export PYTHONPATH=/path/to/RLBench:/path/to/essay2608
 ```
 
-Install the two environments from [requirements/](requirements/). Demonstrations use the standard layout:
+Install the two environments from [requirements/](requirements/). Build the
+pinned bounded TRAC-IK dependency once with:
+
+```bash
+bash integrations/rlbench/build_pytracik_bounded.sh
+```
+
+Formal preflight rejects an unpinned, unbounded, wrong-ABI, or ad-hoc build.
+
+## Training data and model release
+
+The normal training root contains all eight policy tasks:
 
 ```text
-<data-root>/<task>/all_variations/episodes/episode0/low_dim_obs.pkl
+data/training/main/<task>/all_variations/episodes/episode{0..4}/
 ```
 
-## Configuration
+The separate dynamic HandOver cohort is stored at:
 
-- [dynamac_table_ii.json](configs/dynamac_table_ii.json): strict paper interpretation; exposes empty Eq. (6) selections in the local cohort.
-- [dynamac_rlbench_v1.json](configs/dynamac_rlbench_v1.json): immutable copy of the executable `v1` model configuration.
-- [dynamac_rlbench_v2.json](configs/dynamac_rlbench_v2.json): immutable `v2` identity; Equation (6) uses the Equation (5)-weighted 3D position subspace uniformly for every task and arm, with position/rotation weights `1/0`, while Equation (5) is promoted by skill majority.
-- [dynamac_rlbench_v3.json](configs/dynamac_rlbench_v3.json): current default; it retains the V2 Equation (6) subspace and uses a strict skill-majority gate to decide whether the raw Equation (5) mask remains active per time step.
-- [dynamac_rlbench_local.json](configs/dynamac_rlbench_local.json): compatibility alias for the historical V2 config, not a V3 identity source.
-- [tapas_segmentation.json](configs/tapas_segmentation.json): segmentation profiles.
-- [tasks.json](configs/tasks.json): task frames and bimanual coordination.
-- [v3_interventions.json](configs/v3_interventions.json): preregistered task/skill trigger ticks and protocol constants.
-- [v3_motion_sources.json](configs/v3_motion_sources.json): spatial roots and deterministic offline source/goal generation budgets.
-- [evaluation_set_spec.json](configs/v4/evaluation_set_spec.json): V4 input-only
-  specification for `rlbench_eval_v2`. Unchanged tasks remain authenticated,
-  zero-copy references to `rlbench_fixed_v1`; StoreBottle and LiftTray require
-  newly generated task-scoped plan-batch envelopes before sealing.
-- [V3_PROTOCOL.md](V3_PROTOCOL.md): frozen V3 mechanism, trigger evidence, staging, clock, settling, and accounting contract.
-- [V4_PROTOCOL.md](V4_PROTOCOL.md): V4 release identity, six-cell first-run
-  scope, intervention changes, formal video retention, and diagnostic boundary.
-- [V4_STORE_BOTTLE.md](V4_STORE_BOTTLE.md): StoreBottle-only V4 semantic, collection, training, serving, and model-release boundary.
-- [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md): implementation boundary.
-- [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md): details still required for an exact author-side match.
+```text
+data/training/coordination/bimanual_handover_item/all_variations/episodes/episode{0..4}/
+```
 
-## Code boundary
+`data/training/manifest.json` binds all 45 demonstrations and 125 episode files.
+Training consumes `low_dim_obs.pkl`; variation files and the collection
+manifests remain as provenance.
 
-The numerical skill-segmentation implementation is shared core code in
-[`source/policy/tapas_segmentation.py`](../../source/policy/tapas_segmentation.py).
-It operates only on normalized NumPy trajectories and contains the velocity,
-gripper-change, distance, candidate-merging, alignment, and independent/shared-union
-algorithms. This integration keeps the RLBench protocol in
-[`rlbench_dynamac/tapas_segmentation.py`](rlbench_dynamac/tapas_segmentation.py): the
-default config path, current-observation gripper timing, signed gripper encoding, debug
-plots, and compatibility exports. Task-specific profile values and arm-coordination
-choices remain in `configs/` and are applied by `demo_adapter.py`.
-The core result object retains the historical v1 claim text as inert provenance so
-existing training manifests remain exactly verifiable; it does not select any
-RLBench task or protocol.
+The current V4 release retrains two policies:
 
-## Artifacts
+- StoreBottle uses five successful static demonstrations with seeds
+  `4104000000..4104000004`. Its online and training frames are `bottle` and the
+  physical `fridge_base` pose exposed as `fridge`.
+- SweepDust uses the strict five-demo task-frame cohort in
+  `data/training/main/bimanual_sweep_to_dustpan`; its augmentation manifest and
+  five input hashes are stored beside the episodes.
 
-- Demonstrations: `data/` (locally, 45 low-dimensional episodes; no unused image streams).
-- Historical authenticated checkpoints: `models/v1/`.
-- Historical audited 200-episode outputs: `results/v1/`.
-- Immutable second-release checkpoints and outputs: `models/v2/` and `results/v2/`.
-- Current checkpoints and outputs: `models/v3/` and `results/v3/`.
-- Tracked, outcome-free fixed evaluation inputs: `evaluation_sets/rlbench_fixed_v1/`.
-- V4 evaluation inputs (after generation): `evaluation_sets/rlbench_eval_v2/`.
-  `NOT_RUN` and other result state are deliberately excluded from this input
-  schema and belong only in V4 result reports.
-- Failure replays: `results/failure_videos/v1/`.
-- Generated V3 comparison: `results/v3/paper_comparison.md`, with CSV and JSON beside it.
-
-Demonstrations, models, result JSON, and videos are intentionally excluded from
-Git. They contain generated or upstream-derived data and should be transferred
-or published separately only after checking the applicable data and asset
-licenses. The sealed fixed evaluation inputs are tracked because they contain
-no outcomes or model data and define the reusable benchmark scenes. The tracked
-`data/README.md` defines the demonstration layout; the commands below regenerate
-models, evaluations, and reports.
-
-Release directories follow the compact `vN` convention. The current defaults
-are `models/v3` and `results/v3`; V1/V2 remain immutable provenance. A release
-uses its explicitly named config and parallel artifact directories rather than
-overwriting an earlier release. Select a report release with
-`paper_comparison --release vN`; the report authenticates the release config,
-checkpoint semantics, manifest, adapter, evaluator, and V3 protocol evidence.
-
-## Training
-
-V1/V2 models are immutable. V3 changes both per-time-step Equation (5)
-participation and gripper training timing, so all eight main policies and the
-separate coordination HandOver policy must be retrained.
+The remaining six main policies and the separate coordination policy are the
+authenticated byte-identical inherited checkpoints recorded by the V4 release
+manifest. Validate the complete model inventory without training or copying:
 
 ```bash
-export TABLE_II_DATA_ROOT=/path/to/table_ii/stage_5_demos
-export TABLE_I_DATA_ROOT=/path/to/table_i/demos
-export TABLE_III_DATA_ROOT=/path/to/table_iii/demos
-
-# Table II bimanual tasks
-python3.10 -m integrations.rlbench.rlbench_dynamac.direct_policy train \
-  --task all \
-  --data-root "$TABLE_II_DATA_ROOT" \
-  --models-dir integrations/rlbench/models/v3 \
-  --config integrations/rlbench/configs/dynamac_rlbench_v3.json
-
-# Table I unimanual tasks
-python3.10 -m integrations.rlbench.rlbench_dynamac.direct_policy train \
-  --task all-unimanual \
-  --data-root "$TABLE_I_DATA_ROOT" \
-  --models-dir integrations/rlbench/models/v3 \
-  --config integrations/rlbench/configs/dynamac_rlbench_v3.json
-
-# Table III coordination cohort
-python3.10 -m integrations.rlbench.rlbench_dynamac.table_iii_coordination train \
-  --data-root "$TABLE_III_DATA_ROOT" \
-  --models-dir integrations/rlbench/models/v3/table_iii \
-  --config integrations/rlbench/configs/dynamac_rlbench_v3.json
+python3.10 -m integrations.rlbench.rlbench_dynamac.data.store_bottle_v4 \
+  release-manifest --dry-run --require-complete
 ```
 
-## Evaluation
-
-The evaluators load `models/v3` and write below `results/v3` by default. They
-use absolute world-frame end-effector control and Jacobian IK followed by
-sampling IK. Grippers actuate at `0.04`, matching the pinned demonstration
-generator rather than the vendor evaluation default `0.2`.
-
-The Table III coordination diagnostic freezes the dynamic HandOver task at
-five variations and assigns episode `i` to variation `i % 5`. Both the complete
-schedule and each row's variation are authenticated by the V3 report.
-
-For each dynamic episode, a disposable independent staging environment creates
-and waypoint-validates A and B before formal rollout. Only numeric poses,
-semantic fingerprints, and validation provenance cross into the formal scene;
-the formal scene never samples or restores B. Smooth and teleport share the
-same per-episode plan fingerprint and use the preregistered task/skill trigger
-on the committed policy clock. Smooth advances one of ten fractions per new
-committed tick. See [V3_PROTOCOL.md](V3_PROTOCOL.md) for the fail-closed
-contract.
-
-The frozen staging budgets are 20 deterministic candidates for source A and
-100 candidates for goal B. These are independent spatial-generation limits;
-they do not change the temporal intervention profiles or permit result-based
-scene selection.
-
-Staging task-tree evidence is frame-aware. Before every candidate and formal
-episode after the first, the preceding task is unloaded while physics is still
-running so runtime objects can be cleaned up safely. The evaluator then stops
-physics, loads a fresh task environment, seeds, sets the variation, and performs
-exactly one `reset(False)`. A disposable proof generation explicitly validates
-the selected source seed and is discarded; source replay, every B retry, and
-formal A binding then reconstruct that same seed with strict `1e-6` audits.
-During
-the commanded A-to-B move, descendants of `boundary_root` are compared relative
-to that root while ancestors and other objects remain fixed in world
-coordinates. Root pose, task pose chunks, scalar state, and joint positions
-use strict `1e-6` reconstruction limits. Object topology, parent handles,
-boundary-root-subtree membership, semantics, descriptions, grasp state, robot
-numeric state, and collisions remain exact. Finite task-object
-velocity summaries are diagnostic only. The V3.4 protocol,
-plan, batch, and validation schemas reject caches created before this contract;
-task-tree snapshots use the dual-frame V1 state schema. Only the task model is
-reloaded; the base scene, explicit vision-sensor handling, robot/action mode,
-and policy inputs remain unchanged. Typed semantic signatures preserve all
-condition structure and parameters while excluding only declared execution
-progress fields.
-
-Each applied formal teleport or smooth fraction is also audited from its
-current policy-evolved pre-command state to the immediate post-command state.
-The same strict task-tree limits, semantic/registry/grasp invariants, and
-exact robot-contact before/after/new delta are recorded. Task-tree,
-semantic/registry, and grasp invariants remain hard failures. Contact deltas are
-diagnostic rather than an admission gate because the trigger-time robot pose is
-policy-evolved; controller progress therefore does not censor a frozen A/B
-episode according to one policy's trajectory.
-
-`max_primary_action_attempts=3` is a local controller-execution tolerance, not
-a retry count from the DynaMAC paper. It is consumed only when RLBench raises
-`InvalidAction` for an IK or low-level execution failure: the tentative target
-is aborted, one current-state no-op obtains a fresh observation, and the same
-policy time index is recomputed. A command that executes but fails to establish
-a grasp is committed normally; the evaluator does not add policy samples,
-extend the configured skill schedule, or initiate a semantic/contact-based
-re-grasp. The authors' exact failed-action clock semantics and tolerance remain
-unconfirmed. The local logical rollback does not undo physical simulator state.
-
-DynaMAC's dynamic following is separate from that tolerance. A moving task
-frame changes the recomputed target only while Equation (6) selected it and the
-frozen Equation (5) mask is available at the current frame. Both arms keep
-independent schedules and have no mid-skill resynchronization. After normal
-two-arm policy completion, the evaluator allows up to ten raw hold/settle steps
-for every task, stopping at the first success or explicit termination; it does
-not settle after retry, explicit failure, or horizon termination. Policy inputs
-come from RLBench simulator-state ground-truth poses
-(`gripper_pose` and `task_low_dim_state`), not a visual pose detector.
+The StoreBottle collector and trainer use the canonical training path by
+default:
 
 ```bash
-# Table II static example
-python3.8 -m integrations.rlbench.rlbench_dynamac.direct_evaluate \
-  --task bimanual_handover_item --episodes 200 --seed 2608000000 \
-  --eval-set-id rlbench_fixed_v1 --horizon 1000 \
-  --output integrations/rlbench/results/v3/table_ii/handover_fixed.json --headless
-
-# Table I static example
-python3.8 -m integrations.rlbench.rlbench_dynamac.unimanual_evaluate \
-  --task stack_wine --scenario static --episodes 200 --seed 2608000000 \
-  --eval-set-id rlbench_fixed_v1 --horizon 1000 \
-  --output integrations/rlbench/results/v3/table_i/stack_wine_fixed.json --headless
+python3.8 -m integrations.rlbench.rlbench_dynamac.data.store_bottle_v4 collect --headless
+python3.10 -m integrations.rlbench.rlbench_dynamac.data.store_bottle_v4 train
 ```
 
-Regenerate the consolidated report without rerunning experiments:
+Fit any ordinary main-task policy by naming it explicitly; for example, the
+current SweepDust cohort writes its checkpoint directly into the V4 model
+directory with:
 
 ```bash
-python3.10 -m integrations.rlbench.rlbench_dynamac.paper_comparison --release v3
+python3.10 -m integrations.rlbench.rlbench_dynamac.data.direct_policy train \
+  --task bimanual_sweep_to_dustpan \
+  --data-root integrations/rlbench/data/training/main \
+  --models-dir integrations/rlbench/models/v4 \
+  --config integrations/rlbench/configs/dynamac_rlbench_v3.json \
+  --demonstrations 5
 ```
 
-The main dynamic success rate always uses all 200 planned episodes. The report
-also gives trigger reach, complete-to-B count, incomplete count, and success
-conditioned on complete intervention. A complete-only diagnostic cohort cannot
-replace the planned denominator.
+The separate coordination HandOver cohort is trained with:
+
+```bash
+python3.10 -m integrations.rlbench.rlbench_dynamac.eval.table_iii_coordination train \
+  --data-root integrations/rlbench/data/training/coordination \
+  --models-dir integrations/rlbench/models/v4/table_iii \
+  --config integrations/rlbench/configs/dynamac_rlbench_v3.json \
+  --demonstrations 5
+```
+
+Collection and training reject paths below `data/evaluation/` and `results/`.
+Any checkpoint change requires regenerating and validating
+`models/v4/release_manifest.json` before formal evaluation.
+
+```bash
+python3.10 -m integrations.rlbench.rlbench_dynamac.data.store_bottle_v4 \
+  release-manifest --require-complete \
+  --output integrations/rlbench/models/v4/release_manifest.json
+```
+
+## Formal 22-cell evaluation
+
+Every cell uses evaluation set `rlbench_eval_v2`, seeds
+`2608000000..2608000199`, horizon `1000`, and the V4 model release.
+
+| Group | Cells | Count |
+|---|---|---:|
+| Table I | StackWine, PlaceCups, OpenMicrowave, WipeDesk × static/smooth/teleport | 12 |
+| Table II | StoreBottle, HandOver, SweepDust, LiftTray × static | 4 |
+| Table III | StoreBottle, HandOver, SweepDust, LiftTray × teleport; coordination hand-left/hand-right | 6 |
+| Total |  | 22 |
+
+The launcher defaults to eight reusable GPU/Xvfb lanes. `plan` is read-only,
+`preflight` validates dependencies, data, models, and existing results, and
+`execute` starts only cells that are not already valid.
+
+```bash
+python3.8 -m integrations.rlbench.rlbench_dynamac.eval.v4_formal_launch plan \
+  --gpus 0,1,2,3,4,5,6,7
+
+python3.8 -m integrations.rlbench.rlbench_dynamac.eval.v4_formal_launch preflight \
+  --gpus 0,1,2,3,4,5,6,7
+
+python3.8 -m integrations.rlbench.rlbench_dynamac.eval.v4_formal_launch execute \
+  --gpus 0,1,2,3,4,5,6,7
+```
+
+Launcher state is written below
+`results/v4/_launch/formal_22_cells/<run-id>/launch_summary.json`. Formal
+evaluation writes result JSON only; it does not record process videos.
+
+Result admission is cell-scoped. A cell must match its selected evaluation
+batch, model, task semantics, controller, and intervention identity. Global
+manifest/spec hashes remain provenance, but an unrelated batch change does not
+invalidate a cell that did not read that batch.
+
+## Post-evaluation replay videos
+
+Replays are generated only after all 22 result files validate. The replay
+launcher derives deterministic success/failure candidates from each completed
+result, then records only the quota required by its observed success-rate tier.
+
+| Observed success rate | Retained successes | Retained failures |
+|---|---:|---:|
+| at least 80%, and strictly within 2 percentage points of the paper reference | 0 | 0 |
+| at least 80%, otherwise | 3 | 3 |
+| 50% to below 80% | 5 | 10 |
+| below 50% | 5 | 20 |
+
+If a class contains fewer episodes than requested, all available episodes in
+that class are used and quota is not transferred. Replays use front and
+overhead views; the overhead view uses a 70-degree perspective while the front
+view remains unchanged.
+
+```bash
+python3.8 -m integrations.rlbench.rlbench_dynamac.report.v4_post_evaluation_replays plan \
+  --gpus 0,1,2,3,4,5,6,7
+
+python3.8 -m integrations.rlbench.rlbench_dynamac.report.v4_post_evaluation_replays execute \
+  --gpus 0,1,2,3,4,5,6,7 --overwrite
+```
+
+Replay state is written below
+`results/v4/replay_video/_launch/post_evaluation/<run-id>/launch_summary.json`.
 
 ## Verification
 
+The current report is
+[`results/v4/reports/full_22_cell.md`](results/v4/reports/full_22_cell.md).
+Run repository checks without creating cache files:
+
 ```bash
-PYTHONDONTWRITEBYTECODE=1 pytest -q -p no:cacheprovider integrations/rlbench/tests
-ruff check --no-cache integrations/rlbench
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q -p no:cacheprovider integrations/rlbench/tests
+ruff check --no-cache integrations/rlbench source
 ```

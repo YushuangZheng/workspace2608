@@ -12,3 +12,7 @@
 *.hdf5 filter=lfs diff=lfs merge=lfs -text
 
 *.bat text eol=crlf
+
+# Patch bytes are authenticated build inputs. Preserve upstream/context
+# whitespace and exclude it from repository-level whitespace diagnostics.
+integrations/rlbench/patches/*.patch -whitespace

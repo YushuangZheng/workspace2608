@@ -20,7 +20,7 @@
     "success_authority": "RLBench Scene.get_demo raises DemoError unless task.success is true"
   },
   "paths": {
-    "data_directory": "integrations/rlbench/data/v4/store_bottle",
+    "data_directory": "integrations/rlbench/data/training/main/bimanual_put_bottle_in_fridge",
     "policy_config": "integrations/rlbench/configs/v4/dynamac_store_bottle.json",
     "models_directory": "integrations/rlbench/models/v4",
     "model_directory": "integrations/rlbench/models/v4/bimanual_put_bottle_in_fridge",

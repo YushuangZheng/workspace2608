@@ -9,32 +9,34 @@
   "trigger": {
     "clock": "successfully_committed_policy_ticks",
     "global_tick": 235,
-    "application_timing": "before_requesting_policy_action_at_global_tick"
+    "application_timing": "on_policy_action_at_global_tick_before_environment_step"
   },
   "motion": {
-    "measurement_source": "current_observation_gripper_pose",
+    "target_source": "predicted_absolute_end_effector_action",
     "translation_frame": "world",
     "translation_m": [
       0.0,
       0.0,
       0.03
     ],
-    "cartesian_substeps": 10,
-    "orientation": "fixed_at_measured_pre_intervention_orientation",
-    "other_arm": "hold_current_measured_pose_each_substep",
-    "both_grippers": "hold_current_discrete_state_each_substep",
-    "application": "one_shot_then_resume_unmodified_policy",
-    "persistent_policy_target_offset": false
+    "smooth_policy_ticks": 10,
+    "smooth_fractions": "1_over_n_through_n_over_n",
+    "orientation": "unmodified_policy_target",
+    "other_arm": "unmodified_policy_target",
+    "both_grippers": "unmodified_policy_target",
+    "application": "fractional_offset_during_smooth_window_then_hold_final_offset",
+    "persistent_policy_target_offset": true
   },
   "clock_semantics": {
-    "policy_requests_during_substeps": 0,
-    "policy_clock_advances_during_substeps": false,
-    "observation_refreshed_after_substeps": true
+    "policy_requests_during_smooth_window": 10,
+    "policy_clock_advances_during_smooth_window": true,
+    "policy_action_and_intervention_share_one_transaction": true,
+    "observation_refreshed_by_each_committed_policy_step": true
   },
   "invalid_action": {
-    "max_attempts_per_cartesian_substep": 3,
-    "solver": "v4_collision_aware_jacobian_then_sampling",
-    "exhaustion_reason": "coordination_intervention_retry_exhausted"
+    "max_primary_action_attempts_per_policy_tick": 1,
+    "solver": "global_pseudo_trac_sampling_path_formal_v1",
+    "failure_behavior": "commit_joint_hold_and_advance_same_policy_tick"
   },
   "provenance": {
     "result_based_retuning_forbidden": true,

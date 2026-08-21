@@ -1,0 +1,134 @@
+{
+  "schema": "sweep-dust-cartesian-training-augmentation-v1",
+  "status": "PHYSICAL_TASK_FRAME_STRICT5_TRAINING_INPUT_V2",
+  "task": "bimanual_sweep_to_dustpan",
+  "source_data_root": null,
+  "source_data_retention": "The superseded Table-II SweepDust cohort was removed after the five physically recollected demonstrations became canonical; its episode-0 SHA-256 remains below as provenance.",
+  "augmented_data_root": "integrations/rlbench/data/training/main/bimanual_sweep_to_dustpan",
+  "training_cli_data_root": "integrations/rlbench/data/training/main",
+  "training_identity_at_fit": {
+    "manifest_path": "integrations/rlbench/configs/v4/sweep_dust_training_data_augmented.json",
+    "manifest_sha256": "fe4230b1c328ae950eb7a936f9169a43361eda2a38b045c5206572dd04b146d0",
+    "data_root": "integrations/rlbench/data/v4/sweep_dust_augmented_v1"
+  },
+  "active_for_next_sweep_retrain": true,
+  "historical_identity_policy": {
+    "rlbench_fixed_v1_training_split_manifest_modified": false,
+    "existing_models_rebound": false,
+    "reason": "This task-scoped physical five-demo cohort binds only the newly retrained SweepDust model."
+  },
+  "augmentation": {
+    "kind": "physically executed task-frame-relative expert recollection",
+    "demonstration_count": 5,
+    "frame_order": [
+      "broom",
+      "dustpan"
+    ],
+    "initial_task_root_translations_m": {
+      "center": [0.0, 0.0, 0.0],
+      "x_positive": [0.18, 0.0, 0.0],
+      "x_negative": [-0.06, 0.0, 0.0],
+      "y_positive": [0.0, 0.03, 0.0],
+      "y_negative": [0.0, -0.03, 0.0]
+    },
+    "yaw_deg": 0.0,
+    "requested_negative_x_m": -0.18,
+    "negative_x_feasibility": "-0.18, -0.17 and -0.16 m repeatedly exhausted global IK during fixed-home physical approach; -0.06 m is the largest previously certified physical negative-x endpoint.",
+    "task_frames": "move the complete task root before observation zero",
+    "arm_end_effectors": {
+      "tick_0": "fixed robot home pose",
+      "translation_schedule": "common linear task-root translation from tick 0 through tick 60",
+      "full_task_relative_template_from_tick": 60,
+      "first_skill_boundary_tick": 65
+    },
+    "fixed_timing": {
+      "samples_per_episode": 146,
+      "canonical_skill_boundaries": [65, 77, 85, 110],
+      "left_gripper_change_tick": 77,
+      "right_gripper_change_tick": 85
+    },
+    "consumer_boundary": "Real RLBench observations recorded after physically executing every target; no task-specific runtime handling and no synthetic low-dimensional-only transform."
+  },
+  "canonical_template": {
+    "episode": 0,
+    "low_dim_obs_sha256": "d701b16392d4f0d9ed14f043e5c42f9235bb077b20504b2fa185138bea942941",
+    "samples": 146
+  },
+  "episodes": [
+    {
+      "episode": 0,
+      "role": "center",
+      "sha256": "c033ce1831b10f3de73b099d5c42cd0e58562998a2c27d707d2bb5393d211e3f",
+      "translation_m": [0.0, 0.0, 0.0],
+      "yaw_deg": 0.0,
+      "samples": 146,
+      "bytes": 76269,
+      "collection_attempt": 2,
+      "success_verified": true
+    },
+    {
+      "episode": 1,
+      "role": "x_positive",
+      "source_sha256": "d701b16392d4f0d9ed14f043e5c42f9235bb077b20504b2fa185138bea942941",
+      "augmented_sha256": "6e191ea1132888b49c2b572b5b390c6642caf42669af9ce24e05bce0882c556d",
+      "translation_m": [0.18, 0.0, 0.0],
+      "yaw_deg": 0.0,
+      "samples": 146,
+      "bytes": 76269,
+      "collection_attempt": 1,
+      "success_verified": true
+    },
+    {
+      "episode": 2,
+      "role": "x_negative",
+      "source_sha256": "d701b16392d4f0d9ed14f043e5c42f9235bb077b20504b2fa185138bea942941",
+      "augmented_sha256": "4d73c468d3b9d0b988f335d752fa7ac71797dc4af12bc46ac86ff6168ee4b5aa",
+      "translation_m": [-0.06, 0.0, 0.0],
+      "yaw_deg": 0.0,
+      "samples": 146,
+      "bytes": 76269,
+      "collection_attempt": 2,
+      "success_verified": true
+    },
+    {
+      "episode": 3,
+      "role": "y_positive",
+      "source_sha256": "d701b16392d4f0d9ed14f043e5c42f9235bb077b20504b2fa185138bea942941",
+      "augmented_sha256": "f7435487a909f49cb23681a796b38dc853532681c605ee815db22d260e12a4da",
+      "translation_m": [0.0, 0.03, 0.0],
+      "yaw_deg": 0.0,
+      "samples": 146,
+      "bytes": 76269,
+      "collection_attempt": 1,
+      "success_verified": true
+    },
+    {
+      "episode": 4,
+      "role": "y_negative",
+      "source_sha256": "d701b16392d4f0d9ed14f043e5c42f9235bb077b20504b2fa185138bea942941",
+      "augmented_sha256": "154ccb95c9231bf205f4a433f9532baa0f91f1a3e21bf85a8eba136551d14148",
+      "translation_m": [0.0, -0.03, 0.0],
+      "yaw_deg": 0.0,
+      "samples": 146,
+      "bytes": 76269,
+      "collection_attempt": 2,
+      "success_verified": true
+    }
+  ],
+  "verification": {
+    "restricted_pickle_loader": "passed",
+    "dynamac_bimanual_demo_adapter": "passed",
+    "episode_0_unchanged": true,
+    "episode_0_identity_interpretation": "zero task transform; physically replayed and therefore not byte-identical to the legacy source pickle",
+    "physical_collection_successes": 5,
+    "physical_collection_total": 5,
+    "fixed_episode_lengths": true,
+    "fixed_gripper_event_ticks": true,
+    "nonformal_smoke": {
+      "static": "10/10",
+      "teleport": "10/10",
+      "invalid_actions": 0,
+      "joint_hold_commits": 0
+    }
+  }
+}

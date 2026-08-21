@@ -1,0 +1,159 @@
+{
+  "schema": "dynamac-table-i-live-demos-v1",
+  "protocol_label": "local_table_i_v1",
+  "paper_comparable": false,
+  "claim_boundary": "Live demonstrations from the pinned public RLBench fork; not the paper cohort. Seed and fixed variation are local explicit choices.",
+  "seed": 0,
+  "variation": 0,
+  "demonstrations_per_task": 5,
+  "tasks": {
+    "stack_wine": [
+      {
+        "episode": 0,
+        "seed": 0,
+        "variation": 0,
+        "observations": 181,
+        "path": "stack_wine/all_variations/episodes/episode0/low_dim_obs.pkl"
+      },
+      {
+        "episode": 1,
+        "seed": 1,
+        "variation": 0,
+        "observations": 187,
+        "path": "stack_wine/all_variations/episodes/episode1/low_dim_obs.pkl"
+      },
+      {
+        "episode": 2,
+        "seed": 2,
+        "variation": 0,
+        "observations": 188,
+        "path": "stack_wine/all_variations/episodes/episode2/low_dim_obs.pkl"
+      },
+      {
+        "episode": 3,
+        "seed": 3,
+        "variation": 0,
+        "observations": 175,
+        "path": "stack_wine/all_variations/episodes/episode3/low_dim_obs.pkl"
+      },
+      {
+        "episode": 4,
+        "seed": 4,
+        "variation": 0,
+        "observations": 179,
+        "path": "stack_wine/all_variations/episodes/episode4/low_dim_obs.pkl"
+      }
+    ],
+    "place_cups": [
+      {
+        "episode": 0,
+        "seed": 0,
+        "variation": 0,
+        "observations": 190,
+        "path": "place_cups/all_variations/episodes/episode0/low_dim_obs.pkl"
+      },
+      {
+        "episode": 1,
+        "seed": 1,
+        "variation": 0,
+        "observations": 163,
+        "path": "place_cups/all_variations/episodes/episode1/low_dim_obs.pkl"
+      },
+      {
+        "episode": 2,
+        "seed": 2,
+        "variation": 0,
+        "observations": 206,
+        "path": "place_cups/all_variations/episodes/episode2/low_dim_obs.pkl"
+      },
+      {
+        "episode": 3,
+        "seed": 3,
+        "variation": 0,
+        "observations": 198,
+        "path": "place_cups/all_variations/episodes/episode3/low_dim_obs.pkl"
+      },
+      {
+        "episode": 4,
+        "seed": 4,
+        "variation": 0,
+        "observations": 185,
+        "path": "place_cups/all_variations/episodes/episode4/low_dim_obs.pkl"
+      }
+    ],
+    "open_microwave": [
+      {
+        "episode": 0,
+        "seed": 0,
+        "variation": 0,
+        "observations": 163,
+        "path": "open_microwave/all_variations/episodes/episode0/low_dim_obs.pkl"
+      },
+      {
+        "episode": 1,
+        "seed": 1,
+        "variation": 0,
+        "observations": 166,
+        "path": "open_microwave/all_variations/episodes/episode1/low_dim_obs.pkl"
+      },
+      {
+        "episode": 2,
+        "seed": 2,
+        "variation": 0,
+        "observations": 167,
+        "path": "open_microwave/all_variations/episodes/episode2/low_dim_obs.pkl"
+      },
+      {
+        "episode": 3,
+        "seed": 3,
+        "variation": 0,
+        "observations": 161,
+        "path": "open_microwave/all_variations/episodes/episode3/low_dim_obs.pkl"
+      },
+      {
+        "episode": 4,
+        "seed": 4,
+        "variation": 0,
+        "observations": 186,
+        "path": "open_microwave/all_variations/episodes/episode4/low_dim_obs.pkl"
+      }
+    ],
+    "wipe_desk": [
+      {
+        "episode": 0,
+        "seed": 0,
+        "variation": 0,
+        "observations": 234,
+        "path": "wipe_desk/all_variations/episodes/episode0/low_dim_obs.pkl"
+      },
+      {
+        "episode": 1,
+        "seed": 1,
+        "variation": 0,
+        "observations": 250,
+        "path": "wipe_desk/all_variations/episodes/episode1/low_dim_obs.pkl"
+      },
+      {
+        "episode": 2,
+        "seed": 2,
+        "variation": 0,
+        "observations": 302,
+        "path": "wipe_desk/all_variations/episodes/episode2/low_dim_obs.pkl"
+      },
+      {
+        "episode": 3,
+        "seed": 3,
+        "variation": 0,
+        "observations": 227,
+        "path": "wipe_desk/all_variations/episodes/episode3/low_dim_obs.pkl"
+      },
+      {
+        "episode": 4,
+        "seed": 4,
+        "variation": 0,
+        "observations": 268,
+        "path": "wipe_desk/all_variations/episodes/episode4/low_dim_obs.pkl"
+      }
+    ]
+  }
+}

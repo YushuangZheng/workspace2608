@@ -1118,6 +1118,52 @@ class DynaMACAction:
 
 
 @dataclass(frozen=True)
+class DynaMACGripperLookahead:
+    """Read-only command for the policy tick following the current cursor.
+
+    The preview is deliberately gripper-only: obtaining it does not evaluate a
+    pose product-of-experts, request an observation, draw from the policy RNG,
+    or advance any episode state.  ``repeats_terminal`` means that there is no
+    later policy tick and the final command is repeated.  The remaining
+    location fields describe the tick from which ``gripper`` is read.
+    """
+
+    gripper: Array
+    crosses_skill_boundary: bool
+    repeats_terminal: bool
+    next_skill_index: int
+    next_skill_label: int
+    next_time_index: int
+    next_mode: int
+
+    def __post_init__(self) -> None:
+        gripper = _as_float_array(self.gripper)
+        if gripper.ndim != 1 or len(gripper) == 0:
+            raise ValueError("gripper lookahead command must be a non-empty vector")
+        if not np.all(np.isfinite(gripper)):
+            raise ValueError("gripper lookahead command must be finite")
+        object.__setattr__(self, "gripper", gripper.copy())
+        for name in (
+            "crosses_skill_boundary",
+            "repeats_terminal",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"{name} must be a bool")
+        for name in (
+            "next_skill_index",
+            "next_skill_label",
+            "next_time_index",
+            "next_mode",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+                raise TypeError(f"{name} must be an integer")
+            if name != "next_skill_label" and value < 0:
+                raise ValueError(f"{name} must be non-negative")
+            object.__setattr__(self, name, int(value))
+
+
+@dataclass(frozen=True)
 class DynaMACConfig:
     """公开阈值与论文未指定、但复现必须显式冻结的数值选择。"""
 
@@ -3492,6 +3538,66 @@ class DynaMAC:
             raise ValueError(f"观测缺少已选择任务参数 {name}")
         return observation.frames[name]
 
+    def preview_next_gripper(self) -> DynaMACGripperLookahead:
+        """Preview ``g[t + 1]`` without predicting another pose or moving time.
+
+        Call this immediately before :meth:`act` while the runtime cursor still
+        denotes tick ``t``.  Internal transitions read the following sample in
+        the same skill.  At a skill boundary the preview follows the already
+        selected episode ``mode_path`` into the next skill.  At the end of the
+        episode (and after completion) it repeats the final command so a
+        uniform lookahead never invents a new terminal state.
+
+        The method has no observation argument by design.  It is safe to use
+        inside a tentative action transaction because it is a pure read of the
+        discrete gripper model and leaves the captured runtime byte-for-byte
+        unchanged.
+        """
+
+        if not self.fitted:
+            raise RuntimeError("DynaMAC 尚未拟合")
+        if not self._episode_initialized:
+            raise RuntimeError("DynaMAC 尚未 reset，不能预览 gripper")
+        if len(self._mode_path) != len(self.skills):
+            raise RuntimeError("DynaMAC episode mode path is incomplete")
+
+        source_skill_index = self._skill_index
+        source_skill = self.skills[source_skill_index]
+        source_time_index = min(self._time_index, source_skill.duration - 1)
+        crosses_boundary = False
+        repeats_terminal = False
+        if self._complete:
+            next_skill_index = len(self.skills) - 1
+            next_time_index = self.skills[next_skill_index].duration - 1
+            repeats_terminal = True
+        elif source_time_index + 1 < source_skill.duration:
+            next_skill_index = source_skill_index
+            next_time_index = source_time_index + 1
+        elif source_skill_index + 1 < len(self.skills):
+            next_skill_index = source_skill_index + 1
+            next_time_index = 0
+            crosses_boundary = True
+        else:
+            next_skill_index = source_skill_index
+            next_time_index = source_skill.duration - 1
+            repeats_terminal = True
+
+        next_skill = self.skills[next_skill_index]
+        next_mode = self._mode_path[next_skill_index]
+        if next_mode < 0 or next_mode >= next_skill.gripper.shape[0]:
+            raise RuntimeError("DynaMAC episode mode path references a missing mode")
+        if next_skill.duration < 1 or next_skill.gripper.shape[1] != next_skill.duration:
+            raise RuntimeError("DynaMAC skill has an invalid gripper duration")
+        return DynaMACGripperLookahead(
+            gripper=next_skill.gripper[next_mode, next_time_index].copy(),
+            crosses_skill_boundary=crosses_boundary,
+            repeats_terminal=repeats_terminal,
+            next_skill_index=next_skill_index,
+            next_skill_label=next_skill.label,
+            next_time_index=next_time_index,
+            next_mode=next_mode,
+        )
+
     def act(self, observation: DynaMACObservation) -> DynaMACAction:
         """按固定离散时间执行；失败时不推进技能、时间或虚拟帧状态。"""
 
@@ -3926,6 +4032,14 @@ class BimanualDynaMACAction:
     right: DynaMACAction
 
 
+@dataclass(frozen=True)
+class BimanualDynaMACGripperLookahead:
+    """Independent read-only next-tick gripper previews for both arms."""
+
+    left: DynaMACGripperLookahead
+    right: DynaMACGripperLookahead
+
+
 class BimanualDynaMAC:
     """论文 Sec. III-C：两套独立并发 DynaMAC，不共享技能或固定 leader。"""
 
@@ -4083,6 +4197,19 @@ class BimanualDynaMAC:
             DynaMACObservation(right_observation.ee_pose, right_frames),
         )
 
+    def preview_next_gripper(self) -> BimanualDynaMACGripperLookahead:
+        """Preview each independent arm's next command without advancing either.
+
+        An arm that has already completed repeats its own final gripper command
+        while the other arm continues.  Consequently asynchronous bimanual
+        completion does not borrow a command or a boundary from the peer arm.
+        """
+
+        return BimanualDynaMACGripperLookahead(
+            left=self.left.preview_next_gripper(),
+            right=self.right.preview_next_gripper(),
+        )
+
     def act(
         self,
         left_observation: DynaMACObservation,
@@ -4148,10 +4275,12 @@ DynaMACPolicy = DynaMAC
 __all__ = [
     "BimanualDynaMAC",
     "BimanualDynaMACAction",
+    "BimanualDynaMACGripperLookahead",
     "DynaMAC",
     "DynaMACAction",
     "DynaMACConfig",
     "DynaMACDemonstration",
+    "DynaMACGripperLookahead",
     "DynaMACObservation",
     "DynaMACPolicy",
     "GaussianMarginal",

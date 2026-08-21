@@ -122,13 +122,14 @@ environment intervention implementation.
 
 The working reproduction workspace currently uses:
 
-- 45 five-demonstration `low_dim_obs.pkl` episodes for Tables I–III;
-- immutable historical `models/v1`, `models/v2`, `results/v1`, and `results/v2`
-  release directories;
-- `models/v3` and `results/v3` as the current training/evaluation defaults;
-- a sealed V3 fixed evaluation set containing no outcomes or model data;
-- 33 confirmed-failure replay videos from archived `v1` evaluations and the
-  canonical paper comparison.
+- 45 demonstrations in nine five-demo cohorts under
+  `integrations/rlbench/data/training/`;
+- the sealed 200-episode V4 evaluation data under
+  `integrations/rlbench/data/evaluation/`;
+- `integrations/rlbench/models/v4/` and `integrations/rlbench/results/v4/` as
+  the current model and 22-cell evaluation release;
+- post-evaluation replay evidence under
+  `integrations/rlbench/results/v4/replay_video/`.
 
 Demonstrations, checkpoints, result JSON, videos, reference-paper copies,
 RoboTwin, RoboDojo, RLBench, TAPAS, PyRep, and CoppeliaSim are intentionally
@@ -165,10 +166,8 @@ See [`integrations/rlbench/README.md`](integrations/rlbench/README.md) for
 dependency setup, the low-dimensional demonstration layout, training and
 evaluation commands, release directories, and report generation.
 
-The complete frozen V3 mechanism and trigger table are in
-[integrations/rlbench/V3_PROTOCOL.md](integrations/rlbench/V3_PROTOCOL.md).
+The current frozen V4 mechanism, trigger, controller, and artifact contract is
+in [integrations/rlbench/V4_PROTOCOL.md](integrations/rlbench/V4_PROTOCOL.md).
 
 Pinned external revisions and licenses are recorded in
 [`integrations/rlbench/THIRD_PARTY.md`](integrations/rlbench/THIRD_PARTY.md).
-Open details required for a stricter author-side match are maintained in
-[`integrations/rlbench/OPEN_QUESTIONS.md`](integrations/rlbench/OPEN_QUESTIONS.md).

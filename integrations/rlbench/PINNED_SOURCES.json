@@ -24,6 +24,17 @@
       "role": "dual-Panda PyRep classes required by the RLBench fork",
       "simulator_compatibility": "CoppeliaSim 4.1 on Linux per the pinned PyRep README; exact simulator build remains to be frozen by a successful runtime validation",
       "evidence": "REQUIRED_DEPENDENCY_PIN"
+    },
+    "pytracik": {
+      "repository": "https://github.com/chenhaox/pytracik",
+      "tag": "v0.0.3",
+      "commit": "8c8fd2d8ca70334af9b747987f1156ebb1da25cc",
+      "source_archive_sha256": "6ab16912c8bbad74214b553a6b49ac39f3a48362b512f187fc08d852af946f8a",
+      "patch": "integrations/rlbench/patches/pytracik-0.0.3-bounded-cartesian-api.patch",
+      "patch_sha256": "ce1f9053bfc70b6d1a562fe2c830a8f04d8cc59a985941fc3163c3268fe4b565",
+      "role": "ROS-free TRAC-IK Distance fallback with an explicit bounded Cartesian API",
+      "license_file": "integrations/rlbench/third_party/pytracik/LICENSE",
+      "evidence": "PINNED_SOURCE_PLUS_LOCAL_TEXT_PATCH"
     }
   },
   "papers": {
