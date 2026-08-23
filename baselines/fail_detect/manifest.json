@@ -9,6 +9,8 @@
   "paper_url": "https://www.roboticsproceedings.org/rss21/p073.pdf",
   "local_paper": "../../papers/FAIL-Detect.pdf",
   "official_checkpoint": null,
-  "first_target": "Robomimic Transport with flow-matching policy",
-  "reproduction_boundary": "No released checkpoint; released code and paper protocol are not identical."
+  "first_target": "Bounded Robomimic Transport evaluation with diffusion policy and logpZO",
+  "external_official_checkpoint": "Diffusion Policy Transport-PH train-0 epoch 2750 test mean score 1.000",
+  "bounded_protocol": "upstream_release_external_dp_checkpoint",
+  "reproduction_boundary": "FAIL-Detect releases no checkpoint. The bounded run uses official external Diffusion Policy artifacts and is not the paper protocol."
 }
