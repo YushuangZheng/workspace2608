@@ -10,6 +10,11 @@ LLAVA_PY='/data/yukun/miniconda3/envs/dynamac-racer-llava/bin/python'
 COPPELIASIM_ROOT='/data/yukun/essay2608/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04'
 XVFB='/data/yukun/.cache/racer/xvfb-ubuntu-root/usr/bin/Xvfb'
 HF_HOME='/data/yukun/.cache/huggingface-racer/llava-runtime'
+VGL_ROOT=${RACER_VGL_ROOT:-/data/yukun/.cache/racer/virtualgl-3.1.5-root}
+VGLRUN="$VGL_ROOT/opt/VirtualGL/bin/vglrun"
+VGL_LIBDIR="$VGL_ROOT/usr/lib"
+NVIDIA_EGL_VENDOR='/usr/share/glvnd/egl_vendor.d/10_nvidia.json'
+OWNED_PROCESS_AUDIT="$SCRIPT_DIR/audit_owned_processes.py"
 
 LM_GPU=${RACER_LM_GPU:-1}
 VLM_GPUS=${RACER_VLM_GPUS:-2,3}
@@ -19,10 +24,17 @@ VLM_PORT=${RACER_VLM_PORT:-21002}
 DISPLAY_ID=${RACER_DISPLAY_ID:-95}
 HEALTH_ONLY=${RACER_HEALTH_ONLY:-0}
 RUN_ID=${RACER_RUN_ID:-$(date +%Y%m%d_%H%M%S)}
-TASKS='place_cups,place_wine_at_rack_location,sweep_to_dustpan_of_size'
-LOG_NAME='official_ckpt_three_task'
+GL_BACKEND=${RACER_GL_BACKEND:-software}
+EGL_DEVICE=${RACER_EGL_DEVICE:-}
+START_EPISODE=${RACER_START_EPISODE:-0}
+EVAL_EPISODES=${RACER_EVAL_EPISODES:-25}
+RETRY_INVALID_ACTION_ERROR=${RACER_RETRY_FOR_INVALID_ACTION_ERROR:-5}
+TASKS=${RACER_TASKS:-place_cups,place_wine_at_rack_location,sweep_to_dustpan_of_size}
+LOG_NAME=${RACER_LOG_NAME:-official_ckpt_three_task}
+GATE_EVIDENCE_REQUIRED=${RACER_GATE_EVIDENCE_REQUIRED:-0}
 RUNTIME_DIR="$RACER_ROOT/runtime/$RUN_ID"
 RESULT_DIR="$RACER_ROOT/results/$RUN_ID"
+POINT_CLOUD_EVIDENCE="$RUNTIME_DIR/gate_point_cloud_evidence.json"
 
 # The model services are local even if the interactive shell has proxy-on set.
 export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"
@@ -51,6 +63,22 @@ cleanup() {
     kill -TERM "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
+  audit_status=1
+  if [[ -x "$ACTOR_PY" && -f "$OWNED_PROCESS_AUDIT" ]]; then
+    for _ in $(seq 1 10); do
+      if env -u RACER_RUN_ID "$ACTOR_PY" "$OWNED_PROCESS_AUDIT" \
+        --value "$RUN_ID" --ignore-pid "$$" \
+        --output "$RUNTIME_DIR/cleanup_process_audit.json" >/dev/null 2>&1; then
+        audit_status=0
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+  if (( audit_status != 0 )); then
+    echo "ERROR: owned processes remain after launcher cleanup; see $RUNTIME_DIR/cleanup_process_audit.json" >&2
+    (( status != 0 )) || status=1
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -70,10 +98,56 @@ command -v glxinfo >/dev/null || fail 'glxinfo is unavailable.'
 [[ -x "$LLAVA_PY" ]] || fail "LLaVA interpreter missing: $LLAVA_PY"
 [[ -x "$XVFB" ]] || fail "user-space Xvfb missing; run $SCRIPT_DIR/bootstrap_user_xvfb.sh"
 [[ -f "$SCRIPT_DIR/racer_lm_server.py" ]] || fail 'RACER language-service wrapper is missing.'
+[[ -f "$OWNED_PROCESS_AUDIT" ]] || fail 'owned-process audit helper is missing.'
 [[ "$DISPLAY_ID" =~ ^[0-9]+$ ]] || fail 'RACER_DISPLAY_ID must be numeric.'
+[[ "$START_EPISODE" =~ ^[0-9]+$ ]] || fail 'RACER_START_EPISODE must be nonnegative.'
+[[ "$EVAL_EPISODES" =~ ^[1-9][0-9]*$ ]] || fail 'RACER_EVAL_EPISODES must be positive.'
+[[ "$RETRY_INVALID_ACTION_ERROR" =~ ^[0-9]+$ ]] || \
+  fail 'RACER_RETRY_FOR_INVALID_ACTION_ERROR must be nonnegative.'
+(( 10#$START_EPISODE + 10#$EVAL_EPISODES <= 25 )) || \
+  fail 'RACER_START_EPISODE + RACER_EVAL_EPISODES must not exceed the 25 fixed episodes.'
+[[ "$TASKS" =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]] || \
+  fail 'RACER_TASKS must be a comma-separated task list without spaces.'
+[[ "$LOG_NAME" =~ ^[A-Za-z0-9_.-]+$ ]] || fail 'RACER_LOG_NAME contains unsafe characters.'
+[[ "$GATE_EVIDENCE_REQUIRED" == '0' || "$GATE_EVIDENCE_REQUIRED" == '1' ]] || \
+  fail 'RACER_GATE_EVIDENCE_REQUIRED must be 0 or 1.'
 [[ "$LM_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || \
   fail 'RACER_LM_PORT must be an integer between 1 and 65535.'
 (( 10#$LM_PORT <= 65535 )) || fail 'RACER_LM_PORT must be at most 65535.'
+
+case "$GL_BACKEND" in
+  software)
+    ;;
+  spawn-isolated-software)
+    [[ -f "$SCRIPT_DIR/isolated_rollout.py" ]] || \
+      fail 'spawn-isolated evaluator wrapper is missing.'
+    [[ -f "$SCRIPT_DIR/isolated_simulator_proxy.py" ]] || \
+      fail 'spawn-isolated simulator proxy is missing.'
+    [[ -f "$SCRIPT_DIR/isolated_simulator_worker.py" ]] || \
+      fail 'spawn-isolated simulator worker is missing.'
+    ;;
+  virtualgl-egl)
+    [[ "$EGL_DEVICE" =~ ^egl[0-9]+$ ]] || \
+      fail 'RACER_EGL_DEVICE must be an explicit VirtualGL EGL device such as egl4.'
+    [[ -x "$VGLRUN" ]] || \
+      fail "VirtualGL is missing: $VGLRUN; run $SCRIPT_DIR/bootstrap_user_virtualgl.sh"
+    [[ -f "$VGL_LIBDIR/libvglfaker.so" ]] || \
+      fail "VirtualGL faker library is missing: $VGL_LIBDIR/libvglfaker.so"
+    [[ -f "$NVIDIA_EGL_VENDOR" ]] || \
+      fail "NVIDIA EGL vendor manifest is missing: $NVIDIA_EGL_VENDOR"
+    ;;
+  *)
+    fail 'RACER_GL_BACKEND must be software, spawn-isolated-software, or virtualgl-egl.'
+    ;;
+esac
+if [[ "$GATE_EVIDENCE_REQUIRED" == '1' ]]; then
+  [[ -f "$SCRIPT_DIR/point_cloud_evidence.py" ]] || \
+    fail 'point-cloud evidence helper is missing.'
+  if [[ "$GL_BACKEND" != 'spawn-isolated-software' ]]; then
+    [[ -f "$SCRIPT_DIR/instrumented_rollout.py" ]] || \
+      fail 'instrumented gate evaluator wrapper is missing.'
+  fi
+fi
 
 IFS=',' read -r VLM_GPU_A VLM_GPU_B VLM_GPU_EXTRA <<<"$VLM_GPUS"
 [[ -n "$VLM_GPU_A" && -n "$VLM_GPU_B" && -z "${VLM_GPU_EXTRA:-}" ]] || \
@@ -157,9 +231,23 @@ done
 DISPLAY=":$DISPLAY_ID" xdpyinfo >"$RUNTIME_DIR/xdpyinfo.txt" 2>&1 || \
   fail "xdpyinfo failed; see $RUNTIME_DIR/xdpyinfo.txt"
 grep -q 'GLX' "$RUNTIME_DIR/xdpyinfo.txt" || fail 'Xvfb does not expose GLX.'
-DISPLAY=":$DISPLAY_ID" XDG_CACHE_HOME=/data/yukun/.cache/racer \
-  LIBGL_ALWAYS_SOFTWARE=1 glxinfo -B >"$RUNTIME_DIR/glxinfo.txt" 2>&1 || \
-  fail "GLX context creation failed; see $RUNTIME_DIR/glxinfo.txt"
+if [[ "$GL_BACKEND" == 'virtualgl-egl' ]]; then
+  env -u LD_LIBRARY_PATH -u LIBGL_ALWAYS_SOFTWARE -u LIBGL_DRIVERS_PATH \
+    -u MESA_LOADER_DRIVER_OVERRIDE \
+    DISPLAY=":$DISPLAY_ID" XDG_CACHE_HOME=/data/yukun/.cache/racer \
+    __EGL_VENDOR_LIBRARY_FILENAMES="$NVIDIA_EGL_VENDOR" \
+    "$VGLRUN" -ld "$VGL_LIBDIR" -d "$EGL_DEVICE" glxinfo -B \
+    >"$RUNTIME_DIR/glxinfo.txt" 2>&1 || \
+    fail "VirtualGL EGL context creation failed; see $RUNTIME_DIR/glxinfo.txt"
+  grep -q 'OpenGL vendor string: NVIDIA Corporation' "$RUNTIME_DIR/glxinfo.txt" || \
+    fail 'VirtualGL probe did not select the NVIDIA OpenGL vendor.'
+  ! grep -Eqi 'llvmpipe|softpipe|swrast' "$RUNTIME_DIR/glxinfo.txt" || \
+    fail 'VirtualGL probe unexpectedly selected a software renderer.'
+else
+  DISPLAY=":$DISPLAY_ID" XDG_CACHE_HOME=/data/yukun/.cache/racer \
+    LIBGL_ALWAYS_SOFTWARE=1 glxinfo -B >"$RUNTIME_DIR/glxinfo.txt" 2>&1 || \
+    fail "GLX context creation failed; see $RUNTIME_DIR/glxinfo.txt"
+fi
 
 wait_for_get() {
   local name=$1
@@ -255,32 +343,58 @@ fi
 check_gpu_idle "$ACTOR_GPU"
 
 ACTOR_LOG="$RUNTIME_DIR/actor_eval.log"
-echo "Starting frozen 75-episode evaluator on GPU $ACTOR_GPU."
+IFS=',' read -r -a task_list <<<"$TASKS"
+total_episodes=$((${#task_list[@]} * 10#$EVAL_EPISODES))
+echo "Starting frozen ${total_episodes}-episode evaluator on GPU $ACTOR_GPU with $GL_BACKEND."
 echo "Runtime logs: $RUNTIME_DIR"
 echo "Evaluation outputs: $RESULT_DIR/$LOG_NAME"
 start_epoch=$(date +%s)
 (
   cd "$UPSTREAM"
-  exec setsid env \
-    CUDA_VISIBLE_DEVICES="$ACTOR_GPU" \
-    DISPLAY=":$DISPLAY_ID" \
-    XDG_CACHE_HOME=/data/yukun/.cache/racer \
-    COPPELIASIM_ROOT="$COPPELIASIM_ROOT" \
-    LD_LIBRARY_PATH="$COPPELIASIM_ROOT" \
-    QT_PLUGIN_PATH="$COPPELIASIM_ROOT" \
-    QT_QPA_PLATFORM_PLUGIN_PATH="$COPPELIASIM_ROOT/platforms" \
-    QT_QPA_PLATFORM=xcb \
-    QT_XCB_GL_INTEGRATION=xcb_glx \
-    LIBGL_ALWAYS_SOFTWARE=1 \
-    "$ACTOR_PY" -u racer/evaluation/rollout.py \
+  actor_environment=(
+    env
+    -u LIBGL_ALWAYS_SOFTWARE
+    -u LIBGL_DRIVERS_PATH
+    -u MESA_LOADER_DRIVER_OVERRIDE
+    CUDA_VISIBLE_DEVICES="$ACTOR_GPU"
+    DISPLAY=":$DISPLAY_ID"
+    XDG_CACHE_HOME=/data/yukun/.cache/racer
+    COPPELIASIM_ROOT="$COPPELIASIM_ROOT"
+    LD_LIBRARY_PATH="$COPPELIASIM_ROOT"
+    QT_PLUGIN_PATH="$COPPELIASIM_ROOT"
+    QT_QPA_PLATFORM_PLUGIN_PATH="$COPPELIASIM_ROOT/platforms"
+    QT_QPA_PLATFORM=xcb
+    QT_XCB_GL_INTEGRATION=xcb_glx
+  )
+  actor_wrapper=()
+  actor_program=("$ACTOR_PY" -u racer/evaluation/rollout.py)
+  if [[ "$GL_BACKEND" == 'virtualgl-egl' ]]; then
+    actor_environment+=(__EGL_VENDOR_LIBRARY_FILENAMES="$NVIDIA_EGL_VENDOR")
+    actor_wrapper=("$VGLRUN" -ld "$VGL_LIBDIR" -d "$EGL_DEVICE")
+  else
+    actor_environment+=(LIBGL_ALWAYS_SOFTWARE=1)
+    if [[ "$GL_BACKEND" == 'spawn-isolated-software' ]]; then
+      mkdir -p "$RUNTIME_DIR/isolation"
+      actor_environment+=(RACER_ISOLATION_RUNTIME_DIR="$RUNTIME_DIR/isolation")
+      actor_program=("$ACTOR_PY" -u "$SCRIPT_DIR/isolated_rollout.py")
+    fi
+  fi
+  if [[ "$GATE_EVIDENCE_REQUIRED" == '1' ]]; then
+    actor_environment+=(RACER_POINT_CLOUD_EVIDENCE="$POINT_CLOUD_EVIDENCE")
+    if [[ "$GL_BACKEND" != 'spawn-isolated-software' ]]; then
+      actor_program=("$ACTOR_PY" -u "$SCRIPT_DIR/instrumented_rollout.py")
+    fi
+  fi
+  exec setsid "${actor_environment[@]}" "${actor_wrapper[@]}" \
+    "${actor_program[@]}" \
       --model-folder "$UPSTREAM/racer/runs/racer-visuomotor-policy-rich" \
       --model-name model_17.pth \
       --eval-datafolder "$UPSTREAM/racer/data/rlbench/test" \
       --tasks "$TASKS" \
-      --start-episode 0 \
-      --eval-episodes 25 \
+      --start-episode "$START_EPISODE" \
+      --eval-episodes "$EVAL_EPISODES" \
       --episode-length 30 \
-      --retry-for-InvalidActionError 5 \
+      --retry-for-InvalidActionError "$RETRY_INVALID_ACTION_ERROR" \
       --log-name "$LOG_NAME" \
       --eval-log-dir "$RESULT_DIR" \
       --lm-address "http://127.0.0.1:$LM_PORT/encode/" \
@@ -323,10 +437,21 @@ fi
 
 METRICS="$RESULT_DIR/$LOG_NAME/metrics.json"
 [[ -f "$METRICS" ]] || fail "evaluator exited without metrics: $METRICS"
-"$ACTOR_PY" "$SCRIPT_DIR/summarize_three_task.py" "$METRICS" \
-  --paper-reference "$RACER_ROOT/paper_reference.json" \
-  --output-dir "$RESULT_DIR/$LOG_NAME" \
-  >"$RUNTIME_DIR/comparison_summary.json"
+if [[ "$GATE_EVIDENCE_REQUIRED" == '1' ]]; then
+  [[ -s "$POINT_CLOUD_EVIDENCE" ]] || \
+    fail "evaluator exited without point-cloud evidence: $POINT_CLOUD_EVIDENCE"
+  [[ -s "$RUNTIME_DIR/gate_point_clouds.npz" ]] || \
+    fail "evaluator exited without raw point clouds: $RUNTIME_DIR/gate_point_clouds.npz"
+fi
+if [[ "$TASKS" == 'place_cups,place_wine_at_rack_location,sweep_to_dustpan_of_size' \
+      && "$START_EPISODE" == '0' && "$EVAL_EPISODES" == '25' ]]; then
+  "$ACTOR_PY" "$SCRIPT_DIR/summarize_three_task.py" "$METRICS" \
+    --paper-reference "$RACER_ROOT/paper_reference.json" \
+    --output-dir "$RESULT_DIR/$LOG_NAME" \
+    >"$RUNTIME_DIR/comparison_summary.json"
+fi
 
-echo "RACER three-task evaluation completed in $(($(date +%s) - start_epoch)) seconds."
-echo "Comparison: $RESULT_DIR/$LOG_NAME/comparison.md"
+echo "RACER ${total_episodes}-episode evaluation completed in $(($(date +%s) - start_epoch)) seconds."
+if [[ -f "$RESULT_DIR/$LOG_NAME/comparison.md" ]]; then
+  echo "Comparison: $RESULT_DIR/$LOG_NAME/comparison.md"
+fi

@@ -214,11 +214,100 @@ status 0. No A-K2 workaround meets reset stability, observation fidelity, and
 clean shutdown together. The local Xvfb/Mesa path is therefore closed rather
 than used to manufacture a nominal result.
 
-For a future retry, use an NVIDIA-backed Xorg display or VirtualGL on the
-already allocated actor GPU. Before launching 75 episodes, require one exact
-official end-to-end episode (services, actor action, fixed data, and output)
-with a natural status 0, and compare its four observations against a clean
-reference produced by the same renderer.
+## Queued VirtualGL EGL retry
+
+The user-space retry uses VirtualGL 3.1.5's EGL backend rather than another
+Mesa load-order workaround. The server already permits this account to open
+`/dev/nvidia*`, and NVIDIA EGL 1.5 exposes the required surfaceless and
+no-config-context extensions. Xvfb remains the 2D X server; VirtualGL emulates
+the application's GLX path on the NVIDIA EGL device. No NVIDIA Xorg server,
+`vglserver_config`, root access, reboot, simulator patch, or policy patch is
+used.
+
+The graphics probe is stronger than checking `nvidia-smi`: the launcher runs
+`glxinfo -B` through the selected VirtualGL EGL device, records it in the run
+directory, requires `OpenGL vendor string: NVIDIA Corporation`, and rejects
+`llvmpipe`, `softpipe`, or `swrast` before starting either model service.
+
+`scripts/bootstrap_user_virtualgl.sh` pins the official amd64 Debian artifact
+and SHA-256, then extracts it under `/data/yukun/.cache/racer`. The physical
+actor GPU is mapped to an explicit VirtualGL `eglN` identifier through
+NVIDIA's `EGL_CUDA_DEVICE_NV` attribute, checked against the physical
+`nvidia-smi` index; the script never assumes CUDA and EGL numbering are
+identical.
+
+`scripts/run_virtualgl_egl_after_baselines.sh` enforces this order:
+
+1. wait until both pre-existing SPR and Guardian tmux sessions terminate;
+2. require GPUs 1-4 to be idle for three consecutive checks;
+3. run exactly `place_cups` fixed episode 0 through the official evaluator,
+   with zero evaluator retries;
+4. require natural status 0, `success: true`, one valid metrics record, one
+   success marker, four Pillow-verified 256x346 camera GIFs with readable frames
+   and nondegenerate pixels in the top 256x256 camera region (excluding the
+   lower 90px text overlay), and four raw float32 `(3, 512, 512)` point clouds that
+   are finite and nondegenerate, with no native-renderer failure signature;
+5. only then run the three tasks x 25 fixed episodes and generate the paper
+   comparison.
+
+Runtime state is written atomically to
+`runtime/<supervisor-id>/status.tsv`. If EGL device mapping, execution, or
+strict validation fails, the supervisor may enter one fallback path, with no
+loop or automatic retry:
+
+1. a direct clean process resets fixed `place_cups` episode 0 and records
+   stable dtype/shape/byte-hash fingerprints for every numeric observation;
+2. a parent that has imported the official RACER rollout/policy stack performs
+   the same reset through a clean spawned simulator worker;
+3. both captures and the worker must exit naturally with status 0, all values
+   must be finite/supported, and both complete snapshots must match exactly;
+4. only then may one spawn-isolated episode 0 run, with zero evaluator retries;
+5. only `success: true`, natural evaluator and worker status 0, and the strict
+   single-episode artifact validator unlock 3 x 25 under that same isolated
+   backend.
+
+Any initialization mismatch, unsupported value, timeout, abnormal exit, or
+episode-gate failure records a terminal isolation state and leaves the
+75-episode target locked. The adapter replaces only the rollout module's
+`RLBenchSim` symbol; the official policy, evaluator loop, simulator, RLBench,
+PyRep, and CoppeliaSim sources remain unchanged. The known A-K2 Mesa
+load-order/context workarounds remain permanently excluded.
+
+The EGL and isolation gates set `retry-for-InvalidActionError=0`, so each gate
+has exactly one episode attempt. The subsequent 3 x 25 run sets it to 5. This
+matches the released evaluator's default in `racer/evaluation/rollout.py`; the
+official `scripts/eval_racer.sh` invokes that evaluator without overriding the
+default. Keeping five only for the full evaluation therefore preserves the
+released evaluation protocol rather than weakening the one-shot unlock gate.
+
+Point-cloud evidence is captured by a thin simulator subclass at the return of
+the first `RLBenchSim.reset`, before `ModelRVTAgent` downsamples or copies the
+observation. It writes an ignored `gate_point_clouds.npz` plus JSON containing
+the task/episode, shapes, dtypes, axis spans, and SHA-256 values. The validator
+independently reloads the raw NPZ with pickle disabled and recomputes all
+conditions and hashes. The adapter returns the original observation objects
+unchanged, so this is observation-only instrumentation rather than a policy or
+simulator change.
+
+The bounded execution and provenance contract is:
+
+- freeze the exact 40-character Git HEAD at supervisor startup, record it in
+  `expected_head.txt`/`frozen_contract.tsv`, and require the same clean branch
+  after the dependency wait, before the episode gates, before fallback, and
+  before 3 x 25;
+- cap each direct/isolated initialization capture at 600 seconds and each
+  episode-0 evaluator gate at 3600 seconds, with TERM followed by KILL after a
+  30-second cleanup window;
+- tag every child with its exact run/owner token, then scan `/proc` after each
+  capture and evaluation stage; record the result and reject any remaining
+  CoppeliaSim, simulator-worker, model-service, evaluator, Xvfb, or other owned
+  process;
+- record isolated-worker PID, return code, and whether explicit close produced
+  a natural status 0.
+
+These limits apply to gates, not the official 3 x 25 runtime. The full run
+still fails if its launcher cleanup or supervisor audit finds an owned
+residual process.
 
 Key provenance:
 
