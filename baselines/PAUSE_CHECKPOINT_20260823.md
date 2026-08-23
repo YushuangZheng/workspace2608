@@ -18,7 +18,9 @@ checking out this revision.
 - `master` and `dev/yushuang` were left untouched at
   `6ddd92ff0a09133e50c31f6ec301f703c67621e2`.
 - All owned tmux sessions and reproduction processes were stopped. GPUs 0-5
-  were idle at the final audit; unrelated jobs on GPUs 6-7 were not touched.
+  were idle at the stop audit. By the final verification, later root-owned
+  Spark-0/Maniverse jobs had occupied GPUs 0-7; they are unrelated to this
+  project and were not touched.
 - The recovery tag is `yukun-reproduction-pause-20260823`.
 
 The feature worktrees are intentionally retained because their ignored logs
