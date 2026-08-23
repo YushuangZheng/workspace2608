@@ -9,21 +9,24 @@ official checkout lives in ignored `upstream/`; datasets, checkpoints, runtime
 state, and generated results are also ignored. Conda environments live under
 `/data/yukun/miniconda3/envs/` rather than inside this repository.
 
-Status snapshot: 2026-08-20 (Asia/Shanghai). A component smoke is not counted
+Status snapshot: 2026-08-23 (Asia/Shanghai). A component smoke is not counted
 as a reproduced paper result; incomplete evaluations report no success rate.
 
 | Priority | Method | First reproducible target | Status | Boundary |
 |---:|---|---|---|---|
-| 1 | Guardian/FailCoT | official thinking checkpoint, five Table II OOD cells | complete: 820-sample Table II checkpoint evaluation | checkpoint evaluation; no retraining first |
-| 2 | SPR | official `libero_10` checkpoint, one task then the full suite | final scope: task 0 complete at 41/50 (82.0%); task 1 stopped by request after one successful completed episode and retained only as a diagnostic partial; tasks 2-9 not run | no ten-task aggregate or chart; task-0 82.0% is not directly comparable with the paper's ten-task 82.8% aggregate |
-| 3 | RACER | official checkpoint, three related RLBench tasks then all 18 | blocked before episode 0: retry2 exited 139 in Mesa `swrast`; 0/75 completed, no local rate or comparison figure | component smokes pass, but no Xvfb/Mesa workaround preserved observations and exited cleanly; retry only with NVIDIA-backed Xorg/VirtualGL |
-| 4 | FAIL-Detect | environment/data smoke, then Transport + flow matching | environment and model smoke complete; training/evaluation blocked on unreleased data/checkpoints | no checkpoint; released code and paper protocol differ |
+| 1 | Guardian/FailCoT | official thinking checkpoint, five Table II OOD cells | complete: all 18 available thinking/vanilla checkpoint cells, 7,640 predictions | released-checkpoint evaluation; no retraining |
+| 2 | SPR | official `libero_10` checkpoint, one task then the full suite | paused: tasks 0-7 complete at 323/400 (80.75%); task 8 hit CUDA OOM before episode 0; task 9 not started | no ten-task aggregate or direct comparison with the paper's 82.8% aggregate |
+| 3 | RACER | official checkpoint, three related RLBench tasks then all 18 | paused before the new EGL single-episode gate; 0/75 quantitative episodes | NVIDIA EGL and isolated-process gates are merged; no local success rate yet |
+| 4 | FAIL-Detect | environment/data smoke, then Transport + flow matching | paused at the resource gate before artifact download, training, or evaluation | bounded external-DP-checkpoint protocol is merged; no local metric yet |
 | 5 | AgentChord | simulated nominal and recovery on/off rollouts | 29 source tests passed; simulation blocked on endpoint and secure DexSim runtime | requires an OpenAI-compatible GPT-5 endpoint; no paper batch protocol |
-| 6 | AHA | FailGen smoke only | simulator reset and one FailGen episode complete; paper model evaluation blocked | final model/data/inference path unavailable; full training exceeds budget |
+| 6 | AHA | FailGen smoke only | one earlier smoke complete; new 10-task x 1-episode queue paused before task 0 | FailGen engineering coverage only; final model/data/inference path unavailable |
 
 Paper values and local values are compared only within the same method,
 benchmark, split, metric, and released protocol. Results from different robot
 benchmarks are never presented as a direct ranking against DynaMAC.
+
+The exact pause state, completed metrics, raw artifact locations, and safe
+resume boundary are recorded in [PAUSE_CHECKPOINT_20260823.md](PAUSE_CHECKPOINT_20260823.md).
 
 ## Local layout
 
