@@ -1,34 +1,97 @@
 #!/usr/bin/env python3
-"""Run one bounded FailGen episode through the released public API.
+"""Generate one bounded episode with the released AHA FailGen wrapper.
 
-This is a functional smoke test.  It intentionally stores only keyframe PNGs
-and never claims to implement the paper's training or evaluation protocol.
+The caller is responsible for process isolation, Xvfb, timeouts, and retries.
+This worker launches exactly one task environment and calls ``get_failure``
+exactly once. It never changes the released FailGen implementation.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import traceback
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from failgen.env_wrapper import FailGenEnvWrapper
-from failgen.fail_grasp import GraspFailure
+
+
+# Same order as FAILURES_LIST in the released ex_custom_data_generator.py.
+OFFICIAL_FAILURE_ORDER = (
+    "grasp",
+    "slip",
+    "rotation_x",
+    "rotation_y",
+    "rotation_z",
+    "translation_x",
+    "translation_y",
+    "translation_z",
+    "no_rotation",
+    "wrong_sequence",
+    "wrong_object",
+)
+
+
+class FailGenNotProduced(RuntimeError):
+    """The single permitted FailGen call did not yield a failed demo."""
+
+
+class ReleasedConfigurationError(RuntimeError):
+    """The released task configuration cannot support the bounded protocol."""
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--task", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--result-json", required=True, type=Path)
     parser.add_argument("--max-tries", default=1, type=int)
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    if args.max_tries < 1:
-        raise SystemExit("--max-tries must be positive")
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-    args.output.mkdir(parents=True, exist_ok=True)
+
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def select_failure(wrapper: FailGenEnvWrapper):
+    by_type = {failure.failure_type: failure for failure in wrapper.manager._failures}
+    for failure_type in OFFICIAL_FAILURE_ORDER:
+        candidate = by_type.get(failure_type)
+        if candidate is None:
+            continue
+        if failure_type == "wrong_object" or candidate.waypoints_indices:
+            return candidate
+    raise ReleasedConfigurationError(
+        "No released failure type with a usable waypoint is configured"
+    )
+
+
+def artifact_path(output: Path, task: str, failure_type: str, waypoint: int) -> Path:
+    if waypoint == -1:
+        return output / f"{task}_{failure_type}_episode0"
+    return output / f"{task}_{failure_type}_wp{waypoint}_episode0"
+
+
+def run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.max_tries != 1:
+        raise ReleasedConfigurationError("bounded evaluation requires --max-tries 1")
+
+    args.output.mkdir(parents=True, exist_ok=False)
     wrapper = FailGenEnvWrapper(
-        task_name="basketball_in_hoop",
+        task_name=args.task,
         headless=True,
         record=False,
         save_data=True,
@@ -37,61 +100,84 @@ def main() -> int:
     )
 
     try:
-        target = None
+        target = select_failure(wrapper)
         for failure in wrapper.manager._failures:
-            enabled = failure.failure_type == GraspFailure.FAILURE_TYPE
-            failure.set_enabled(enabled)
-            if enabled:
-                target = failure
+            failure.set_enabled(failure is target)
 
-        if target is None:
-            raise RuntimeError("basketball_in_hoop has no released grasp failure")
-        if str(wrapper.config.data.renderer) != "opengl3":
-            raise RuntimeError(
-                f"Expected the official opengl3 renderer, got "
-                f"{wrapper.config.data.renderer!r}"
+        renderer = str(wrapper.config.data.renderer)
+        if renderer != "opengl3":
+            raise ReleasedConfigurationError(
+                f"Expected released renderer opengl3, got {renderer!r}"
             )
-        if not target.waypoints_indices:
-            raise RuntimeError("released grasp failure has no waypoint index")
 
-        waypoint_index = target.waypoints_indices[0]
-        target.change_waypoint_fail_name(f"waypoint{waypoint_index}")
+        failure_type = target.failure_type
+        waypoint = -1
+        if failure_type != "wrong_object":
+            waypoint = int(target.waypoints_indices[0])
+            target.change_waypoint_fail_name(f"waypoint{waypoint}")
+
         wrapper.reset()
-
-        demo = None
-        success = True
-        for _ in range(args.max_tries):
-            demo, success = wrapper.get_failure()
-            if demo is not None and not success:
-                break
-
+        demo, success = wrapper.get_failure()
         if demo is None or success:
-            raise RuntimeError(
-                "FailGen did not produce the requested failure within the "
-                f"{args.max_tries} allowed attempt(s)"
+            raise FailGenNotProduced(
+                "The one permitted get_failure call did not produce a failed demo"
             )
 
         wrapper.save_keyframe_data(
             ep_idx=0,
-            fail_type=GraspFailure.FAILURE_TYPE,
-            wp_idx=waypoint_index,
+            fail_type=failure_type,
+            wp_idx=waypoint,
         )
-        artifact_dir = args.output / (
-            "basketball_in_hoop_grasp_"
-            f"wp{waypoint_index}_episode0"
+        artifact_dir = artifact_path(
+            args.output, args.task, failure_type, waypoint
         )
-        artifacts = sorted(artifact_dir.glob("*.png"))
-        if not artifacts:
+        png_count = len(list(artifact_dir.glob("*.png")))
+        if png_count == 0:
             raise RuntimeError(f"No keyframe PNGs saved under {artifact_dir}")
 
-        print("Saved FailGen smoke episode 1 / 1")
-        print(f"Renderer: {wrapper.config.data.renderer}")
-        print(f"Waypoint index: {waypoint_index}")
-        print(f"Keyframe PNGs: {len(artifacts)}")
-        print(f"Output: {artifact_dir}")
-        return 0
+        return {
+            "schema_version": 1,
+            "status": "success",
+            "task": args.task,
+            "episode": 0,
+            "max_tries": 1,
+            "get_failure_calls": 1,
+            "failure_type": failure_type,
+            "waypoint": waypoint,
+            "renderer": renderer,
+            "artifact_dir": str(artifact_dir.resolve()),
+            "png_count_unverified": png_count,
+            "finished_at_utc": utc_now(),
+        }
     finally:
         wrapper.shutdown()
+
+
+def main() -> int:
+    args = parse_args()
+    started = utc_now()
+    try:
+        result = run(args)
+        result["started_at_utc"] = started
+        write_json_atomic(args.result_json, result)
+        print(json.dumps(result, sort_keys=True), flush=True)
+        return 0
+    except BaseException as exc:
+        result = {
+            "schema_version": 1,
+            "status": "failed",
+            "task": args.task,
+            "episode": 0,
+            "max_tries": args.max_tries,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "started_at_utc": started,
+            "finished_at_utc": utc_now(),
+        }
+        write_json_atomic(args.result_json, result)
+        print(json.dumps(result, sort_keys=True), flush=True)
+        traceback.print_exc()
+        return 1
 
 
 if __name__ == "__main__":
