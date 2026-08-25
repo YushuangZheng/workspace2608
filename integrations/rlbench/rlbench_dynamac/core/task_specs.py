@@ -31,6 +31,18 @@ CANDIDATE_FRAME_POLICY_SOURCE_STATUS = "AUTHOR_EMAIL_EXPLICIT_20260814"
 TASK_CONFIG_PATH = INTEGRATION_ROOT / "configs" / "tasks.json"
 
 SegmentationCoordination = Literal["single", "independent", "shared_union"]
+RECOVERABLE_RELATION_ROLES = frozenset(
+    {
+        "operated_object",
+        "candidate_object",
+        "articulated_object",
+        "operated_tool",
+        "variation_target",
+        "carried_object",
+        "cooperatively_operated_object",
+        "cooperatively_operated_tool",
+    }
+)
 
 
 def _pose_array(value: Any, *, convention: str) -> Array:
@@ -149,6 +161,16 @@ class TaskSpec:
     @property
     def arm_count(self) -> int:
         return 2 if self.bimanual else 1
+
+    @property
+    def recoverable_relation_frames(self) -> tuple[str, ...]:
+        """Physical task entities for which LINK/UNLINK recovery is meaningful."""
+
+        return tuple(
+            chunk.name
+            for chunk in self.pose_chunks
+            if chunk.role in RECOVERABLE_RELATION_ROLES
+        )
 
     def extract_pose_chunks(
         self,
@@ -323,6 +345,7 @@ __all__ = [
     "CANDIDATE_FRAME_POLICY_SOURCE_STATUS",
     "CorePoseConvention",
     "RLBENCH_REFERENCE_COMMIT",
+    "RECOVERABLE_RELATION_ROLES",
     "RLBenchPoseConvention",
     "SegmentationCoordination",
     "TASK_CONFIG_PATH",

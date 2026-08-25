@@ -15,7 +15,12 @@ midigap = ["scipy>=1.10"]
 test = ["pytest>=8"]
 
 [tool.setuptools]
-packages = ["essay2608", "essay2608.data", "essay2608.policy"]
+packages = [
+    "essay2608",
+    "essay2608.data",
+    "essay2608.policy",
+    "essay2608.policy.closed_loop",
+]
 package-dir = { essay2608 = "source" }
 
 [tool.pytest.ini_options]

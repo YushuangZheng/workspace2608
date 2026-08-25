@@ -139,7 +139,12 @@ def _prepare_pose_batch(trajectories: Array) -> Array:
     """
 
     values = _as_float_array(trajectories)
-    if values.ndim != 3 or values.shape[-1] != 7 or values.shape[0] == 0 or values.shape[1] == 0:
+    if (
+        values.ndim != 3
+        or values.shape[-1] != 7
+        or values.shape[0] == 0
+        or values.shape[1] == 0
+    ):
         raise ValueError("pose batch must be nonempty with shape [N, T, 7]")
     result = np.stack([_normalize_pose_trajectory(item) for item in values])
     previous_anchor: Array | None = None
@@ -240,7 +245,9 @@ def quaternion_exp(rotation_vector: Array) -> Array:
         where=angle > 1.0e-12,
     )
     return normalize_quaternion(
-        np.concatenate((np.cos(angle)[..., None], rotation_vector * scale[..., None]), axis=-1)
+        np.concatenate(
+            (np.cos(angle)[..., None], rotation_vector * scale[..., None]), axis=-1
+        )
     )
 
 
@@ -262,7 +269,9 @@ def pose_compose(left: Array, right: Array) -> Array:
     left = _as_float_array(left)
     right = _as_float_array(right)
     position = left[..., :3] + rotate_vector(left[..., 3:7], right[..., :3])
-    orientation = normalize_quaternion(quaternion_multiply(left[..., 3:7], right[..., 3:7]))
+    orientation = normalize_quaternion(
+        quaternion_multiply(left[..., 3:7], right[..., 3:7])
+    )
     return np.concatenate((position, orientation), axis=-1)
 
 
@@ -333,7 +342,9 @@ def quaternion_parallel_transport(source: Array, target: Array) -> Array:
     if distance < RIEPY_MANIFOLD_REGULARIZATION:
         return np.eye(3, dtype=np.float64)
     if 1.0 + inner < np.finfo(np.float64).eps:
-        raise ValueError("parallel transport between antipodal S3 quaternions is undefined")
+        raise ValueError(
+            "parallel transport between antipodal S3 quaternions is undefined"
+        )
     # Levi-Civita parallel transport on the unit sphere in ambient coordinates.
     ambient = np.eye(4) - np.outer(source + target, target) / (1.0 + inner)
     source_basis = _quaternion_left_matrix(source)[:, 1:]
@@ -438,7 +449,9 @@ def interpolate_poses(poses: Array, length: int) -> Array:
     target = np.linspace(0.0, 1.0, length)
     quaternion = []
     for value in target:
-        right_index = min(int(np.searchsorted(source, value, side="right")), len(poses) - 1)
+        right_index = min(
+            int(np.searchsorted(source, value, side="right")), len(poses) - 1
+        )
         left_index = max(right_index - 1, 0)
         width = source[right_index] - source[left_index]
         fraction = 0.0 if width == 0.0 else float((value - source[left_index]) / width)
@@ -461,8 +474,14 @@ def _pose_mean(poses: Array, weights: Array | None = None) -> Array:
         weights = np.full(len(poses), 1.0 / len(poses), dtype=np.float64)
     else:
         weights = _as_float_array(weights)
-        if weights.shape != (len(poses),) or np.any(weights < 0.0) or np.sum(weights) <= 0.0:
-            raise ValueError("Frechet mean weights must be a nonnegative vector with positive sum")
+        if (
+            weights.shape != (len(poses),)
+            or np.any(weights < 0.0)
+            or np.sum(weights) <= 0.0
+        ):
+            raise ValueError(
+                "Frechet mean weights must be a nonnegative vector with positive sum"
+            )
         weights = weights / np.sum(weights)
     # Use weights for Markley initialization so EM soft responsibilities are retained.
     quaternions = normalize_quaternion(poses[:, 3:7])
@@ -475,7 +494,9 @@ def _pose_mean(poses: Array, weights: Array | None = None) -> Array:
     reference = quaternions[int(np.argmax(weights))]
     if float(np.dot(initial_quaternion, reference)) < 0.0:
         initial_quaternion *= -1.0
-    mean = np.concatenate((np.sum(weights[:, None] * poses[:, :3], axis=0), initial_quaternion))
+    mean = np.concatenate(
+        (np.sum(weights[:, None] * poses[:, :3], axis=0), initial_quaternion)
+    )
     for _ in range(64):
         increment = np.sum(weights[:, None] * _pose_residuals(mean, poses), axis=0)
         mean = pose_exp_world(mean, increment)
@@ -529,7 +550,10 @@ def _fit_pose_sequence(
         raise ValueError("unknown covariance_estimation_method")
     for time_index in range(trajectories.shape[1]):
         means[time_index] = _pose_mean(trajectories[:, time_index])
-        if time_index and float(np.dot(means[time_index - 1, 3:7], means[time_index, 3:7])) < 0.0:
+        if (
+            time_index
+            and float(np.dot(means[time_index - 1, 3:7], means[time_index, 3:7])) < 0.0
+        ):
             means[time_index, 3:7] *= -1.0
         residuals = _pose_residuals(means[time_index], trajectories[:, time_index])
         denominator = max(len(residuals) - 1, 1)
@@ -585,15 +609,17 @@ def _weighted_pose_covariance(
         dtype=np.float64,
     )
     if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
-        raise ValueError("Eq. (5) position and rotation weights must be finite and nonnegative")
+        raise ValueError(
+            "Eq. (5) position and rotation weights must be finite and nonnegative"
+        )
     active = weights > 0.0
     if not np.any(active):
-        raise ValueError("Eq. (5) requires at least one positive-weight tangent dimension")
+        raise ValueError(
+            "Eq. (5) requires at least one positive-weight tangent dimension"
+        )
     selected = covariance[..., active, :][..., :, active]
     active_weights = weights[active]
-    return selected * (
-        active_weights[:, None] * active_weights[None, :]
-    )
+    return selected * (active_weights[:, None] * active_weights[None, :])
 
 
 def task_parameter_scores(
@@ -688,7 +714,9 @@ def task_parameter_score_details(
 
     available_candidate_count = np.sum(availability_values, axis=0, dtype=np.int64)
     if np.any(available_candidate_count == 0):
-        missing_times = [int(index) for index in np.flatnonzero(available_candidate_count == 0)]
+        missing_times = [
+            int(index) for index in np.flatnonzero(available_candidate_count == 0)
+        ]
         raise RuntimeError(
             f"Eq. (6) time steps {missing_times} have no candidates available under "
             "Eq. (5); the paper does not define an empty-denominator fallback"
@@ -716,7 +744,9 @@ def task_parameter_score_details(
         & (np.abs(normalization_residual) <= 1.0e-12)
     )
     if not np.all(normalization_valid_mask):
-        invalid_times = [int(index) for index in np.flatnonzero(~normalization_valid_mask)]
+        invalid_times = [
+            int(index) for index in np.flatnonzero(~normalization_valid_mask)
+        ]
         raise RuntimeError(f"Eq. (6) 在时刻 {invalid_times} 的归一化无效")
     ever_available = np.any(availability_values, axis=1)
     scores = {
@@ -790,9 +820,7 @@ def static_task_parameter_score_details(
     duration = next(iter(durations.values()))
     details = task_parameter_score_details(
         covariances,
-        availability={
-            name: np.ones(duration, dtype=bool) for name in covariances
-        },
+        availability={name: np.ones(duration, dtype=bool) for name in covariances},
         candidate_kind={name: "dynamic" for name in covariances},
     )
     details["availability_source"] = "implicit_all_candidates_static_default"
@@ -883,9 +911,7 @@ def _eq6_skill_selection(
         name: (
             details["rejection_reason"][name]
             if details["rejection_reason"][name] is not None
-            else None
-            if selected_by_eq6[name]
-            else "eq6_score_not_above_tau_omega"
+            else None if selected_by_eq6[name] else "eq6_score_not_above_tau_omega"
         )
         for name in details["frame_names"]
     }
@@ -961,6 +987,7 @@ def product_of_experts(
     marginals: Sequence[GaussianMarginal],
     maximum_iterations: int = 50,
     tolerance: float = 1.0e-5,
+    precision_weights: Sequence[float] | None = None,
 ) -> tuple[Array, Array, dict[str, float]]:
     """公式 (3)：按固定 TAPAS/riepy 语义左折叠黎曼高斯专家。
 
@@ -971,6 +998,33 @@ def product_of_experts(
 
     if not marginals:
         raise ValueError("PoE 至少需要一个 marginal")
+    if precision_weights is not None:
+        weights_array = np.asarray(precision_weights, dtype=np.float64)
+        if weights_array.shape != (len(marginals),):
+            raise ValueError("PoE 精度权重必须与 marginal 数量一致")
+        if np.any(~np.isfinite(weights_array)) or np.any(weights_array < 0.0):
+            raise ValueError("PoE 精度权重必须为有限非负数")
+        retained = [
+            (marginal, float(weight))
+            for marginal, weight in zip(marginals, weights_array, strict=True)
+            if weight > 0.0
+        ]
+        if not retained:
+            raise ValueError("PoE 至少需要一个正精度权重的 marginal")
+        # 对高斯专家 p(x)^w 等价于把精度缩放为 w Lambda，即把协方差
+        # 缩放为 Sigma / w。全 1 权重保持原对象和原运算路径，确保冻结的
+        # baseline 数值语义不受新查询接口影响。
+        if any(weight != 1.0 for _, weight in retained):
+            marginals = tuple(
+                GaussianMarginal(
+                    marginal.frame,
+                    marginal.mean,
+                    marginal.covariance / weight,
+                )
+                for marginal, weight in retained
+            )
+        else:
+            marginals = tuple(marginal for marginal, _ in retained)
     reference_quaternion = marginals[0].mean[3:7]
     aligned_marginals = []
     for marginal in marginals:
@@ -979,7 +1033,9 @@ def product_of_experts(
             # 不同 tracker 可为同一 SO(3) 姿态给出 q/-q。body-tangent 坐标和
             # covariance 不变，只统一均值代表元；规范 TAPAS 输入上这是 no-op。
             mean[3:7] *= -1.0
-        aligned_marginals.append(GaussianMarginal(marginal.frame, mean, marginal.covariance))
+        aligned_marginals.append(
+            GaussianMarginal(marginal.frame, mean, marginal.covariance)
+        )
     marginals = tuple(aligned_marginals)
 
     def robust_inverse(matrix: Array) -> Array:
@@ -988,7 +1044,9 @@ def product_of_experts(
         except np.linalg.LinAlgError:
             return np.linalg.inv(matrix + np.eye(len(matrix)) * 1.0e-8)
 
-    def multiply_pair(left: GaussianMarginal, right: GaussianMarginal) -> GaussianMarginal:
+    def multiply_pair(
+        left: GaussianMarginal, right: GaussianMarginal
+    ) -> GaussianMarginal:
         left_precision = robust_inverse(left.covariance)
         right_precision = robust_inverse(right.covariance)
         mean = left.mean.copy()
@@ -1024,7 +1082,10 @@ def product_of_experts(
     return (
         joint.mean.copy(),
         joint.covariance.copy(),
-        {item.frame: float(weight) for item, weight in zip(marginals, weights, strict=True)},
+        {
+            item.frame: float(weight)
+            for item, weight in zip(marginals, weights, strict=True)
+        },
     )
 
 
@@ -1038,6 +1099,9 @@ class DynaMACDemonstration:
     frames: dict[str, Array]
     skill: Array
     name: str = "demonstration"
+    entity_configurations: dict[str, dict[str, Array]] = field(default_factory=dict)
+    scene_entity_poses: dict[str, Array] = field(default_factory=dict)
+    structural_bindings: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         ee_pose = _normalize_pose_trajectory(self.ee_pose)
@@ -1054,7 +1118,14 @@ class DynaMACDemonstration:
         skill = raw_skill.astype(np.int64)
         if any(not isinstance(name, str) or not name for name in self.frames):
             raise ValueError(f"{self.name} 的任务参数名称必须为非空字符串")
-        frames = {name: _normalize_pose_trajectory(value) for name, value in self.frames.items()}
+        frames = {
+            name: _normalize_pose_trajectory(value)
+            for name, value in self.frames.items()
+        }
+        scene_entity_poses = {
+            name: _normalize_pose_trajectory(value)
+            for name, value in self.scene_entity_poses.items()
+        }
         steps = len(ee_pose)
         if ee_pose.shape != (steps, 7) or action_pose.shape != (steps, 7):
             raise ValueError(f"{self.name} 的末端/动作位姿必须为 [T, 7]")
@@ -1069,8 +1140,50 @@ class DynaMACDemonstration:
             raise ValueError(f"{self.name} 的数组长度不一致")
         if not frames or any(value.shape != (steps, 7) for value in frames.values()):
             raise ValueError(f"{self.name} 的任务参数必须为非空 [T, 7] 位姿字典")
+        if any(value.shape != (steps, 7) for value in scene_entity_poses.values()):
+            raise ValueError(f"{self.name} 的场景实体位姿必须为 [T, 7]")
+        overlap = set(frames).intersection(scene_entity_poses)
+        if overlap:
+            raise ValueError(f"场景实体位姿不能重复任务参数：{sorted(overlap)}")
         if any(name.startswith("virtual_skill_") for name in frames):
             raise ValueError("真实任务参数名称不能使用保留前缀 virtual_skill_")
+        entity_configurations: dict[str, dict[str, Array]] = {}
+        known_entities = set(frames).union(scene_entity_poses)
+        for entity, raw_fields in self.entity_configurations.items():
+            if entity not in known_entities:
+                raise ValueError(f"实体构型引用未知实体 {entity}")
+            if not isinstance(raw_fields, dict) or not raw_fields:
+                raise ValueError(f"实体 {entity} 的内部构型字段不能为空")
+            fields: dict[str, Array] = {}
+            for field_name, raw_values in raw_fields.items():
+                if not isinstance(field_name, str) or not field_name:
+                    raise ValueError("实体内部构型字段名必须为非空字符串")
+                values = _as_float_array(raw_values)
+                if values.ndim == 1:
+                    values = values[:, None]
+                if (
+                    values.ndim != 2
+                    or values.shape[0] != steps
+                    or values.shape[1] == 0
+                    or not np.all(np.isfinite(values))
+                ):
+                    raise ValueError(
+                        f"实体 {entity} 的构型字段 {field_name} 必须为有限 [T,D] 数组"
+                    )
+                fields[field_name] = values.copy()
+            entity_configurations[entity] = fields
+        structural_bindings = dict(self.structural_bindings)
+        for child, parent in structural_bindings.items():
+            if (
+                not isinstance(child, str)
+                or not child
+                or not isinstance(parent, str)
+                or not parent
+                or child == parent
+            ):
+                raise ValueError("直接结构绑定必须连接两个不同的非空实体")
+            if child not in known_entities or parent not in known_entities:
+                raise ValueError(f"直接结构绑定引用未知实体：{child}->{parent}")
         sequence = _compressed_skill_sequence(skill)
         if len(sequence) != len(set(sequence)):
             raise ValueError(f"{self.name} 的同一技能不能分成多个不连续区间")
@@ -1084,6 +1197,9 @@ class DynaMACDemonstration:
         object.__setattr__(self, "gripper", gripper)
         object.__setattr__(self, "skill", skill)
         object.__setattr__(self, "frames", frames)
+        object.__setattr__(self, "entity_configurations", entity_configurations)
+        object.__setattr__(self, "scene_entity_poses", scene_entity_poses)
+        object.__setattr__(self, "structural_bindings", structural_bindings)
 
 
 @dataclass(frozen=True)
@@ -1094,7 +1210,9 @@ class DynaMACObservation:
     def __post_init__(self) -> None:
         ee_pose = _as_float_array(self.ee_pose)
         frames = {name: _as_float_array(value) for name, value in self.frames.items()}
-        if ee_pose.shape != (7,) or any(value.shape != (7,) for value in frames.values()):
+        if ee_pose.shape != (7,) or any(
+            value.shape != (7,) for value in frames.values()
+        ):
             raise ValueError("观测位姿必须为 [7]")
         if not np.all(np.isfinite(ee_pose)) or any(
             not np.all(np.isfinite(value)) for value in frames.values()
@@ -1273,7 +1391,8 @@ class DynaMACConfig:
         )
         integer = tuple(getattr(self, name) for name in integer_names)
         if any(
-            isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer))
+            isinstance(value, (bool, np.bool_))
+            or not isinstance(value, (int, np.integer))
             for value in integer
         ):
             raise ValueError("DynaMAC 整数配置不能使用布尔值或小数")
@@ -1425,9 +1544,7 @@ class StreamModel:
         )
         expected_active = availability_by_mode & self.selected_by_eq6[:, None]
         if not np.array_equal(active_by_mode, expected_active):
-            raise ValueError(
-                "流 active 必须严格等于 availability AND selected_by_eq6"
-            )
+            raise ValueError("流 active 必须严格等于 availability AND selected_by_eq6")
 
     def is_active(self, mode: int, time_index: int) -> bool:
         if self.active.ndim == 1:
@@ -1661,7 +1778,9 @@ def _resampled_skill_data(
     ee_trajectories = []
     action_trajectories = []
     grippers = []
-    real_frames: dict[str, list[Array]] = {name: [] for name in demonstrations[0].frames}
+    real_frames: dict[str, list[Array]] = {
+        name: [] for name in demonstrations[0].frames
+    }
     virtual_frames: dict[str, list[Array]] = {
         f"virtual_skill_{virtual_label}": [] for virtual_label in virtual_starts
     }
@@ -1671,17 +1790,26 @@ def _resampled_skill_data(
             _resample_poses(demonstration.ee_pose[indices], duration, resampling_method)
         )
         action_trajectories.append(
-            _resample_poses(demonstration.action_pose[indices], duration, resampling_method)
+            _resample_poses(
+                demonstration.action_pose[indices], duration, resampling_method
+            )
         )
-        grippers.append(_resample_rows(demonstration.gripper[indices], duration, resampling_method))
+        grippers.append(
+            _resample_rows(demonstration.gripper[indices], duration, resampling_method)
+        )
         for name, poses in demonstration.frames.items():
-            real_frames[name].append(_resample_poses(poses[indices], duration, resampling_method))
+            real_frames[name].append(
+                _resample_poses(poses[indices], duration, resampling_method)
+            )
         for virtual_label, starts in virtual_starts.items():
             pose = starts[demo_index]
             virtual_frames[f"virtual_skill_{virtual_label}"].append(
                 np.repeat(pose[None], duration, axis=0)
             )
-    frames = {name: np.stack(values) for name, values in {**real_frames, **virtual_frames}.items()}
+    frames = {
+        name: np.stack(values)
+        for name, values in {**real_frames, **virtual_frames}.items()
+    }
     return (
         np.stack(ee_trajectories),
         np.stack(action_trajectories),
@@ -1750,7 +1878,9 @@ def _trajectory_distances(
             residuals = np.stack(
                 [
                     pose_log_world(centre_pose, trajectory_pose)
-                    for centre_pose, trajectory_pose in zip(centre, trajectory, strict=True)
+                    for centre_pose, trajectory_pose in zip(
+                        centre, trajectory, strict=True
+                    )
                 ]
             )
             squared = float(np.sum(np.square(residuals)))
@@ -1843,7 +1973,9 @@ def _riemannian_kmeans_candidates(
 
     samples = len(trajectories)
     all_combinations = itertools.combinations(range(samples), clusters)
-    initializations = list(itertools.islice(all_combinations, config.clustering_restarts))
+    initializations = list(
+        itertools.islice(all_combinations, config.clustering_restarts)
+    )
     candidates: list[tuple[Array, Array, float]] = []
     seen: set[tuple[int, ...]] = set()
     for centre_indices in initializations:
@@ -1860,7 +1992,9 @@ def _riemannian_kmeans_candidates(
             key=lambda value: int(np.flatnonzero(labels == value)[0]),
         )
         mapping = {int(old): new for new, old in enumerate(unique)}
-        canonical = np.asarray([mapping[int(value)] for value in labels], dtype=np.int64)
+        canonical = np.asarray(
+            [mapping[int(value)] for value in labels], dtype=np.int64
+        )
         key = tuple(int(value) for value in canonical)
         if key in seen:
             continue
@@ -1896,7 +2030,9 @@ def _deterministic_riemannian_kmeans(
 
 def _logsumexp(values: Array, axis: int) -> Array:
     maximum = np.max(values, axis=axis, keepdims=True)
-    result = maximum + np.log(np.sum(np.exp(values - maximum), axis=axis, keepdims=True))
+    result = maximum + np.log(
+        np.sum(np.exp(values - maximum), axis=axis, keepdims=True)
+    )
     return np.squeeze(result, axis=axis)
 
 
@@ -1938,21 +2074,27 @@ def _mixture_statistics(
                 np.concatenate(
                     [
                         pose_log_world(centre_pose, sample_pose)
-                        for centre_pose, sample_pose in zip(centre, trajectory, strict=True)
+                        for centre_pose, sample_pose in zip(
+                            centre, trajectory, strict=True
+                        )
                     ]
                 )
                 for trajectory in trajectories
             ]
         )
         if euclidean_trajectories is not None:
-            euclidean_centre = np.sum(
-                weights[:, None] * euclidean_trajectories, axis=0
-            ) / effective[component]
+            euclidean_centre = (
+                np.sum(weights[:, None] * euclidean_trajectories, axis=0)
+                / effective[component]
+            )
             residuals = np.concatenate(
                 (residuals, euclidean_trajectories - euclidean_centre), axis=1
             )
             euclidean_centres.append(euclidean_centre)
-        variance = np.sum(weights[:, None] * np.square(residuals), axis=0) / effective[component]
+        variance = (
+            np.sum(weights[:, None] * np.square(residuals), axis=0)
+            / effective[component]
+        )
         centres.append(centre)
         variances.append(variance + floor)
     pose_centres = np.stack(centres)
@@ -1988,7 +2130,9 @@ def _mixture_log_joint(
                 np.concatenate(
                     [
                         pose_log_world(centre_pose, sample_pose)
-                        for centre_pose, sample_pose in zip(centre, trajectory, strict=True)
+                        for centre_pose, sample_pose in zip(
+                            centre, trajectory, strict=True
+                        )
                     ]
                 )
                 for trajectory in trajectories
@@ -2009,7 +2153,9 @@ def _mixture_log_joint(
     return result
 
 
-def _mixture_bic(log_likelihood: float, clusters: int, dimension: int, samples: int) -> float:
+def _mixture_bic(
+    log_likelihood: float, clusters: int, dimension: int, samples: int
+) -> float:
     # 每个 Riemannian 分量有 D 个均值自由度、D 个对角方差和 mixture priors。
     parameters = clusters * (2 * dimension) + clusters - 1
     return -2.0 * log_likelihood + parameters * math.log(max(samples, 2))
@@ -2227,12 +2373,16 @@ def _partition_modes(
 ) -> Array:
     """MiDiGaP 的 ``M^T`` 整轨迹模态划分。"""
 
-    trajectories = _prepare_pose_batch(np.stack(
-        [
-            _resample_poses(trajectory, config.clustering_length, config.resampling_method)
-            for trajectory in local_trajectories
-        ]
-    ))
+    trajectories = _prepare_pose_batch(
+        np.stack(
+            [
+                _resample_poses(
+                    trajectory, config.clustering_length, config.resampling_method
+                )
+                for trajectory in local_trajectories
+            ]
+        )
+    )
     euclidean = None
     if global_euclidean_trajectories is not None:
         values = _as_float_array(global_euclidean_trajectories)
@@ -2242,7 +2392,9 @@ def _partition_modes(
             raise ValueError("全局欧氏轨迹必须具有 [N, T, G] 形状")
         euclidean = np.stack(
             [
-                _resample_rows(trajectory, config.clustering_length, config.resampling_method)
+                _resample_rows(
+                    trajectory, config.clustering_length, config.resampling_method
+                )
                 for trajectory in values
             ]
         ).reshape(len(values), -1)
@@ -2332,16 +2484,18 @@ def _resampled_product_modal_data(
         elif len(values) != sample_count:
             raise ValueError("per-frame product 的所有局部流必须演示一一对应")
         products.append(
-            _prepare_pose_batch(np.stack(
-                [
-                    _resample_poses(
-                        trajectory,
-                        config.clustering_length,
-                        config.resampling_method,
-                    )
-                    for trajectory in values
-                ]
-            ))
+            _prepare_pose_batch(
+                np.stack(
+                    [
+                        _resample_poses(
+                            trajectory,
+                            config.clustering_length,
+                            config.resampling_method,
+                        )
+                        for trajectory in values
+                    ]
+                )
+            )
         )
     euclidean_products = []
     for name, stream in (global_streams or {}).items():
@@ -2393,7 +2547,9 @@ def _modal_partition_audit(
         "automatic_fallback": False,
         "resampled_pose_product": trajectories.copy(),
         "global_euclidean_product": (
-            None if global_euclidean is None else _as_float_array(global_euclidean).copy()
+            None
+            if global_euclidean is None
+            else _as_float_array(global_euclidean).copy()
         ),
         "geodesic_distance_matrix": distances,
         "final_labels": labels.copy(),
@@ -2433,9 +2589,11 @@ def _modal_partition_audit(
                 "dbscan_completion": (
                     "pooled_all_samples_INFERRED_IMPLEMENTATION"
                     if raw_clusters == 0 and np.any(raw_labels < 0)
-                    else "nearest_detected_cluster_INFERRED_IMPLEMENTATION"
-                    if np.any(raw_labels < 0)
-                    else "none"
+                    else (
+                        "nearest_detected_cluster_INFERRED_IMPLEMENTATION"
+                        if np.any(raw_labels < 0)
+                        else "none"
+                    )
                 ),
             }
         )
@@ -2466,7 +2624,9 @@ def _transition_probabilities(previous: Array, current: Array) -> Array:
         if denominator == 0:
             raise ValueError("前一技能存在空模态")
         for target in range(result.shape[1]):
-            result[source, target] = np.sum(source_mask & (current == target)) / denominator
+            result[source, target] = (
+                np.sum(source_mask & (current == target)) / denominator
+            )
     return result
 
 
@@ -2525,7 +2685,9 @@ class DynaMAC:
         return {
             "skill_index": self._skill_index,
             "time_index": self._time_index,
-            "virtual_frames": {name: value.copy() for name, value in self._virtual_frames.items()},
+            "virtual_frames": {
+                name: value.copy() for name, value in self._virtual_frames.items()
+            },
             "pending_virtual_capture": self._pending_virtual_capture,
             "mode_strategy": self._mode_strategy,
             "mode_path": self._mode_path,
@@ -2631,7 +2793,10 @@ class DynaMAC:
                 demonstration.ee_pose[_skill_slice(demonstration, label)[0]].copy()
                 for demonstration in demonstrations
             ]
-            lengths = [len(_skill_slice(demonstration, label)) for demonstration in demonstrations]
+            lengths = [
+                len(_skill_slice(demonstration, label))
+                for demonstration in demonstrations
+            ]
             # TAPAS Demos 使用 int(mean(lengths)) 与 round(linspace) 索引重采样。
             duration = max(int(float(np.mean(lengths))), 1)
             ee, actions, frames, extra = _resampled_skill_data(
@@ -2743,9 +2908,7 @@ class DynaMAC:
                                 "majority_gate_enabled": _majority_gate_audit(
                                     raw_mask, self.config
                                 ),
-                                "majority_gate_rule": (
-                                    "strict_mean_raw_linked_gt_0.5"
-                                ),
+                                "majority_gate_rule": ("strict_mean_raw_linked_gt_0.5"),
                             }
                             if self.config.link_mask_scope
                             == "skill_majority_gate_timestep"
@@ -2799,9 +2962,7 @@ class DynaMAC:
                                 "majority_gate_enabled": _majority_gate_audit(
                                     raw_mask, self.config
                                 ),
-                                "majority_gate_rule": (
-                                    "strict_mean_raw_linked_gt_0.5"
-                                ),
+                                "majority_gate_rule": ("strict_mean_raw_linked_gt_0.5"),
                             }
                             if self.config.link_mask_scope
                             == "skill_majority_gate_timestep"
@@ -2874,8 +3035,7 @@ class DynaMAC:
                     "eq6_covariance_scope": self.config.eq6_covariance_scope,
                     "eq6_covariance_scope_source_status": (
                         "LOCAL_AUTHOR_EMAIL_INTERPRETATION"
-                        if self.config.eq6_covariance_scope
-                        == "eq5_weighted_subspace"
+                        if self.config.eq6_covariance_scope == "eq5_weighted_subspace"
                         else "PAPER_EQ6_FULL_POSE"
                     ),
                     "eq5_availability": {
@@ -2903,9 +3063,7 @@ class DynaMAC:
                     )
                 # Algorithm 1 line 7 uses the selected per-frame product as the
                 # task-parameterized MiDiGaP input.  Labels are discovered once.
-                modal_local_streams = {
-                    name: local_policy[name] for name in selected
-                }
+                modal_local_streams = {name: local_policy[name] for name in selected}
                 modal_global_streams = {
                     "gripper": _gripper_modal_factor(
                         extra["gripper"], self.config.gripper_clustering_scale
@@ -2995,7 +3153,8 @@ class DynaMAC:
                 )
 
                 eq5_availability = {
-                    name: np.ones((modes, duration), dtype=bool) for name in candidate_frames
+                    name: np.ones((modes, duration), dtype=bool)
+                    for name in candidate_frames
                 }
                 for name in frame_names:
                     mode_scales = []
@@ -3031,7 +3190,8 @@ class DynaMAC:
                             {
                                 "mode": mode,
                                 "demonstration_indices": [
-                                    int(index) for index in np.flatnonzero(mode_labels == mode)
+                                    int(index)
+                                    for index in np.flatnonzero(mode_labels == mode)
                                 ],
                                 "linked": bool(np.any(linked_mask)),
                                 "fully_linked": bool(np.all(linked_mask)),
@@ -3084,12 +3244,18 @@ class DynaMAC:
                         "fully_linked": bool(np.all(linked_masks)),
                         "raw_linked_fraction": float(np.mean(raw_masks)),
                         "linked_fraction": float(np.mean(linked_masks)),
-                        "raw_maximum_link_run": max(_maximum_true_run(mask) for mask in raw_masks),
-                        "maximum_link_run": max(_maximum_true_run(mask) for mask in linked_masks),
+                        "raw_maximum_link_run": max(
+                            _maximum_true_run(mask) for mask in raw_masks
+                        ),
+                        "maximum_link_run": max(
+                            _maximum_true_run(mask) for mask in linked_masks
+                        ),
                         "minimum_m": float(np.min(scales)),
                         "median_m": float(np.median(scales)),
                         "gmsd": (scales[0] if modes == 1 else scales).tolist(),
-                        "raw_link_mask": (raw_masks[0] if modes == 1 else raw_masks).tolist(),
+                        "raw_link_mask": (
+                            raw_masks[0] if modes == 1 else raw_masks
+                        ).tolist(),
                         "filtered_link_mask": (
                             linked_masks[0] if modes == 1 else linked_masks
                         ).tolist(),
@@ -3107,9 +3273,7 @@ class DynaMAC:
                                         mode_raw_masks[0], self.config
                                     )
                                 ),
-                                "majority_gate_rule": (
-                                    "strict_mean_raw_linked_gt_0.5"
-                                ),
+                                "majority_gate_rule": ("strict_mean_raw_linked_gt_0.5"),
                             }
                             if self.config.link_mask_scope
                             == "skill_majority_gate_timestep"
@@ -3160,7 +3324,9 @@ class DynaMAC:
                 skill_audit["task_parameter_selection"] = {
                     "scope": "mode_conditioned_INFERRED_IMPLEMENTATION",
                     "per_mode_scores": deepcopy(per_mode_scores),
-                    "per_mode_details": [deepcopy(item[2]) for item in per_mode_selection],
+                    "per_mode_details": [
+                        deepcopy(item[2]) for item in per_mode_selection
+                    ],
                     "scores": deepcopy(scores),
                     "candidate_covariance": {
                         name: covariance.copy()
@@ -3173,8 +3339,7 @@ class DynaMAC:
                     "eq6_covariance_scope": self.config.eq6_covariance_scope,
                     "eq6_covariance_scope_source_status": (
                         "LOCAL_AUTHOR_EMAIL_INTERPRETATION"
-                        if self.config.eq6_covariance_scope
-                        == "eq5_weighted_subspace"
+                        if self.config.eq6_covariance_scope == "eq5_weighted_subspace"
                         else "PAPER_EQ6_FULL_POSE"
                     ),
                     "eq5_availability": {
@@ -3208,7 +3373,9 @@ class DynaMAC:
                     )
                     for name in candidate_frames
                 }
-                selected = tuple(name for name in candidate_frames if np.any(eq6_selected[name]))
+                selected = tuple(
+                    name for name in candidate_frames if np.any(eq6_selected[name])
+                )
             if not selected:
                 score_summary = ", ".join(
                     f"{name}={scores[name]:.6g}" for name in candidate_frames
@@ -3257,7 +3424,8 @@ class DynaMAC:
                         name: mask.copy() for name, mask in eq6_selected.items()
                     },
                     "poe_participation_mask": {
-                        name: mask.copy() for name, mask in framewise_participation.items()
+                        name: mask.copy()
+                        for name, mask in framewise_participation.items()
                     },
                 }
             )
@@ -3311,7 +3479,8 @@ class DynaMAC:
                 )
 
             priors = np.asarray(
-                [np.mean(mode_labels == mode) for mode in range(modes)], dtype=np.float64
+                [np.mean(mode_labels == mode) for mode in range(modes)],
+                dtype=np.float64,
             )
             mode_demonstration_indices = tuple(
                 tuple(int(index) for index in np.flatnonzero(mode_labels == mode))
@@ -3449,7 +3618,9 @@ class DynaMAC:
                 total = float(np.sum(probabilities))
                 if total <= 0.0:
                     raise RuntimeError("模态证据排除了已选前缀的所有后续路径")
-                path.append(int(self._rng.choice(len(probabilities), p=probabilities / total)))
+                path.append(
+                    int(self._rng.choice(len(probabilities), p=probabilities / total))
+                )
             return tuple(path)
         if strategy != "map":
             raise ValueError(f"未知模态选择策略：{strategy}")
@@ -3498,7 +3669,9 @@ class DynaMAC:
         if not self.fitted:
             raise RuntimeError("DynaMAC 尚未拟合")
         selected_strategy = (
-            self.config.default_mode_strategy if mode_strategy is None else mode_strategy
+            self.config.default_mode_strategy
+            if mode_strategy is None
+            else mode_strategy
         )
         mode_path = self._select_mode_path(selected_strategy, mode_evidence)
         evidence = (
@@ -3531,12 +3704,251 @@ class DynaMAC:
 
     def _frame_pose(self, name: str, observation: DynaMACObservation) -> Array:
         if name.startswith("virtual_skill_"):
-            if name not in self._virtual_frames:
-                raise RuntimeError(f"虚拟帧 {name} 尚未在技能边界捕获")
-            return self._virtual_frames[name]
+            if name in self._virtual_frames:
+                return self._virtual_frames[name]
+            # The closed-loop controller may query a legal realignment/reentry
+            # state whose virtual frame is owned by its runtime snapshot rather
+            # than the baseline cursor.  Supplying that captured frame through
+            # the observation keeps query_state read-only and leaves baseline
+            # skill-boundary capture semantics unchanged.
+            if name in observation.frames:
+                return observation.frames[name]
+            raise RuntimeError(f"虚拟帧 {name} 尚未在技能边界捕获或随观测提供")
         if name not in observation.frames:
             raise ValueError(f"观测缺少已选择任务参数 {name}")
         return observation.frames[name]
+
+    @staticmethod
+    def _query_state_components(
+        state_id: Any,
+        mode_index: int | None,
+    ) -> tuple[int, int, int | None]:
+        """Normalize progress state and the independent mode component."""
+
+        if all(hasattr(state_id, name) for name in ("skill_index", "local_index")):
+            values = (state_id.skill_index, state_id.local_index)
+        else:
+            try:
+                raw_values = tuple(state_id)
+            except TypeError as exc:
+                raise TypeError("state_id 必须是 StateId 或二元组") from exc
+            if len(raw_values) != 2:
+                raise ValueError("state_id 必须只包含 skill_index 和 local_index")
+            values = raw_values
+        if len(values) != 2:
+            raise ValueError("state_id 必须包含 skill_index 和 local_index")
+        if any(
+            isinstance(value, (bool, np.bool_))
+            or not isinstance(value, (int, np.integer))
+            for value in values
+        ):
+            raise TypeError("state_id 的两个分量必须为整数")
+        mode = mode_index
+        if mode is not None and (
+            isinstance(mode, (bool, np.bool_))
+            or not isinstance(mode, (int, np.integer))
+        ):
+            raise TypeError("mode_index 必须为整数")
+        return int(values[0]), int(values[1]), None if mode is None else int(mode)
+
+    def query_state(
+        self,
+        observation: DynaMACObservation,
+        state_id: Any,
+        stream_weights: dict[str, float] | None = None,
+        *,
+        mode_index: int | None = None,
+    ) -> DynaMACAction:
+        """Query one fitted skill state without advancing any episode cursor.
+
+        ``stream_weights=None`` follows the frozen DynaMAC Eq. (5)/Eq. (6)
+        participation mask.  An explicit mapping is the closed-loop path: only
+        named, positive-weight streams participate, and the supplied values
+        scale their precisions.  Eq. (6)-rejected component streams can never
+        be re-enabled by a runtime weight.
+        """
+
+        if not self.fitted:
+            raise RuntimeError("DynaMAC 尚未拟合")
+        if not self._episode_initialized:
+            raise RuntimeError("DynaMAC 尚未 reset，不能查询状态")
+        skill_index, index, mode = self._query_state_components(state_id, mode_index)
+        if skill_index < 0 or skill_index >= len(self.skills):
+            raise IndexError("state_id 的 skill_index 超出范围")
+        skill = self.skills[skill_index]
+        if mode is None:
+            mode = self._mode_path[skill_index]
+        if index < 0 or index >= skill.duration:
+            raise IndexError("state_id 的 local_index 超出范围")
+        if mode < 0 or mode >= len(skill.mode_priors):
+            raise IndexError("state_id 的 mode 超出范围")
+        if stream_weights is not None:
+            unknown = set(stream_weights).difference(skill.selected_frames)
+            if unknown:
+                raise ValueError(f"流权重包含当前技能未建模的参考系：{sorted(unknown)}")
+            normalized_weights: dict[str, float] = {}
+            for name, value in stream_weights.items():
+                if (
+                    isinstance(value, (bool, np.bool_))
+                    or not isinstance(value, (int, float, np.integer, np.floating))
+                    or not math.isfinite(float(value))
+                    or float(value) < 0.0
+                ):
+                    raise ValueError("流精度权重必须为有限非负实数")
+                normalized_weights[name] = float(value)
+        else:
+            normalized_weights = {}
+
+        marginals: list[GaussianMarginal] = []
+        precision_weights: list[float] = []
+        inactive_frames: list[str] = []
+        effective_weights: dict[str, float] = {}
+        mask_indices: dict[str, int] = {}
+        for name in skill.selected_frames:
+            stream = skill.streams[name]
+            mask_index = index
+            if self.config.link_mask_scope == "skill_majority":
+                active_mask = (
+                    stream.active if stream.active.ndim == 1 else stream.active[mode]
+                )
+                availability_mask = (
+                    stream.availability
+                    if stream.availability.ndim == 1
+                    else stream.availability[mode]
+                )
+                if not (
+                    np.all(active_mask == active_mask[0])
+                    and np.all(availability_mask == availability_mask[0])
+                ):
+                    raise RuntimeError("schema 13 skill mask 在技能内必须恒定")
+                mask_index = 0
+            mask_indices[name] = mask_index
+            selected = stream.is_selected(mode)
+            weight = (
+                float(stream.is_active(mode, mask_index))
+                if stream_weights is None
+                else normalized_weights.get(name, 0.0)
+            )
+            if not selected:
+                weight = 0.0
+            effective_weights[name] = weight
+            if weight <= 0.0:
+                inactive_frames.append(name)
+                continue
+            marginals.append(
+                transform_marginal(
+                    name,
+                    self._frame_pose(name, observation),
+                    stream.mean[mode, index],
+                    stream.covariance[mode, index],
+                    diagonalize=self.config.diagonalize_transformed_covariance,
+                )
+            )
+            precision_weights.append(weight)
+        if not marginals:
+            raise RuntimeError(
+                f"技能 {skill.label} 在状态 ({index}, {mode}) 没有正权重执行流"
+            )
+        pose, covariance, weights = product_of_experts(
+            marginals,
+            precision_weights=precision_weights,
+        )
+        gripper = skill.gripper[mode, index].copy()
+        diagnostics = {
+            "method": self.name,
+            "selection_semantics_id": self.selection_semantics_id,
+            "skill_index": skill_index,
+            "skill_label": skill.label,
+            "time_index": index,
+            "duration": skill.duration,
+            "mode": mode,
+            "mode_prior": float(skill.mode_priors[mode]),
+            "mode_evidence": float(self._mode_evidence[skill_index][mode]),
+            "modal_path": list(self._mode_path),
+            "path_probability_factor": (
+                float(skill.mode_priors[mode])
+                if skill_index == 0
+                else float(
+                    skill.transition_from_previous[
+                        self._mode_path[skill_index - 1], mode
+                    ]
+                )
+            ),
+            "selected_frames": list(skill.selected_frames),
+            "active_frames": [item.frame for item in marginals],
+            "inactive_linked_frames": inactive_frames,
+            "frame_status": {
+                name: {
+                    "selected_by_eq6_for_skill": skill.streams[name].is_selected(mode),
+                    "exogenous_for_skill_by_eq5": (
+                        skill.streams[name].is_available(mode, mask_indices[name])
+                        if self.config.link_mask_scope == "skill_majority"
+                        else None
+                    ),
+                    "exogenous_at_t_by_eq5": skill.streams[name].is_available(
+                        mode, mask_indices[name]
+                    ),
+                    "participates_in_poe_at_t": effective_weights[name] > 0.0,
+                }
+                for name in skill.selected_frames
+            },
+            "marginal_means": {item.frame: item.mean.tolist() for item in marginals},
+            "marginal_covariances": {
+                item.frame: item.covariance.tolist() for item in marginals
+            },
+            "frame_poses": {
+                item.frame: self._frame_pose(item.frame, observation).tolist()
+                for item in marginals
+            },
+            "captured_virtual_frames": {
+                name: pose.tolist() for name, pose in self._virtual_frames.items()
+            },
+            "poe_weights": weights,
+            "joint_covariance": covariance.tolist(),
+            "selection_mode": (
+                "eq6_with_kinematic_analysis_disabled"
+                if not self.config.kinematic_analysis_enabled
+                else (
+                    "eq6_per_skill_with_eq5_skill_mask"
+                    if self.config.link_mask_scope == "skill_majority"
+                    else (
+                        "eq6_per_skill_with_majority_gated_eq5_framewise_participation"
+                        if self.config.link_mask_scope == "skill_majority_gate_timestep"
+                        else "eq6_per_skill_with_eq5_framewise_participation"
+                    )
+                )
+            ),
+            "kinematic_link_granularity": (
+                "disabled_all_dynamic_candidates_available"
+                if not self.config.kinematic_analysis_enabled
+                else (
+                    "offline_per_skill_strict_majority"
+                    if self.config.link_mask_scope == "skill_majority"
+                    else (
+                        "offline_skill_majority_gate_then_raw_per_timestep"
+                        if self.config.link_mask_scope == "skill_majority_gate_timestep"
+                        else "offline_per_timestep_within_skill"
+                    )
+                )
+            ),
+            "kinematic_analysis_enabled": self.config.kinematic_analysis_enabled,
+            "task_parameter_selection_granularity": "offline_per_skill_max_over_time",
+            "online_link_detection": False,
+            "query_advances_clock": False,
+        }
+        if stream_weights is not None:
+            diagnostics.update(
+                {
+                    "requested_stream_weights": normalized_weights,
+                    "effective_stream_weights": effective_weights,
+                }
+            )
+        return DynaMACAction(
+            pose=pose,
+            covariance=covariance,
+            gripper=gripper,
+            diagnostics=diagnostics,
+        )
 
     def preview_next_gripper(self) -> DynaMACGripperLookahead:
         """Preview ``g[t + 1]`` without predicting another pose or moving time.
@@ -3586,7 +3998,10 @@ class DynaMAC:
         next_mode = self._mode_path[next_skill_index]
         if next_mode < 0 or next_mode >= next_skill.gripper.shape[0]:
             raise RuntimeError("DynaMAC episode mode path references a missing mode")
-        if next_skill.duration < 1 or next_skill.gripper.shape[1] != next_skill.duration:
+        if (
+            next_skill.duration < 1
+            or next_skill.gripper.shape[1] != next_skill.duration
+        ):
             raise RuntimeError("DynaMAC skill has an invalid gripper duration")
         return DynaMACGripperLookahead(
             gripper=next_skill.gripper[next_mode, next_time_index].copy(),
@@ -3623,137 +4038,11 @@ class DynaMAC:
             self._pending_virtual_capture = False
         skill = self.current_skill
         index = min(self._time_index, skill.duration - 1)
-        marginals = []
-        inactive_frames = []
-        for name in skill.selected_frames:
-            stream = skill.streams[name]
-            mask_index = index
-            if self.config.link_mask_scope == "skill_majority":
-                active_mask = (
-                    stream.active
-                    if stream.active.ndim == 1
-                    else stream.active[self._active_mode]
-                )
-                availability_mask = (
-                    stream.availability
-                    if stream.availability.ndim == 1
-                    else stream.availability[self._active_mode]
-                )
-                if not (
-                    np.all(active_mask == active_mask[0])
-                    and np.all(availability_mask == availability_mask[0])
-                ):
-                    raise RuntimeError("schema 13 skill mask 在技能内必须恒定")
-                # 作者口径的推理只读取 skill mask，不重新应用 time mask。
-                mask_index = 0
-            if not stream.is_active(self._active_mode, mask_index):
-                inactive_frames.append(name)
-                continue
-            marginals.append(
-                transform_marginal(
-                    name,
-                    self._frame_pose(name, observation),
-                    stream.mean[self._active_mode, index],
-                    stream.covariance[self._active_mode, index],
-                    diagonalize=self.config.diagonalize_transformed_covariance,
-                )
-            )
-        if not marginals:
-            raise RuntimeError(
-                f"技能 {skill.label} 在时刻 {index} 的所有已选择任务参数均处于链接状态"
-            )
-        pose, covariance, weights = product_of_experts(marginals)
-        gripper = skill.gripper[self._active_mode, index].copy()
-        diagnostics = {
-            "method": self.name,
-            "selection_semantics_id": self.selection_semantics_id,
-            "skill_index": self._skill_index,
-            "skill_label": skill.label,
-            "time_index": index,
-            "duration": skill.duration,
-            "mode": self._active_mode,
-            "mode_prior": float(skill.mode_priors[self._active_mode]),
-            "mode_evidence": float(self._mode_evidence[self._skill_index][self._active_mode]),
-            "modal_path": list(self._mode_path),
-            "path_probability_factor": (
-                float(skill.mode_priors[self._active_mode])
-                if self._skill_index == 0
-                else float(
-                    skill.transition_from_previous[
-                        self._mode_path[self._skill_index - 1], self._active_mode
-                    ]
-                )
-            ),
-            "selected_frames": list(skill.selected_frames),
-            "active_frames": [item.frame for item in marginals],
-            "inactive_linked_frames": inactive_frames,
-            "frame_status": {
-                name: {
-                    "selected_by_eq6_for_skill": skill.streams[name].is_selected(
-                        self._active_mode
-                    ),
-                    "exogenous_for_skill_by_eq5": (
-                        skill.streams[name].is_available(self._active_mode, mask_index)
-                        if self.config.link_mask_scope == "skill_majority"
-                        else None
-                    ),
-                    "exogenous_at_t_by_eq5": skill.streams[name].is_available(
-                        self._active_mode, mask_index
-                    ),
-                    "participates_in_poe_at_t": skill.streams[name].is_active(
-                        self._active_mode, mask_index
-                    ),
-                }
-                for name in skill.selected_frames
-            },
-            "marginal_means": {item.frame: item.mean.tolist() for item in marginals},
-            "marginal_covariances": {
-                item.frame: item.covariance.tolist() for item in marginals
-            },
-            "frame_poses": {
-                item.frame: self._frame_pose(item.frame, observation).tolist()
-                for item in marginals
-            },
-            "captured_virtual_frames": {
-                name: pose.tolist() for name, pose in self._virtual_frames.items()
-            },
-            "poe_weights": weights,
-            "joint_covariance": covariance.tolist(),
-            "selection_mode": (
-                "eq6_with_kinematic_analysis_disabled"
-                if not self.config.kinematic_analysis_enabled
-                else (
-                    "eq6_per_skill_with_eq5_skill_mask"
-                    if self.config.link_mask_scope == "skill_majority"
-                    else (
-                        "eq6_per_skill_with_majority_gated_eq5_framewise_participation"
-                        if self.config.link_mask_scope
-                        == "skill_majority_gate_timestep"
-                        else "eq6_per_skill_with_eq5_framewise_participation"
-                    )
-                )
-            ),
-            "kinematic_link_granularity": (
-                "disabled_all_dynamic_candidates_available"
-                if not self.config.kinematic_analysis_enabled
-                else (
-                    "offline_per_skill_strict_majority"
-                    if self.config.link_mask_scope == "skill_majority"
-                    else (
-                        "offline_skill_majority_gate_then_raw_per_timestep"
-                        if self.config.link_mask_scope
-                        == "skill_majority_gate_timestep"
-                        else "offline_per_timestep_within_skill"
-                    )
-                )
-            ),
-            "kinematic_analysis_enabled": self.config.kinematic_analysis_enabled,
-            "task_parameter_selection_granularity": "offline_per_skill_max_over_time",
-            # DynaMAC 从演示中离线学习并冻结 availability；推理不会根据
-            # 在线接触重新判定链接，但 V3 会逐时间索引读取多数门控后冻结的
-            # raw mask。
-            "online_link_detection": False,
-        }
+        action = self.query_state(
+            observation,
+            (self._skill_index, index),
+            mode_index=self._active_mode,
+        )
         self._time_index += 1
         if self._time_index >= skill.duration:
             if self._skill_index == len(self.skills) - 1:
@@ -3765,12 +4054,7 @@ class DynaMAC:
                 # 而不是上一技能最后一个控制周期的旧观测。
                 self._pending_virtual_capture = True
                 self._active_mode = self._mode_path[self._skill_index]
-        return DynaMACAction(
-            pose=pose,
-            covariance=covariance,
-            gripper=gripper,
-            diagnostics=diagnostics,
-        )
+        return action
 
     def summary(self) -> dict[str, Any]:
         if not self.fitted:
@@ -3835,18 +4119,25 @@ class DynaMAC:
                 or len(membership) != len(skill.mode_priors)
                 or any(not members for members in membership)
             ):
-                raise ValueError(f"技能 {skill.label} 的模式演示成员必须与模态一一对应且均非空")
+                raise ValueError(
+                    f"技能 {skill.label} 的模式演示成员必须与模态一一对应且均非空"
+                )
             flattened = [index for members in membership for index in members]
-            if any(index < 0 for index in flattened) or len(set(flattened)) != len(flattened):
+            if any(index < 0 for index in flattened) or len(set(flattened)) != len(
+                flattened
+            ):
                 raise ValueError(f"技能 {skill.label} 的模式演示成员含负数或重复 index")
             if sorted(flattened) != list(range(len(flattened))):
-                raise ValueError(f"技能 {skill.label} 的模式演示成员必须完整覆盖连续 index")
+                raise ValueError(
+                    f"技能 {skill.label} 的模式演示成员必须完整覆盖连续 index"
+                )
             if demonstration_count is None:
                 demonstration_count = len(flattened)
             elif len(flattened) != demonstration_count:
                 raise ValueError("所有技能的模式演示成员必须覆盖同一批演示")
             expected_priors = np.asarray(
-                [len(members) / len(flattened) for members in membership], dtype=np.float64
+                [len(members) / len(flattened) for members in membership],
+                dtype=np.float64,
             )
             if not np.all(np.isfinite(skill.mode_priors)) or not np.allclose(
                 skill.mode_priors, expected_priors
@@ -3895,7 +4186,9 @@ class DynaMAC:
                 arrays[self._array_key(index, name, "mean")] = stream.mean
                 arrays[self._array_key(index, name, "covariance")] = stream.covariance
                 arrays[self._array_key(index, name, "active")] = stream.active
-                arrays[self._array_key(index, name, "availability")] = stream.availability
+                arrays[self._array_key(index, name, "availability")] = (
+                    stream.availability
+                )
                 arrays[self._array_key(index, name, "selected_by_eq6")] = (
                     stream.selected_by_eq6
                 )
@@ -3904,7 +4197,9 @@ class DynaMAC:
         with path.open("wb") as checkpoint:
             np.savez_compressed(
                 checkpoint,
-                metadata_json=np.asarray(json.dumps(metadata, ensure_ascii=False, sort_keys=True)),
+                metadata_json=np.asarray(
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+                ),
                 **arrays,
             )
 
@@ -3976,11 +4271,17 @@ class DynaMAC:
                     f"loaded by {expected_policy_type!r}"
                 )
             config = DynaMACConfig(**metadata["config"])
-            if metadata.get("selection_semantics_id") != _selection_semantics_id(config):
-                raise ValueError("DynaMAC checkpoint 的任务参数选择 semantics_id 不匹配")
+            if metadata.get("selection_semantics_id") != _selection_semantics_id(
+                config
+            ):
+                raise ValueError(
+                    "DynaMAC checkpoint 的任务参数选择 semantics_id 不匹配"
+                )
             policy = cls(config)
             policy.frame_names = tuple(metadata["frame_names"])
-            policy.skill_sequence = tuple(int(value) for value in metadata["skill_sequence"])
+            policy.skill_sequence = tuple(
+                int(value) for value in metadata["skill_sequence"]
+            )
             for index, skill_meta in enumerate(metadata["skills"]):
                 if "mode_demonstration_indices" not in skill_meta:
                     raise ValueError("DynaMAC checkpoint 缺少模式演示成员")
@@ -4006,7 +4307,9 @@ class DynaMAC:
                         streams=streams,
                         gripper=archive[f"skill_{index}__gripper"].copy(),
                         transition_from_previous=(
-                            None if index == 0 else archive[f"skill_{index}__transition"].copy()
+                            None
+                            if index == 0
+                            else archive[f"skill_{index}__transition"].copy()
                         ),
                         mode_demonstration_indices=tuple(
                             tuple(int(value) for value in indices)
@@ -4019,7 +4322,9 @@ class DynaMAC:
                         },
                     )
                 )
-        if policy._validate_and_get_demonstration_count() != metadata.get("demonstration_count"):
+        if policy._validate_and_get_demonstration_count() != metadata.get(
+            "demonstration_count"
+        ):
             raise ValueError("DynaMAC checkpoint 的演示数量与模式成员不一致")
         if policy.fingerprint() != metadata.get("fingerprint"):
             raise ValueError("DynaMAC checkpoint 指纹不一致")
@@ -4038,6 +4343,64 @@ class BimanualDynaMACGripperLookahead:
 
     left: DynaMACGripperLookahead
     right: DynaMACGripperLookahead
+
+
+def synchronized_bimanual_demonstrations(
+    left_demonstrations: Sequence[DynaMACDemonstration],
+    right_demonstrations: Sequence[DynaMACDemonstration],
+) -> tuple[list[DynaMACDemonstration], list[DynaMACDemonstration]]:
+    """Inject each paired end effector as the other arm's synchronized frame."""
+
+    if len(left_demonstrations) != len(right_demonstrations):
+        raise ValueError("左右臂演示数量必须一致")
+    if not left_demonstrations:
+        raise ValueError("双臂 DynaMAC 至少需要一对演示")
+    paired_left = []
+    paired_right = []
+    for left_demo, right_demo in zip(
+        left_demonstrations, right_demonstrations, strict=True
+    ):
+        if len(left_demo.ee_pose) != len(right_demo.ee_pose):
+            raise ValueError("成对双臂演示必须逐时刻对齐")
+        left_frames = {
+            name: value
+            for name, value in left_demo.frames.items()
+            if name != "right_ee"
+        }
+        left_frames["right_ee"] = right_demo.ee_pose
+        right_frames = {
+            name: value
+            for name, value in right_demo.frames.items()
+            if name != "left_ee"
+        }
+        right_frames["left_ee"] = left_demo.ee_pose
+        paired_left.append(
+            DynaMACDemonstration(
+                ee_pose=left_demo.ee_pose,
+                action_pose=left_demo.action_pose,
+                gripper=left_demo.gripper,
+                frames=left_frames,
+                skill=left_demo.skill,
+                name=left_demo.name,
+                entity_configurations=left_demo.entity_configurations,
+                scene_entity_poses=left_demo.scene_entity_poses,
+                structural_bindings=left_demo.structural_bindings,
+            )
+        )
+        paired_right.append(
+            DynaMACDemonstration(
+                ee_pose=right_demo.ee_pose,
+                action_pose=right_demo.action_pose,
+                gripper=right_demo.gripper,
+                frames=right_frames,
+                skill=right_demo.skill,
+                name=right_demo.name,
+                entity_configurations=right_demo.entity_configurations,
+                scene_entity_poses=right_demo.scene_entity_poses,
+                structural_bindings=right_demo.structural_bindings,
+            )
+        )
+    return paired_left, paired_right
 
 
 class BimanualDynaMAC:
@@ -4083,55 +4446,28 @@ class BimanualDynaMAC:
         left_demonstrations: Sequence[DynaMACDemonstration],
         right_demonstrations: Sequence[DynaMACDemonstration],
     ) -> BimanualDynaMAC:
-        if len(left_demonstrations) != len(right_demonstrations):
-            raise ValueError("左右臂演示数量必须一致")
-        if not left_demonstrations:
-            raise ValueError("双臂 DynaMAC 至少需要一对演示")
-        paired_left = []
-        paired_right = []
-        for left_demo, right_demo in zip(left_demonstrations, right_demonstrations, strict=True):
-            if len(left_demo.ee_pose) != len(right_demo.ee_pose):
-                raise ValueError("成对双臂演示必须逐时刻对齐")
-            # 对侧末端候选帧必须来自同一同步演示快照；忽略调用方可能陈旧的
-            # 同名副本，由配对轨迹直接构造 Sec. III-C 所需任务参数。
-            left_frames = {
-                name: value for name, value in left_demo.frames.items() if name != "right_ee"
-            }
-            left_frames["right_ee"] = right_demo.ee_pose
-            right_frames = {
-                name: value for name, value in right_demo.frames.items() if name != "left_ee"
-            }
-            right_frames["left_ee"] = left_demo.ee_pose
-            paired_left.append(
-                DynaMACDemonstration(
-                    ee_pose=left_demo.ee_pose,
-                    action_pose=left_demo.action_pose,
-                    gripper=left_demo.gripper,
-                    frames=left_frames,
-                    skill=left_demo.skill,
-                    name=left_demo.name,
-                )
-            )
-            paired_right.append(
-                DynaMACDemonstration(
-                    ee_pose=right_demo.ee_pose,
-                    action_pose=right_demo.action_pose,
-                    gripper=right_demo.gripper,
-                    frames=right_frames,
-                    skill=right_demo.skill,
-                    name=right_demo.name,
-                )
-            )
+        paired_left, paired_right = synchronized_bimanual_demonstrations(
+            left_demonstrations,
+            right_demonstrations,
+        )
         left_model = (self.left.frame_names, self.left.skill_sequence, self.left.skills)
-        right_model = (self.right.frame_names, self.right.skill_sequence, self.right.skills)
+        right_model = (
+            self.right.frame_names,
+            self.right.skill_sequence,
+            self.right.skills,
+        )
         left_runtime = self.left._capture_runtime_state()
         right_runtime = self.right._capture_runtime_state()
         try:
             self.left.fit(paired_left)
             self.right.fit(paired_right)
         except Exception:
-            self.left.frame_names, self.left.skill_sequence, self.left.skills = left_model
-            self.right.frame_names, self.right.skill_sequence, self.right.skills = right_model
+            self.left.frame_names, self.left.skill_sequence, self.left.skills = (
+                left_model
+            )
+            self.right.frame_names, self.right.skill_sequence, self.right.skills = (
+                right_model
+            )
             self.left._restore_runtime_state(left_runtime)
             self.right._restore_runtime_state(right_runtime)
             raise
@@ -4295,6 +4631,7 @@ __all__ = [
     "relative_pose",
     "static_task_parameter_score_details",
     "static_task_parameter_scores",
+    "synchronized_bimanual_demonstrations",
     "task_parameter_score_details",
     "task_parameter_scores",
     "transform_marginal",
