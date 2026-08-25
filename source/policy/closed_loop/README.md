@@ -1,6 +1,6 @@
 # 闭环多流策略模块
 
-本目录按照《新方法代码开发计划》组织关系—进度信念驱动方法。阶段一离线任务模型已经完成并通过验收；当前代码不包含阶段二之后的在线关系滤波、进度滤波、动态角色、入口守卫运行时或恢复控制器。
+本目录按照《新方法代码开发计划》组织关系—进度信念驱动方法。阶段一离线任务模型与阶段二旁路关系—进度联合信念推断已经实现；当前代码不包含阶段三动态角色和任务时钟控制、阶段四入口守卫运行时或阶段五恢复控制器。
 
 ## 阶段一公式到代码的映射
 
@@ -33,6 +33,50 @@
 离线 LINK/UNLINK 候选由同一 mode 的全部正常示范共同拟合的逐状态关系先验产生，并在完整任务联合先验序列上通过迟滞和稳定窗口检测，因此事件前后稳定窗口可以跨越技能边界。按示范留一只做稳定性检查：每折用其余 `N-1` 条示范重新拟合联合先验，要求至少 80% 留一折在位置容差内重现同类事件；通过后仍以全部示范联合模型确定事件位置，并使用全部对应示范拟合最终锚点或脱离信息。夹爪命令不参与关系先验拟合，也不能单独创建事件；它只做模板完整性校验：LINK 锚点必须覆盖闭合命令，UNLINK 必须发生在最近一次打开命令之后。LINK 与 Pending 的轨迹最多保留16个对齐状态；若同一机械臂在窗口内更早存在其他参考系或同一参考系的 linked→external，则从最近一次 UNLINK 的下一状态开始截断且不向前回填，避免混入上一段抓取轨迹。轨迹可跨技能边界，建立后的正常 linked 状态按示范路径跨技能、跨 mode 追溯事件级 `link_origin`；UNLINK 的合法重入状态和局部脱离目标也允许进入后继技能。双臂事务组只为示范边界稳定同步且双方共享 linked 实体或同一硬场景条件的边界生成。
 
 `ClosedLoopTaskModel.save()` 使用 sidecar schema v3 保存新增关系、Pending 事件、场景、边界和恢复统计。原有流均值、协方差和夹爪模型继续从绑定的 DynaMAC checkpoint 读取。
+
+## 阶段二在线信念推断
+
+阶段二以旁路方式建立固定的单周期状态估计链：
+
+```text
+RuntimeObservation
+→ RuntimeFeatures
+→ action-after progress prior
+→ external/linked relation posterior
+→ progress posterior
+```
+
+`RuntimeObservation` 统一提供末端位姿、任务参考系位姿、夹爪状态、上一命令目标、上一末端状态、可见性和跟踪可靠性。节点场景因子额外读取实体随观测附带的 `entity_configurations`；只有刚体真值位姿的平台可将该字段留空。RLBench 低维仿真真值未显式提供可见性和跟踪可靠性时，已有位姿默认使用 `visible=True`、`reliability=1`，字段和运行门控仍完整保留。
+
+`RuntimeFeatureBuilder` 每个控制周期只计算一次实际末端运动、命令目标运动、参考系世界运动、末端—参考系相对位姿、相对运动残差、夹爪变化、动作激励和逐关系信息权重。只有当前与上一周期参考系均可见、跟踪可靠且机器人产生实际动作响应时，关系观测才具有非零信息权重；因此机器人与对象同时静止不会因为相对残差为零而被强判 linked。
+
+`ProgressPriorBuilder` 将上一周期进度后验传播到未完成状态、正常后继和稍微提前完成状态，默认权重分别为 `0.20/0.65/0.15`，随后只保留名义状态附近的局部候选。跨技能边界默认禁止；阶段四以后只有把已经放行的 `BoundaryId` 作为 `permitted_boundaries` 传入时，阶段二才允许先验或候选扩展进入下一技能首状态。阶段二本身不评估守卫，也不提交任务时钟。
+
+`RelationFilter` 对每个物理 arm-frame 关系仅维护 `[P(external), P(linked)]`。它依次组合关系持久转移、由名义进度先验加权的离线示范关系先验，以及动作条件化相对运动似然。`Unknown` 只是不可靠周期的决策状态，不进入二元概率向量；不可见、跟踪不可靠、动作激励不足、后验熵过高或最大概率不足时均输出 `Unknown`。虚拟技能帧不进入关系滤波。
+
+`StateEvaluator` 对每个候选状态分别保存机器人局部轨迹、稀疏场景构型和关系兼容度的 log-space 分项。机器人轨迹只由可靠、非 Unknown 且按 $q_t(\mathrm{external})$ 加权的物理流参与；虚拟技能帧只按观测可靠性参与。连续高斯轨迹和场景因子用于在线进度校正的分数为峰值归一化支持度：
+
+$$
+\log\widetilde p(x\mid s)=-\frac12d_M^2(x,s).
+$$
+
+协方差仍决定马氏距离中的方向和尺度，但不同状态不再因 `logdet` 较小而凭绝对密度峰值获得额外优势。完整原始 `log p` 不参与进度后验，仍按每个帧/因子/mode 保存原始对数密度、马氏距离平方、协方差 `logdet`、维数和模态权重用于审计。离散 external/linked 关系兼容度保持 $q_t$ 与示范关系先验的内积，不使用该归一化。
+
+`ProgressFilter` 在局部候选上一次性计算：
+
+$$
+\beta_t(s)\propto
+\bar\beta_t(s)
+\widetilde L_t^{\mathrm{robot}}(s)
+[\widetilde L_t^{\mathrm{state}}(s)]^{\lambda_x}
+[C_t^{\mathrm{rel}}(s)]^{\lambda_r}.
+$$
+
+输出 `ALIGNED/FORWARD_REALIGNMENT/BACKWARD_REALIGNMENT/LOW_CONFIDENCE/NO_PLAUSIBLE_STATE`。没有候选达到最低支持度时，后验保留动作后名义先验并报告 `NO_PLAUSIBLE_STATE`，不把一组近零支持分数强行归一化成虚假的高置信结论。
+
+`BeliefUpdater` 每个递增 tick 严格执行一次 `progress prior → relation posterior → progress posterior`，并返回含统一运行特征、关系估计、进度估计、关系变化、局部/扩展候选及全部 `CandidateScore` 的 `ClosedLoopBelief`。只有出现可靠二元关系变化且局部窗口无可解释状态时，才依次查询未来关系兼容状态段；未来候选还必须同时满足机器人、场景（若状态要求）和关系支持，且不能越过未放行边界。该机制允许正常动作提前完成前移，同时避免仅凭掉落产生的 external 关系跳到未来释放状态。
+
+阶段二全部运行阈值集中在 `configs/closed_loop_belief.json`，并通过配置默认值往返测试防止代码和文件漂移。
 
 ## 查询语义
 
