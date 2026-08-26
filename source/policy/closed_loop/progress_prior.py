@@ -100,22 +100,54 @@ class ProgressPriorBuilder:
         self,
         previous_posterior: Mapping[StateId, float],
         *,
+        executed_reference_state: StateId | None = None,
         permitted_boundaries: frozenset[BoundaryId] = frozenset(),
     ) -> ProgressPrior:
         unknown = set(previous_posterior).difference(self.task_model.states)
         if unknown:
             raise KeyError(f"进度后验包含未知状态：{sorted(unknown)}")
         posterior = _normalize(previous_posterior)
+        if (
+            executed_reference_state is not None
+            and executed_reference_state not in self.task_model.states
+        ):
+            raise KeyError(f"动作引用状态不存在：{executed_reference_state}")
+
         raw: dict[StateId, float] = {}
-        transitions = (
-            (0, self.config.incomplete_weight),
-            (1, self.config.normal_successor_weight),
-            (2, self.config.early_completion_weight),
-        )
-        for source, probability in posterior.items():
-            for steps, weight in transitions:
-                target = self._advance(source, steps, permitted_boundaries)
-                raw[target] = raw.get(target, 0.0) + probability * weight
+        if executed_reference_state is None:
+            # Phase-two can still be exercised as a standalone sidecar.  In
+            # that case the posterior itself supplies the only available
+            # action-state approximation.
+            transitions = (
+                (0, self.config.incomplete_weight),
+                (1, self.config.normal_successor_weight),
+                (2, self.config.early_completion_weight),
+            )
+            for source, probability in posterior.items():
+                for steps, weight in transitions:
+                    target = self._advance(source, steps, permitted_boundaries)
+                    raw[target] = raw.get(target, 0.0) + probability * weight
+        else:
+            # In the integrated loop, ``reference_state`` identifies the
+            # policy action actually queried at t-1.  It anchors the normal
+            # and slightly-early action outcomes, while beta_{t-1} is still
+            # retained for the incomplete-action branch.  This implements
+            # P_prog(s | s', a_{t-1}) beta_{t-1}(s') without either ignoring
+            # the action or replacing the posterior by a one-hot cursor.
+            for source, probability in posterior.items():
+                raw[source] = raw.get(source, 0.0) + (
+                    probability * self.config.incomplete_weight
+                )
+            for steps, weight in (
+                (1, self.config.normal_successor_weight),
+                (2, self.config.early_completion_weight),
+            ):
+                target = self._advance(
+                    executed_reference_state,
+                    steps,
+                    permitted_boundaries,
+                )
+                raw[target] = raw.get(target, 0.0) + weight
 
         raw = _normalize(raw)
         nominal = max(raw, key=lambda state: (raw[state], -self._global_index[state]))

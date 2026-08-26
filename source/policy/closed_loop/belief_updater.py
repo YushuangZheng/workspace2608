@@ -152,6 +152,7 @@ class BeliefUpdater:
         *,
         initial_progress: Mapping[StateId, float] | None = None,
         initial_relations: Mapping[str, np.ndarray] | None = None,
+        initial_relation_decisions: Mapping[str, RelationDecision] | None = None,
         previous_observation: RuntimeObservation | None = None,
     ) -> None:
         if initial_progress is None:
@@ -176,7 +177,13 @@ class BeliefUpdater:
         self._last_tick = (
             None if previous_observation is None else previous_observation.tick
         )
-        self._stable_decisions: dict[str, RelationDecision] = {}
+        decisions = dict(initial_relation_decisions or {})
+        unknown_frames = set(decisions).difference(self.task_model.relation_frames)
+        if unknown_frames:
+            raise KeyError(f"初始关系判定包含未知参考系：{sorted(unknown_frames)}")
+        if any(decision == RelationDecision.UNKNOWN for decision in decisions.values()):
+            raise ValueError("初始稳定关系判定不能为 Unknown")
+        self._stable_decisions = decisions
 
     def _relation_changes(
         self,
@@ -186,6 +193,13 @@ class BeliefUpdater:
         for frame, estimate in estimates.items():
             current = estimate.decision_state
             if current == RelationDecision.UNKNOWN:
+                # RelationFilter only preserves a stable decision through a
+                # visible, reliable and posterior-consistent low-excitation
+                # cycle.  Reaching Unknown therefore breaks that continuity
+                # (occlusion, unreliable tracking, or posterior conflict).
+                # Do not resurrect the pre-gap decision when the frame later
+                # reappears without fresh informative motion.
+                self._stable_decisions.pop(frame, None)
                 continue
             previous = self._stable_decisions.get(frame)
             if previous is not None and previous != current:
@@ -301,6 +315,7 @@ class BeliefUpdater:
         self,
         observation: RuntimeObservation,
         *,
+        executed_reference_state: StateId | None = None,
         permitted_boundaries: frozenset[BoundaryId] = frozenset(),
         mode_by_skill: Mapping[int, int] | None = None,
     ) -> ClosedLoopBelief:
@@ -309,12 +324,14 @@ class BeliefUpdater:
         features = self.feature_builder.build(observation, self._previous_observation)
         progress_prior = self.progress_prior_builder.build(
             self._progress_posterior,
+            executed_reference_state=executed_reference_state,
             permitted_boundaries=permitted_boundaries,
         )
         relation_estimates = self.relation_filter.update(
             progress_prior.probabilities,
             features,
             self._relation_posteriors,
+            previous_decisions=self._stable_decisions,
             mode_by_skill=mode_by_skill,
         )
         changes = self._relation_changes(relation_estimates)

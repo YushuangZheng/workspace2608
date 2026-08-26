@@ -498,6 +498,62 @@ def test_confirmed_relation_events_override_flickering_state_evidence() -> None:
             )
 
 
+def test_rejected_relation_pulse_stays_audit_only_not_deployment_expectation() -> None:
+    class RejectedPulseBuilder(ClosedLoopTaskModelBuilder):
+        def _joint_relation_event_probability_sequence(
+            self,
+            policy,
+            aligned,
+            frame,
+            members,
+            final_skill,
+        ):
+            count = sum(
+                policy.skills[index].duration for index in range(final_skill + 1)
+            )
+            return np.full(count, 0.5, dtype=np.float64)
+
+        def _joint_link_pending_evidence_sequence(
+            self,
+            policy,
+            aligned,
+            frame,
+            members,
+            final_skill,
+        ):
+            count = sum(
+                policy.skills[index].duration for index in range(final_skill + 1)
+            )
+            return np.zeros(count, dtype=np.float64), np.ones(count, dtype=bool)
+
+        def _build_states(self, policy, aligned):
+            states, skill_states = super()._build_states(policy, aligned)
+            for state_id in tuple(sorted(states))[7:9]:
+                states[state_id].demo_relation_priors["object"][:] = np.asarray(
+                    [0.05, 0.95]
+                )
+            return states, skill_states
+
+    policy, demos = fitted_policy()
+    builder = RejectedPulseBuilder()
+    model = builder.build(policy, demos, recoverable_frames=("object",))
+    assert not model.link_anchors
+    assert not model.unlink_events
+    assert not model.link_pending_events
+    assert not model.link_origins
+    expected = np.asarray(
+        [
+            1.0 - builder.config.relation_unlink_threshold,
+            builder.config.relation_unlink_threshold,
+        ]
+    )
+    for state_id in tuple(sorted(model.states))[7:9]:
+        np.testing.assert_allclose(
+            model.state(state_id).demo_relation_priors["object"][0],
+            expected,
+        )
+
+
 def test_link_anchor_starts_after_same_arm_latest_cross_frame_unlink() -> None:
     class CrossFrameEventBuilder(ClosedLoopTaskModelBuilder):
         def _joint_relation_event_probability_sequence(

@@ -28,20 +28,23 @@ import matplotlib.pyplot as plt  # noqa: E402
 from essay2608.policy import (
     BimanualDynaMAC,
     DynaMAC,
+    DynaMACObservation,
     synchronized_bimanual_demonstrations,
 )
 from essay2608.policy.dynamac import (
     pose_compose,
     pose_inverse,
-    pose_log_world,
+    pose_log_nearest,
     relative_pose,
 )
 from essay2608.policy.closed_loop import (
     BeliefUpdater,
+    BeliefUpdaterConfig,
+    ClosedLoopExecutionConfig,
+    ClosedLoopExecutionController,
     ClosedLoopTaskModel,
     ClosedLoopTaskModelBuilder,
     FrameRole,
-    FrameRoleRouter,
     ProgressStatus,
     RelationStateKey,
     RuntimeFeatureBuilder,
@@ -65,6 +68,8 @@ DATA_ROOT = REPOSITORY_ROOT / "integrations/rlbench/data/training/main"
 MODEL_ROOT = REPOSITORY_ROOT / "integrations/rlbench/models/v4"
 STORE_BOTTLE = "bimanual_put_bottle_in_fridge"
 SCHEMA_RESULT = "essay2608-phase23-component-ab-result-v1"
+BELIEF_CONFIG_PATH = REPOSITORY_ROOT / "configs/closed_loop_belief.json"
+EXECUTION_CONFIG_PATH = REPOSITORY_ROOT / "configs/closed_loop_execution.json"
 
 MODEL_PATHS = {
     "stack_wine": MODEL_ROOT / "stack_wine/model.npz",
@@ -82,6 +87,7 @@ MODEL_PATHS = {
 class Sample:
     state_id: StateId
     ee_pose: np.ndarray
+    action_pose: np.ndarray
     frames: dict[str, np.ndarray]
     gripper: np.ndarray
     entity_configurations: dict[str, dict[str, np.ndarray]]
@@ -191,6 +197,7 @@ def _samples_for_skill(
             Sample(
                 StateId(skill_index, local_index),
                 data.ee_pose[demonstration_index, local_index].copy(),
+                data.action_pose[demonstration_index, local_index].copy(),
                 frames,
                 np.atleast_1d(data.gripper[demonstration_index, local_index]).copy(),
                 configurations,
@@ -203,13 +210,23 @@ def _runtime_observation(
     tick: int,
     current: Sample,
     previous: Sample | None,
+    *,
+    previous_command_pose: np.ndarray | None = None,
 ) -> RuntimeObservation:
     return RuntimeObservation(
         tick=tick,
         ee_pose=current.ee_pose,
         frame_poses=current.frames,
         gripper_state=current.gripper,
-        previous_command_pose=None if previous is None else current.ee_pose,
+        previous_command_pose=(
+            None
+            if previous is None
+            else (
+                previous.action_pose
+                if previous_command_pose is None
+                else previous_command_pose
+            )
+        ),
         previous_ee_pose=None if previous is None else previous.ee_pose,
         tracking_reliability={},
         frame_visibility={},
@@ -223,6 +240,7 @@ def _replace_frame(sample: Sample, frame: str, pose: np.ndarray) -> Sample:
     return Sample(
         sample.state_id,
         sample.ee_pose.copy(),
+        sample.action_pose.copy(),
         frames,
         sample.gripper.copy(),
         {
@@ -300,12 +318,23 @@ def _progress_trace(
 
     mode_by_skill = _mode_by_skill(case.policy, demonstration_index)
     initial = samples[source_indices[0]]
-    updater = BeliefUpdater(case.model)
+    case.policy.reset(
+        DynaMACObservation(initial.ee_pose, initial.frames), mode_strategy="map"
+    )
+    updater = BeliefUpdater(
+        case.model,
+        BeliefUpdaterConfig.from_json(BELIEF_CONFIG_PATH),
+    )
     updater.reset(
         initial_progress={initial.state_id: 1.0},
         initial_relations=_initial_relations(case, initial.state_id, mode_by_skill),
         previous_observation=_runtime_observation(0, initial, None),
     )
+    controller = ClosedLoopExecutionController(
+        case.model,
+        ClosedLoopExecutionConfig.from_json(EXECUTION_CONFIG_PATH),
+    )
+    controller.reset(initial.state_id)
     global_indices = _state_global_indices(case.model)
     baseline_errors = []
     proposed_errors = []
@@ -318,6 +347,15 @@ def _progress_trace(
         current = samples[source_index]
         belief = updater.update(
             _runtime_observation(tick, current, previous),
+            # Offline observations follow the recorded demonstration action.
+            # The controller query is audited but is not applied to this
+            # fixed counterfactual trajectory.
+            executed_reference_state=previous.state_id,
+            mode_by_skill=mode_by_skill,
+        )
+        execution = controller.update(
+            belief,
+            DynaMACObservation(current.ee_pose, current.frames),
             mode_by_skill=mode_by_skill,
         )
         baseline_local = min(start + tick, len(samples) - 1)
@@ -347,6 +385,15 @@ def _progress_trace(
                 "truth_state": _state_text(current.state_id),
                 "baseline_state": _state_text(baseline_state),
                 "estimated_state": _state_text(belief.progress.estimated_state),
+                "nominal_state": _state_text(belief.progress.nominal_state),
+                "reference_state_before": _state_text(
+                    execution.cursor_before.reference_state
+                ),
+                "reference_state_after": _state_text(
+                    execution.cursor_after.reference_state
+                ),
+                "execution_decision": execution.decision.value,
+                "execution_reasons": "|".join(execution.reasons),
                 "baseline_abs_error": baseline_error,
                 "proposed_abs_error": proposed_error,
                 "progress_status": belief.progress.status.value,
@@ -397,7 +444,10 @@ def _motion_magnitude(sequence: Sequence[Sample], start: int, stop: int) -> floa
     return float(
         sum(
             builder.motion_magnitude(
-                pose_log_world(sequence[index - 1].ee_pose, sequence[index].ee_pose)
+                pose_log_nearest(
+                    sequence[index - 1].ee_pose,
+                    sequence[index].ee_pose,
+                )
             )
             for index in range(start + 1, stop)
         )
@@ -512,13 +562,23 @@ def _relation_trace(
 
     mode_by_skill = _mode_by_skill(case.policy, demonstration_index)
     initial = samples[0]
-    updater = BeliefUpdater(case.model)
+    case.policy.reset(
+        DynaMACObservation(initial.ee_pose, initial.frames), mode_strategy="map"
+    )
+    updater = BeliefUpdater(
+        case.model,
+        BeliefUpdaterConfig.from_json(BELIEF_CONFIG_PATH),
+    )
     updater.reset(
         initial_progress={initial.state_id: 1.0},
         initial_relations=_initial_relations(case, initial.state_id, mode_by_skill),
         previous_observation=_runtime_observation(0, initial, None),
     )
-    router = FrameRoleRouter(case.model)
+    controller = ClosedLoopExecutionController(
+        case.model,
+        ClosedLoopExecutionConfig.from_json(EXECUTION_CONFIG_PATH),
+    )
+    controller.reset(initial.state_id)
     roles = []
     blocks = []
     decisions = []
@@ -530,9 +590,15 @@ def _relation_trace(
     for tick, current in enumerate(samples[1:], start=1):
         belief = updater.update(
             _runtime_observation(tick, current, previous),
+            executed_reference_state=previous.state_id,
             mode_by_skill=mode_by_skill,
         )
-        snapshot = router.route(current.state_id, belief, mode_by_skill=mode_by_skill)
+        execution = controller.update(
+            belief,
+            DynaMACObservation(current.ee_pose, current.frames),
+            mode_by_skill=mode_by_skill,
+        )
+        snapshot = execution.roles
         decision = snapshot.decisions.get(frame)
         role = None if decision is None else decision.role
         weight = 0.0 if decision is None else decision.execution_weight
@@ -567,6 +633,15 @@ def _relation_trace(
                 "truth_state": _state_text(current.state_id),
                 "baseline_state": _state_text(current.state_id),
                 "estimated_state": _state_text(belief.progress.estimated_state),
+                "nominal_state": _state_text(belief.progress.nominal_state),
+                "reference_state_before": _state_text(
+                    execution.cursor_before.reference_state
+                ),
+                "reference_state_after": _state_text(
+                    execution.cursor_after.reference_state
+                ),
+                "execution_decision": execution.decision.value,
+                "execution_reasons": "|".join(execution.reasons),
                 "baseline_abs_error": 0,
                 "proposed_abs_error": abs(
                     _state_global_indices(case.model)[belief.progress.estimated_state]
@@ -706,7 +781,7 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
             if name not in fieldnames:
                 fieldnames.append(name)
     with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -715,7 +790,7 @@ def _write_trace(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     if not rows:
         raise ValueError("逐周期轨迹不能为空")
     with gzip.open(path, "wt", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -866,6 +941,13 @@ def _task_summary(
     return result
 
 
+def _normalize_generated_text(path: Path) -> None:
+    """Keep generated text artifacts stable and clean in version control."""
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    path.write_text("\n".join(line.rstrip() for line in lines) + "\n", encoding="utf-8")
+
+
 def _plots(
     directory: Path,
     progress_rows: Sequence[Mapping[str, Any]],
@@ -895,8 +977,10 @@ def _plots(
     axis.legend()
     axis.grid(axis="y", alpha=0.25)
     figure.tight_layout()
-    figure.savefig(directory / "progress_mae_by_scenario.svg")
+    progress_figure = directory / "progress_mae_by_scenario.svg"
+    figure.savefig(progress_figure)
     plt.close(figure)
+    _normalize_generated_text(progress_figure)
 
     figure, axis = plt.subplots(figsize=(5.2, 5.2))
     baseline = np.asarray([float(row["baseline_mae"]) for row in progress_rows])
@@ -910,8 +994,10 @@ def _plots(
     axis.set_ylabel("Online-estimator MAE")
     axis.grid(alpha=0.25)
     figure.tight_layout()
-    figure.savefig(directory / "progress_trial_scatter.svg")
+    scatter_figure = directory / "progress_trial_scatter.svg"
+    figure.savefig(scatter_figure)
     plt.close(figure)
+    _normalize_generated_text(scatter_figure)
 
     relation_summary = [row for row in summary if row["family"] == "relation"]
     labels = [str(row["scenario"]) for row in relation_summary]
@@ -935,8 +1021,10 @@ def _plots(
     axis.legend()
     axis.grid(axis="y", alpha=0.25)
     figure.tight_layout()
-    figure.savefig(directory / "relation_detection.svg")
+    relation_figure = directory / "relation_detection.svg"
+    figure.savefig(relation_figure)
     plt.close(figure)
+    _normalize_generated_text(relation_figure)
 
 
 def _environment(
@@ -948,8 +1036,8 @@ def _environment(
         (REPOSITORY_ROOT / "source/policy/closed_loop").glob("*.py")
     ) + [
         REPOSITORY_ROOT / "source/policy/dynamac.py",
-        REPOSITORY_ROOT / "configs/closed_loop_belief.json",
-        REPOSITORY_ROOT / "configs/closed_loop_execution.json",
+        BELIEF_CONFIG_PATH,
+        EXECUTION_CONFIG_PATH,
         Path(__file__).resolve(),
         config_path,
     ]
@@ -1112,6 +1200,24 @@ def run(
         effective_config["demonstration_indices"] = demonstrations
         (staging / "config.json").write_text(
             json.dumps(effective_config, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (staging / "belief_config.json").write_text(
+            json.dumps(
+                BeliefUpdaterConfig.from_json(BELIEF_CONFIG_PATH).to_dict(),
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (staging / "execution_config.json").write_text(
+            json.dumps(
+                ClosedLoopExecutionConfig.from_json(EXECUTION_CONFIG_PATH).to_dict(),
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
         cases = []

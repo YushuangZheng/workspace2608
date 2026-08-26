@@ -8,7 +8,7 @@ from typing import Literal
 
 import numpy as np
 
-from ..dynamac import _fit_pose_sequence, pose_log_world
+from ..dynamac import _fit_pose_sequence, pose_log_nearest
 
 Array = np.ndarray
 FactorKind = Literal["node", "edge"]
@@ -112,7 +112,7 @@ class FactorDistribution:
     def log_likelihood(self, value: Array) -> float:
         current = np.asarray(value, dtype=np.float64)
         residual = (
-            pose_log_world(self.mean, current)
+            pose_log_nearest(self.mean, current)
             if self.space == "se3"
             else current - self.mean
         )
@@ -147,7 +147,7 @@ class FactorDistribution:
 
         current = np.asarray(value, dtype=np.float64)
         residual = (
-            pose_log_world(self.mean, current)
+            pose_log_nearest(self.mean, current)
             if self.space == "se3"
             else current - self.mean
         )

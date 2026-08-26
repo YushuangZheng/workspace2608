@@ -30,6 +30,7 @@ from essay2608.policy.closed_loop import (
     MismatchKind,
     MismatchTracker,
     ProgressEstimate,
+    ProgressPriorBuilder,
     ProgressStatus,
     RelationDecision,
     RelationEstimate,
@@ -476,6 +477,125 @@ def test_unknown_holds_but_reuses_last_trusted_servo_weight(phase3_model) -> Non
     assert result.weighted_action.action.diagnostics["time_index"] == 0
 
 
+def test_unknown_without_history_uses_soft_external_safe_weight(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    current = StateId(0, 0)
+    successor = StateId(0, 1)
+    force_relation_prior(model, current, linked=False)
+    force_relation_prior(model, successor, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    unknown = belief_for(
+        model,
+        demos,
+        tick=0,
+        nominal=successor,
+        estimated=successor,
+        relation=relation_estimate(
+            "object",
+            (0.8, 0.2),
+            RelationDecision.UNKNOWN,
+            information_weight=0.0,
+        ),
+        static=True,
+    )
+    result = controller.update(
+        unknown,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+    )
+    decision = result.roles.decisions["object"]
+    assert result.decision == ExecutionDecision.ADVANCE
+    assert result.cursor_after.reference_state == successor
+    assert decision.role == FrameRole.DEFER
+    assert decision.execution_weight == pytest.approx(0.8)
+    assert decision.blocks_advance is False
+    assert result.weighted_action.available is True
+
+    hidden_controller = ClosedLoopExecutionController(model)
+    hidden_controller.reset(current)
+    hidden = belief_for(
+        model,
+        demos,
+        tick=0,
+        nominal=successor,
+        estimated=successor,
+        relation=relation_estimate(
+            "object",
+            (0.8, 0.2),
+            RelationDecision.UNKNOWN,
+            information_weight=0.0,
+        ),
+        static=True,
+    )
+    hidden.runtime_features.frame_visibility["object"] = False
+    hidden_result = hidden_controller.update(
+        hidden,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+    )
+    hidden_decision = hidden_result.roles.decisions["object"]
+    assert hidden_result.decision == ExecutionDecision.HOLD
+    assert hidden_decision.execution_weight == 0.0
+    assert hidden_decision.blocks_advance is True
+
+
+def test_ambiguous_expected_relation_defers_without_blocking_or_false_recovery(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    current = StateId(0, 0)
+    node = model.state(current)
+    node.demo_relation_priors["object"][:] = np.asarray([0.35, 0.65])
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    linked = belief_for(
+        model,
+        demos,
+        tick=0,
+        nominal=current,
+        estimated=current,
+        relation=relation_estimate("object", (0.2, 0.8), RelationDecision.LINKED),
+    )
+    result = controller.update(
+        linked,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+    )
+    decision = result.roles.decisions["object"]
+    assert decision.expected_distribution[1] == pytest.approx(0.65)
+    assert decision.expected_relation == RelationDecision.UNKNOWN
+    assert decision.actual_relation == RelationDecision.LINKED
+    assert decision.role == FrameRole.DEFER
+    assert decision.execution_weight == 0.0
+    assert decision.blocks_advance is False
+    assert decision.recovery_intent is None
+
+    controller.reset(current)
+    external = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=current,
+        estimated=current,
+        relation=relation_estimate("object", (0.8, 0.2), RelationDecision.EXTERNAL),
+    )
+    external_result = controller.update(
+        external,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+    )
+    external_decision = external_result.roles.decisions["object"]
+    assert external_decision.expected_relation == RelationDecision.UNKNOWN
+    assert external_decision.actual_relation == RelationDecision.EXTERNAL
+    assert external_decision.role == FrameRole.DEFER
+    assert external_decision.execution_weight == pytest.approx(0.8)
+    assert external_decision.blocks_advance is False
+    assert external_decision.recovery_intent is None
+
+
 def test_controller_advances_one_direct_successor_only(phase3_model) -> None:
     model, demos = phase3_model
     current = StateId(0, 0)
@@ -502,6 +622,39 @@ def test_controller_advances_one_direct_successor_only(phase3_model) -> None:
     assert result.cursor_after.reference_state != StateId(0, 2)
     assert result.weighted_action.action is not None
     assert result.weighted_action.action.diagnostics["time_index"] == 1
+
+
+def test_committed_reference_is_the_next_cycle_action_prior_anchor(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    current = StateId(0, 0)
+    successor = StateId(0, 1)
+    following = StateId(0, 2)
+    force_relation_prior(model, current, linked=False)
+    force_relation_prior(model, successor, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=successor,
+        estimated=successor,
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+    )
+    controller.update(
+        belief,
+        dynamac_observation(model, demos, successor),
+        mode_by_skill={0: 0},
+    )
+
+    next_prior = ProgressPriorBuilder(model).build(
+        {successor: 1.0},
+        executed_reference_state=controller.cursor.reference_state,
+    )
+    assert controller.cursor.reference_state == successor
+    assert next_prior.nominal_state == following
 
 
 def test_controller_realigns_index_without_reverse_trajectory_playback(

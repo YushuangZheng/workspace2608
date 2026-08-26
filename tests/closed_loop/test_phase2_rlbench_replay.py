@@ -86,6 +86,7 @@ def test_stack_wine_five_normal_demonstrations_track_in_sidecar_replay() -> None
                         data.ee_pose[demonstration_index, local_index],
                         {name: value.copy() for name, value in frames.items()},
                         data.gripper[demonstration_index, local_index],
+                        data.action_pose[demonstration_index, local_index],
                     )
                 )
 
@@ -94,13 +95,15 @@ def test_stack_wine_five_normal_demonstrations_track_in_sidecar_replay() -> None
             item,
             previous_item=None,
         ) -> RuntimeObservation:
-            _, ee_pose, frames, gripper = item
+            _, ee_pose, frames, gripper, _ = item
             return RuntimeObservation(
                 tick=tick,
                 ee_pose=ee_pose,
                 frame_poses=frames,
                 gripper_state=gripper,
-                previous_command_pose=None if previous_item is None else ee_pose,
+                previous_command_pose=(
+                    None if previous_item is None else previous_item[4]
+                ),
                 previous_ee_pose=None if previous_item is None else previous_item[1],
                 tracking_reliability={},
                 frame_visibility={},
@@ -111,6 +114,7 @@ def test_stack_wine_five_normal_demonstrations_track_in_sidecar_replay() -> None
         for tick in range(1, len(sequence)):
             belief = updater.update(
                 runtime_observation(tick, sequence[tick], sequence[tick - 1]),
+                executed_reference_state=sequence[tick - 1][0],
                 permitted_boundaries=frozenset(model.boundaries),
                 mode_by_skill=mode_by_skill,
             )
@@ -195,17 +199,18 @@ def test_handover_right_static_segment_does_not_stick_at_old_boundary() -> None:
                     data.ee_pose[demonstration_index, local_index].copy(),
                     frames,
                     data.gripper[demonstration_index, local_index].copy(),
+                    data.action_pose[demonstration_index, local_index].copy(),
                 )
             )
 
     def runtime_observation(tick: int, item, previous_item=None) -> RuntimeObservation:
-        _, ee_pose, frames, gripper = item
+        _, ee_pose, frames, gripper, _ = item
         return RuntimeObservation(
             tick=tick,
             ee_pose=ee_pose,
             frame_poses=frames,
             gripper_state=gripper,
-            previous_command_pose=None if previous_item is None else ee_pose,
+            previous_command_pose=None if previous_item is None else previous_item[4],
             previous_ee_pose=None if previous_item is None else previous_item[1],
             tracking_reliability={},
             frame_visibility={},
@@ -220,6 +225,7 @@ def test_handover_right_static_segment_does_not_stick_at_old_boundary() -> None:
     for tick in range(1, len(sequence)):
         belief = updater.update(
             runtime_observation(tick, sequence[tick], sequence[tick - 1]),
+            executed_reference_state=sequence[tick - 1][0],
             permitted_boundaries=frozenset(model.boundaries),
             mode_by_skill=mode_by_skill,
         )

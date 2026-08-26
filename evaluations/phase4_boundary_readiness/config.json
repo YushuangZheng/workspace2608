@@ -1,0 +1,22 @@
+{
+  "schema": "essay2608-phase4-boundary-readiness-config-v1",
+  "claim_boundary": "本检查由五条正常训练示范回放构成。每个新技能假设其上一边界已经正常提交，将进度初始化到该技能首状态，并继续携带已有关系后验，以免早期边界滞后污染后续边界的自身就绪性。检查用于确认离线边界模型和阶段二后验能否为阶段四提供可用的标定输入；它不实现在线入口守卫、不注入故障、不使用故障集调参，也不衡量仿真任务成功率。",
+  "tasks": [
+    "stack_wine",
+    "place_cups",
+    "open_microwave",
+    "wipe_desk",
+    "bimanual_handover_item",
+    "bimanual_lift_tray",
+    "bimanual_put_bottle_in_fridge",
+    "bimanual_sweep_to_dustpan"
+  ],
+  "demonstration_indices": [0, 1, 2, 3, 4],
+  "minimum_tracking_reliability": 0.25,
+  "minimum_consecutive_samples_for_h_audit": 2,
+  "priority_cases": [
+    "bimanual_put_bottle_in_fridge/left",
+    "bimanual_put_bottle_in_fridge/right",
+    "wipe_desk"
+  ]
+}

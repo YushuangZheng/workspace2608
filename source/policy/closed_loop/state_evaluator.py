@@ -8,7 +8,7 @@ from typing import Mapping
 
 import numpy as np
 
-from ..dynamac import pose_log_world, relative_pose
+from ..dynamac import pose_log_nearest, relative_pose
 from .relation_filter import RelationDecision, RelationEstimate
 from .runtime_features import RuntimeFeatures
 from .scene_factors import FactorDistribution, FactorId
@@ -78,7 +78,7 @@ def _gaussian_pose_terms(
     covariance: Array,
     value: Array,
 ) -> tuple[float, float, float, float]:
-    return _gaussian_terms(pose_log_world(mean, value), covariance)
+    return _gaussian_terms(pose_log_nearest(mean, value), covariance)
 
 
 @dataclass(frozen=True)
@@ -97,11 +97,13 @@ class CandidateScore:
     robot_compatibility: float
     state_compatibility: float
     relation_compatibility: float
+    relation_peak_normalized_compatibility: float = 1.0
     robot_frame_terms: dict[str, float] = field(default_factory=dict)
     robot_frame_weights: dict[str, float] = field(default_factory=dict)
     scene_factor_terms: dict[FactorId, float] = field(default_factory=dict)
     scene_factor_weights: dict[FactorId, float] = field(default_factory=dict)
     relation_frame_terms: dict[str, float] = field(default_factory=dict)
+    relation_frame_peak_normalized_terms: dict[str, float] = field(default_factory=dict)
     relation_frame_weights: dict[str, float] = field(default_factory=dict)
     robot_frame_raw_log_likelihoods: dict[str, float] = field(default_factory=dict)
     scene_factor_raw_log_likelihoods: dict[FactorId, float] = field(
@@ -309,7 +311,7 @@ class StateEvaluator:
     ) -> tuple[float, float, float, float]:
         current = np.asarray(value, dtype=np.float64)
         residual = (
-            pose_log_world(distribution.mean, current)
+            pose_log_nearest(distribution.mean, current)
             if distribution.space == "se3"
             else current - distribution.mean
         )
@@ -420,9 +422,17 @@ class StateEvaluator:
         features: RuntimeFeatures,
         relations: Mapping[str, RelationEstimate],
         selected_mode: int | None,
-    ) -> tuple[float, float, dict[str, float], dict[str, float]]:
+    ) -> tuple[
+        float,
+        float,
+        float,
+        dict[str, float],
+        dict[str, float],
+        dict[str, float],
+    ]:
         mode_weights = self._mode_weights(node, selected_mode)
         terms: dict[str, float] = {}
+        peak_normalized_terms: dict[str, float] = {}
         weights: dict[str, float] = {}
         for frame, estimate in relations.items():
             if estimate.decision_state == RelationDecision.UNKNOWN:
@@ -437,16 +447,42 @@ class StateEvaluator:
                 float(np.dot(estimate.posterior, demo_prior)),
                 self.config.probability_floor,
             )
+            # ``compatibility`` is the raw discrete overlap consumed by the
+            # progress posterior.  Its maximum is ``max(demo_prior)``, not one,
+            # whenever the demonstration prior is deliberately soft.  Divide
+            # only the absolute plausibility support by that attainable peak so
+            # all evidence families share a unit best-match scale.  This does
+            # not change relation filtering or candidate-state ranking.
+            attainable_peak = max(
+                float(np.max(demo_prior)), self.config.probability_floor
+            )
+            peak_normalized = float(np.clip(compatibility / attainable_peak, 0.0, 1.0))
             terms[frame] = reliability * math.log(compatibility)
+            peak_normalized_terms[frame] = reliability * math.log(
+                max(peak_normalized, self.config.probability_floor)
+            )
             weights[frame] = reliability
         total = float(sum(terms.values()))
+        peak_normalized_total = float(sum(peak_normalized_terms.values()))
         total_weight = float(sum(weights.values()))
         compatibility = (
             1.0
             if total_weight <= 0.0
             else float(math.exp(max(-750.0, total / total_weight)))
         )
-        return total, compatibility, terms, weights
+        peak_normalized_compatibility = (
+            1.0
+            if total_weight <= 0.0
+            else float(math.exp(max(-750.0, peak_normalized_total / total_weight)))
+        )
+        return (
+            total,
+            compatibility,
+            peak_normalized_compatibility,
+            terms,
+            peak_normalized_terms,
+            weights,
+        )
 
     def evaluate(
         self,
@@ -481,9 +517,14 @@ class StateEvaluator:
             scene_expected,
             scene_available,
         ) = self._scene_score(node, features, selected_mode)
-        relation_log, relation_compat, relation_terms, relation_weights = (
-            self._relation_score(node, features, relations, selected_mode)
-        )
+        (
+            relation_log,
+            relation_compat,
+            relation_peak_normalized_compat,
+            relation_terms,
+            relation_peak_normalized_terms,
+            relation_weights,
+        ) = self._relation_score(node, features, relations, selected_mode)
         explanation_log = (
             robot_support_log
             + self.config.scene_weight * state_support_log
@@ -492,7 +533,7 @@ class StateEvaluator:
         normalized = (
             robot_compat
             * state_compat**self.config.scene_weight
-            * relation_compat**self.config.relation_weight
+            * relation_peak_normalized_compat**self.config.relation_weight
         )
         return CandidateScore(
             state_id=state_id,
@@ -506,11 +547,13 @@ class StateEvaluator:
             robot_compatibility=robot_compat,
             state_compatibility=state_compat,
             relation_compatibility=relation_compat,
+            relation_peak_normalized_compatibility=(relation_peak_normalized_compat),
             robot_frame_terms=robot_terms,
             robot_frame_weights=robot_weights,
             scene_factor_terms=scene_terms,
             scene_factor_weights=scene_weights,
             relation_frame_terms=relation_terms,
+            relation_frame_peak_normalized_terms=(relation_peak_normalized_terms),
             relation_frame_weights=relation_weights,
             robot_frame_raw_log_likelihoods=robot_raw_terms,
             scene_factor_raw_log_likelihoods=scene_raw_terms,

@@ -202,9 +202,11 @@ class RelationFilter:
         features: RuntimeFeatures,
         previous_posteriors: Mapping[str, Array] | None = None,
         *,
+        previous_decisions: Mapping[str, RelationDecision] | None = None,
         mode_by_skill: Mapping[int, int] | None = None,
     ) -> dict[str, RelationEstimate]:
         previous_posteriors = previous_posteriors or {}
+        previous_decisions = previous_decisions or {}
         estimates: dict[str, RelationEstimate] = {}
         for frame in self.task_model.relation_frames:
             demo_prior = self.demonstration_prior(progress_prior, frame, mode_by_skill)
@@ -238,16 +240,35 @@ class RelationFilter:
                 and reliability >= self.config.minimum_tracking_reliability
                 and information >= self.config.minimum_information_weight
             )
+            posterior_decision = RelationDecision.UNKNOWN
             if (
-                not informative
-                or entropy > self.config.maximum_decision_entropy
-                or float(np.max(posterior)) < self.config.decision_probability
+                entropy <= self.config.maximum_decision_entropy
+                and float(np.max(posterior)) >= self.config.decision_probability
             ):
-                decision = RelationDecision.UNKNOWN
-            elif posterior[1] > posterior[0]:
-                decision = RelationDecision.LINKED
+                posterior_decision = (
+                    RelationDecision.LINKED
+                    if posterior[1] > posterior[0]
+                    else RelationDecision.EXTERNAL
+                )
+
+            if informative:
+                decision = posterior_decision
             else:
-                decision = RelationDecision.EXTERNAL
+                previous_decision = previous_decisions.get(frame)
+                may_persist = bool(
+                    visibility
+                    and reliability >= self.config.minimum_tracking_reliability
+                    and information < self.config.minimum_information_weight
+                    and previous_decision
+                    in {
+                        RelationDecision.EXTERNAL,
+                        RelationDecision.LINKED,
+                    }
+                    and posterior_decision == previous_decision
+                )
+                decision = (
+                    previous_decision if may_persist else RelationDecision.UNKNOWN
+                )
             estimates[frame] = RelationEstimate(
                 frame_id=frame,
                 posterior=posterior,

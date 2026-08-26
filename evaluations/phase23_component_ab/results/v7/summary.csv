@@ -1,0 +1,8 @@
+family,scenario,trials,baseline_mae,proposed_mae,absolute_mae_reduction,relative_mae_reduction,proposed_win_rate,baseline_exact_rate,proposed_exact_rate,baseline_detection_rate,proposed_detection_rate,proposed_mean_block_rate,median_detection_latency,active_expert_suppression_rate
+progress,normal,60,0.0,0.06358024691358025,-0.06358024691358025,0.0,0.0,1.0,0.9364197530864197,,,,,
+progress,skip,120,1.9843478260869565,0.18040579710144927,1.8039420289855073,0.9090855974291557,1.0,0.33391304347826084,0.894376811594203,,,,,
+progress,stutter,120,3.095454545454546,0.1568939393939394,2.938560606060607,0.9493147332354381,1.0,0.2545454545454545,0.8431060606060606,,,,,
+relation,break_link_control,45,,,,,,,,0.0,0.0,0.00925925925925926,,0.0
+relation,break_link_perturbed,45,,,,,,,,0.0,1.0,0.9981481481481481,0.0,0.0
+relation,false_coupling_control,50,,,,,,,,0.0,0.0,0.0,,0.0
+relation,false_coupling_perturbed,50,,,,,,,,0.0,1.0,1.0,0.0,1.0

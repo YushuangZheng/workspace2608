@@ -304,6 +304,26 @@ def pose_log_world(base: Array, point: Array) -> Array:
     return np.concatenate((point[:3] - base[:3], rotation_tangent))
 
 
+def pose_log_nearest(base: Array, point: Array) -> Array:
+    """Return a sign-invariant local pose residual for observation matching.
+
+    DynaMAC fitting keeps a continuous lift on :math:`S^3`, so
+    :func:`pose_log_world` deliberately does not change quaternion signs.  A
+    runtime tracker, however, may represent the same physical orientation with
+    either ``q`` or ``-q``.  Observation likelihoods and adjacent-cycle motion
+    residuals must therefore align the observed representative to the model or
+    previous pose before applying the existing TAPAS logarithmic map.
+    """
+
+    reference = _as_float_array(base)
+    aligned = _as_float_array(point).copy()
+    if reference.shape != (7,) or aligned.shape != (7,):
+        raise ValueError("pose_log_nearest requires two [7] poses")
+    if float(np.dot(reference[3:7], aligned[3:7])) < 0.0:
+        aligned[3:7] *= -1.0
+    return pose_log_world(reference, aligned)
+
+
 def pose_exp_world(base: Array, tangent: Array) -> Array:
     """Map a six-dimensional TAPAS ``R3 x S3`` tangent vector to a pose."""
 
@@ -4627,6 +4647,7 @@ __all__ = [
     "pose_exp_world",
     "pose_inverse",
     "pose_log_world",
+    "pose_log_nearest",
     "product_of_experts",
     "relative_pose",
     "static_task_parameter_score_details",

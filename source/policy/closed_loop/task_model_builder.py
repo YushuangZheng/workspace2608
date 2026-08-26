@@ -127,6 +127,10 @@ class ClosedLoopTaskModelConfig:
 @dataclass(frozen=True)
 class _AlignedSkillData:
     ee_pose: Array
+    # Transient replay input only.  It is not serialized into StateNode or
+    # ClosedLoopTaskModel; offline evaluators use it to reconstruct the action
+    # that actually produced the next recorded observation.
+    action_pose: Array
     frames: dict[str, Array]
     gripper: Array
     scene_entity_poses: dict[str, Array]
@@ -219,7 +223,7 @@ class ClosedLoopTaskModelBuilder:
                 demo.ee_pose[_skill_slice(demo, label)[0]].copy()
                 for demo in demonstrations
             ]
-            ee, _, frames, extra = _resampled_skill_data(
+            ee, action, frames, extra = _resampled_skill_data(
                 demonstrations,
                 label,
                 skill.duration,
@@ -261,6 +265,7 @@ class ClosedLoopTaskModelBuilder:
             }
             aligned[skill_index] = _AlignedSkillData(
                 ee_pose=ee,
+                action_pose=action,
                 frames=frames,
                 gripper=extra["gripper"],
                 scene_entity_poses=scene_entity_poses,
@@ -1650,6 +1655,7 @@ class ClosedLoopTaskModelBuilder:
             states,
             links,
             unlinks,
+            pending_links,
             arm_id,
         )
 
@@ -1677,14 +1683,17 @@ class ClosedLoopTaskModelBuilder:
         states: dict[StateId, StateNode],
         links: dict[RelationEventId, LinkRecoveryAnchor],
         unlinks: dict[RelationEventId, UnlinkEventMetadata],
+        pending_links: dict[RelationEventId, LinkPendingCandidate],
         arm_id: str,
     ) -> dict[RelationStateKey, RelationEventId]:
         """Apply accepted LINK/UNLINK events as a persistent relation state.
 
         The covariance/GMSD values remain available in
-        ``demo_relation_scores``.  Only modes whose demonstrations have a
-        confirmed event track are reconciled; Pending-only and purely
-        evidence-based frames keep their soft priors and never gain an origin.
+        ``demo_relation_scores``.  Deployment priors follow the confirmed
+        event state machine, so a rejected isolated covariance pulse cannot
+        become a control-time linked expectation.  A Pending-only interval may
+        retain its covariance-led linked hypothesis after its candidate point,
+        but it never gains an origin and stops as soon as that support ends.
         """
 
         skill_offsets = np.cumsum(
@@ -1724,6 +1733,22 @@ class ClosedLoopTaskModelBuilder:
         for values in transitions.values():
             values.sort(key=lambda value: (value[0], value[1]))
 
+        pending_starts: dict[tuple[int, str], list[int]] = {}
+        for event_id, candidate in pending_links.items():
+            start = global_index(candidate.candidate_state)
+            members = _mode_members(
+                policy.skills[event_id.skill_index],
+                event_id.mode,
+            )
+            for demonstration in members:
+                pending_starts.setdefault(
+                    (int(demonstration), event_id.frame_id), []
+                ).append(start)
+        for values in pending_starts.values():
+            values.sort()
+
+        pending_runtime: dict[tuple[tuple[int, ...], str], tuple[int, bool]] = {}
+
         origins: dict[RelationStateKey, RelationEventId] = {}
         for state_id, node in sorted(states.items()):
             state_global_index = global_index(state_id)
@@ -1731,10 +1756,49 @@ class ClosedLoopTaskModelBuilder:
             for mode in range(len(skill.mode_priors)):
                 mode_members = tuple(int(value) for value in _mode_members(skill, mode))
                 for frame in policy.frame_names:
+                    raw_prior = node.demo_relation_priors[frame][mode].copy()
                     tracks = [
                         transitions.get((member, frame)) for member in mode_members
                     ]
                     if not tracks or any(track is None for track in tracks):
+                        member_pending = [
+                            pending_starts.get((member, frame), [])
+                            for member in mode_members
+                        ]
+                        common_starts = (
+                            sorted(
+                                set.intersection(
+                                    *(set(values) for values in member_pending)
+                                )
+                            )
+                            if member_pending and all(member_pending)
+                            else []
+                        )
+                        available_starts = [
+                            start
+                            for start in common_starts
+                            if start <= state_global_index
+                        ]
+                        runtime_key = (mode_members, frame)
+                        last_start, active = pending_runtime.get(
+                            runtime_key, (-1, False)
+                        )
+                        if available_starts and available_starts[-1] > last_start:
+                            last_start = available_starts[-1]
+                            active = True
+                        pending_hypothesis = bool(
+                            active
+                            and raw_prior[1] >= self.config.relation_link_threshold
+                        )
+                        if active and not pending_hypothesis:
+                            active = False
+                        pending_runtime[runtime_key] = (last_start, active)
+                        if not pending_hypothesis:
+                            linked_probability = self.config.relation_unlink_threshold
+                            node.demo_relation_priors[frame][mode] = np.asarray(
+                                [1.0 - linked_probability, linked_probability],
+                                dtype=np.float64,
+                            )
                         continue
                     active_origins: list[RelationEventId | None] = []
                     active_count = 0

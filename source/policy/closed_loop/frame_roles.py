@@ -242,8 +242,11 @@ class FrameRoleRouter:
         return result
 
     def _expected_decision(self, distribution: Array) -> RelationDecision:
-        maximum = float(np.max(distribution))
-        if maximum < self.config.expected_relation_probability:
+        # A soft progress-weighted demonstration distribution can be
+        # temporarily ambiguous around a normal relation transition.  Keep
+        # that uncertainty explicit: it is neither an actual-q Unknown nor a
+        # reliable expected/actual mismatch.
+        if float(np.max(distribution)) < self.config.expected_relation_probability:
             return RelationDecision.UNKNOWN
         return (
             RelationDecision.LINKED
@@ -387,7 +390,11 @@ class FrameRoleRouter:
 
         for frame in (*selected_frames, *confirmed_monitors):
             selected_offline = frame in selected
-            reliability = features.tracking_reliability.get(frame, 0.0)
+            reliability = (
+                features.tracking_reliability.get(frame, 0.0)
+                if features.frame_visibility.get(frame, False)
+                else 0.0
+            )
             if frame.startswith("virtual_skill_"):
                 weight = (
                     reliability if features.frame_visibility.get(frame, False) else 0.0
@@ -409,34 +416,75 @@ class FrameRoleRouter:
             distribution = self._expected_distribution(
                 frame, belief.progress.posterior, mode_by_skill
             )
-            expected = self._expected_decision(distribution)
-            if not selected_offline and expected != RelationDecision.LINKED:
-                # Event-confirmed monitoring never re-enables an inactive
-                # external expert and never broadens PoE participation.
-                continue
             estimate = belief.relation_estimates.get(frame)
             actual = (
                 RelationDecision.UNKNOWN
                 if estimate is None
                 else estimate.decision_state
             )
+            expected = self._expected_decision(distribution)
+            if (
+                not selected_offline
+                and expected != RelationDecision.LINKED
+                and not (
+                    expected == RelationDecision.UNKNOWN
+                    and actual == RelationDecision.LINKED
+                )
+            ):
+                # Event-confirmed monitoring never re-enables an inactive
+                # external expert and never broadens PoE participation.
+                continue
             compatibility = (
                 0.5
                 if estimate is None
                 else float(np.dot(estimate.posterior, distribution))
             )
-            if (
-                expected == RelationDecision.UNKNOWN
-                or actual == RelationDecision.UNKNOWN
-            ):
+            if actual == RelationDecision.UNKNOWN:
                 role = FrameRole.DEFER
+                safe_weight = (
+                    0.0 if estimate is None else reliability * estimate.external
+                )
+                trusted = frame in self._last_trusted_weights
                 weight = (
-                    self._last_trusted_weights.get(frame, 0.0)
+                    self._last_trusted_weights.get(frame, safe_weight)
                     if selected_offline
                     else 0.0
                 )
                 monitor = False
-                blocks = True
+                # At startup there may be no previously confirmed relation.
+                # If both the demonstrated expectation and the binary
+                # posterior strongly support a visible/reliable external
+                # relation, a conservatively weighted action is needed to
+                # create the motion evidence that can resolve Unknown.  This
+                # is not a relation decision.  Once a trusted relation exists,
+                # any later Unknown is blocking because persistence already
+                # failed its continuity checks.
+                safe_external_bootstrap = bool(
+                    selected_offline
+                    and not trusted
+                    and expected == RelationDecision.EXTERNAL
+                    and estimate is not None
+                    and estimate.external >= self.config.expected_relation_probability
+                    and reliability >= self.config.minimum_tracking_reliability
+                    and weight > 0.0
+                )
+                blocks = not safe_external_bootstrap
+                intent = None
+            elif expected == RelationDecision.UNKNOWN:
+                # The online relation is stable, but beta-weighted normal
+                # expectations straddle a demonstrated relation transition.
+                # Preserve a safe role without inventing a mismatch.  This
+                # ambiguity alone must not deadlock the progress transition;
+                # a genuine actual-q Unknown remains blocking above.
+                role = FrameRole.DEFER
+                if actual == RelationDecision.LINKED:
+                    weight = 0.0
+                    monitor = True
+                else:
+                    safe_weight = reliability * estimate.external
+                    weight = self._last_trusted_weights.get(frame, safe_weight)
+                    monitor = False
+                blocks = False
                 intent = None
             elif expected == actual == RelationDecision.EXTERNAL:
                 role = FrameRole.EXECUTE

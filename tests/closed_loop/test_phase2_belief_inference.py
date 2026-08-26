@@ -21,6 +21,7 @@ from essay2608.policy.closed_loop import (
     FactorId,
     ProgressFilter,
     ProgressPriorBuilder,
+    ProgressPriorConfig,
     ProgressStatus,
     RelationDecision,
     RelationEstimate,
@@ -136,6 +137,79 @@ def test_runtime_features_distinguish_comotion_external_and_static() -> None:
     assert static.action_excitation == pytest.approx(0.0)
 
 
+def test_runtime_motion_and_gaussian_support_ignore_quaternion_antipodes(
+    phase2_model,
+) -> None:
+    model, demonstrations = phase2_model
+    demo = demonstrations[0]
+    previous = RuntimeObservation(
+        tick=0,
+        ee_pose=demo.ee_pose[0],
+        frame_poses={"object": demo.frames["object"][0]},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=None,
+        previous_ee_pose=None,
+        tracking_reliability={"object": 1.0},
+        frame_visibility={"object": True},
+    )
+    flipped_frame = demo.frames["object"][1].copy()
+    flipped_frame[3:7] *= -1.0
+    flipped = RuntimeObservation(
+        tick=1,
+        ee_pose=demo.ee_pose[1],
+        frame_poses={"object": flipped_frame},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=demo.action_pose[0],
+        previous_ee_pose=demo.ee_pose[0],
+        tracking_reliability={"object": 1.0},
+        frame_visibility={"object": True},
+    )
+    canonical = RuntimeObservation(
+        tick=1,
+        ee_pose=demo.ee_pose[1],
+        frame_poses={"object": demo.frames["object"][1]},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=demo.action_pose[0],
+        previous_ee_pose=demo.ee_pose[0],
+        tracking_reliability={"object": 1.0},
+        frame_visibility={"object": True},
+    )
+    builder = RuntimeFeatureBuilder()
+    canonical_features = builder.build(canonical, previous)
+    flipped_features = builder.build(flipped, previous)
+    np.testing.assert_allclose(
+        flipped_features.relative_motion_residuals["object"],
+        canonical_features.relative_motion_residuals["object"],
+        atol=1.0e-12,
+    )
+    relation = {
+        "object": relation_estimate("object", (0.999, 0.001), RelationDecision.EXTERNAL)
+    }
+    evaluator = StateEvaluator(model)
+    canonical_score = evaluator.evaluate(
+        StateId(0, 1), canonical_features, relation, mode_by_skill={0: 0}
+    )
+    flipped_score = evaluator.evaluate(
+        StateId(0, 1), flipped_features, relation, mode_by_skill={0: 0}
+    )
+    assert flipped_score.robot_log_support == pytest.approx(
+        canonical_score.robot_log_support
+    )
+    assert flipped_score.robot_compatibility == pytest.approx(
+        canonical_score.robot_compatibility
+    )
+
+    distribution = FactorDistribution(
+        mean=pose(0.1), covariance=np.eye(6) * 0.01, sample_count=5
+    )
+    antipode = distribution.mean.copy()
+    antipode[3:7] *= -1.0
+    assert distribution.compatibility(antipode) == pytest.approx(1.0)
+    assert distribution.log_likelihood(antipode) == pytest.approx(
+        distribution.log_likelihood(distribution.mean)
+    )
+
+
 def test_relation_filter_has_shared_physical_semantics_without_static_false_link(
     phase2_model,
 ) -> None:
@@ -202,6 +276,91 @@ def test_invisible_or_unreliable_relation_is_unknown(phase2_model) -> None:
     assert first_estimate.information_weight == 0.0
 
 
+def test_confirmed_relation_persists_only_through_reliable_static_cycle(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    builder = RuntimeFeatureBuilder()
+    relation_filter = RelationFilter(
+        model,
+        RelationFilterConfig(demonstration_prior_strength=0.0),
+        feature_builder=builder,
+    )
+    progress = {StateId(0, 1): 1.0}
+    previous = observation(0, 0.0, 0.4, previous_ee_x=None)
+    moving = builder.build(observation(1, 0.1, 0.5, previous_ee_x=0.0), previous)
+    confirmed = relation_filter.update(
+        progress, moving, {"object": np.asarray([0.5, 0.5])}
+    )["object"]
+    assert confirmed.decision_state == RelationDecision.LINKED
+    assert confirmed.informative is True
+
+    static_previous = observation(1, 0.1, 0.5, previous_ee_x=0.0)
+    static = builder.build(observation(2, 0.1, 0.5, previous_ee_x=0.1), static_previous)
+    persisted = relation_filter.update(
+        progress,
+        static,
+        {"object": confirmed.posterior},
+        previous_decisions={"object": confirmed.decision_state},
+    )["object"]
+    assert persisted.informative is False
+    assert persisted.decision_state == RelationDecision.LINKED
+
+    unconfirmed = relation_filter.update(
+        progress, static, {"object": confirmed.posterior}
+    )["object"]
+    assert unconfirmed.decision_state == RelationDecision.UNKNOWN
+
+    hidden_static = builder.build(
+        observation(2, 0.1, 0.5, previous_ee_x=0.1, visible=False),
+        static_previous,
+    )
+    hidden = relation_filter.update(
+        progress,
+        hidden_static,
+        {"object": confirmed.posterior},
+        previous_decisions={"object": confirmed.decision_state},
+    )["object"]
+    assert hidden.decision_state == RelationDecision.UNKNOWN
+
+
+def test_relation_does_not_resurrect_across_visibility_gap_without_new_motion(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    updater = BeliefUpdater(
+        model,
+        BeliefUpdaterConfig(
+            relation_filter=RelationFilterConfig(demonstration_prior_strength=0.0)
+        ),
+    )
+    state = StateId(0, 1)
+    updater.reset(
+        initial_progress={state: 1.0},
+        initial_relations={"object": np.asarray([0.05, 0.95])},
+        initial_relation_decisions={"object": RelationDecision.LINKED},
+        previous_observation=observation(0, 0.1, 0.5, previous_ee_x=None),
+    )
+    hidden = updater.update(
+        observation(1, 0.1, 0.5, previous_ee_x=0.1, visible=False),
+        executed_reference_state=state,
+        mode_by_skill={0: 0, 1: 0},
+    )
+    assert (
+        hidden.relation_estimates["object"].decision_state == RelationDecision.UNKNOWN
+    )
+
+    reappeared = updater.update(
+        observation(2, 0.1, 0.5, previous_ee_x=0.1, visible=True),
+        executed_reference_state=state,
+        mode_by_skill={0: 0, 1: 0},
+    )
+    assert (
+        reappeared.relation_estimates["object"].decision_state
+        == RelationDecision.UNKNOWN
+    )
+
+
 def test_progress_prior_concentrates_on_successor_and_obeys_boundary_gate(
     phase2_model,
 ) -> None:
@@ -220,6 +379,25 @@ def test_progress_prior_concentrates_on_successor_and_obeys_boundary_gate(
     )
     assert released.nominal_state == StateId(1, 0)
     assert set(released.probabilities) == {terminal, StateId(1, 0)}
+
+
+def test_progress_prior_is_conditioned_on_the_action_reference(phase2_model) -> None:
+    model, _ = phase2_model
+    builder = ProgressPriorBuilder(
+        model,
+        ProgressPriorConfig(local_backward_radius=2),
+    )
+    posterior = {StateId(0, 0): 0.75, StateId(0, 1): 0.25}
+    action_reference = StateId(0, 1)
+    anchored = builder.build(
+        posterior,
+        executed_reference_state=action_reference,
+    )
+    assert anchored.nominal_state == StateId(0, 2)
+    assert anchored.probabilities[StateId(0, 0)] == pytest.approx(0.15)
+    assert anchored.probabilities[action_reference] == pytest.approx(0.05)
+    assert anchored.probabilities[StateId(0, 2)] == pytest.approx(0.65)
+    assert anchored.probabilities[StateId(0, 3)] == pytest.approx(0.15)
 
 
 def candidate(
@@ -328,7 +506,7 @@ def test_linked_stream_precision_is_suppressed_in_progress_score(phase2_model) -
         ee_pose=demo.ee_pose[1],
         frame_poses={"object": demo.frames["object"][1]},
         gripper_state=np.asarray([1.0]),
-        previous_command_pose=demo.action_pose[1],
+        previous_command_pose=demo.action_pose[0],
         previous_ee_pose=demo.ee_pose[0],
         tracking_reliability={"object": 1.0},
         frame_visibility={"object": True},
@@ -346,6 +524,70 @@ def test_linked_stream_precision_is_suppressed_in_progress_score(phase2_model) -
     )
     assert score.robot_frame_weights["object"] == pytest.approx(0.001)
     assert math.isfinite(score.robot_log_likelihood)
+
+
+def test_absolute_explanation_removes_soft_relation_prior_peak_scale(
+    phase2_model,
+) -> None:
+    model, demonstrations = phase2_model
+    demo = demonstrations[0]
+    state_id = StateId(0, 1)
+    node = model.state(state_id)
+    original = node.demo_relation_priors["object"].copy()
+    runtime = RuntimeObservation(
+        tick=1,
+        ee_pose=demo.ee_pose[1],
+        frame_poses={"object": demo.frames["object"][1]},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=demo.action_pose[0],
+        previous_ee_pose=demo.ee_pose[0],
+        tracking_reliability={"object": 1.0},
+        frame_visibility={"object": True},
+    )
+    features = RuntimeFeatureBuilder().build(runtime)
+    estimate = {
+        "object": relation_estimate("object", (0.15, 0.85), RelationDecision.LINKED)
+    }
+    try:
+        node.demo_relation_priors["object"][0] = np.asarray([0.3, 0.7])
+        matching = StateEvaluator(model).evaluate(
+            state_id, features, estimate, mode_by_skill={0: 0}
+        )
+        assert matching.relation_compatibility == pytest.approx(0.64)
+        assert matching.relation_peak_normalized_compatibility == pytest.approx(
+            0.64 / 0.7
+        )
+        assert matching.normalized_explanation_score == pytest.approx(
+            matching.robot_compatibility * matching.state_compatibility * (0.64 / 0.7)
+        )
+        assert matching.relation_log_compatibility == pytest.approx(math.log(0.64))
+
+        node.demo_relation_priors["object"][0] = np.asarray([0.7, 0.3])
+        opposing = StateEvaluator(model).evaluate(
+            state_id, features, estimate, mode_by_skill={0: 0}
+        )
+        assert opposing.relation_compatibility == pytest.approx(0.36)
+        assert opposing.relation_peak_normalized_compatibility == pytest.approx(
+            0.36 / 0.7
+        )
+        assert (
+            matching.relation_compatibility / opposing.relation_compatibility
+        ) == pytest.approx(
+            matching.relation_peak_normalized_compatibility
+            / opposing.relation_peak_normalized_compatibility
+        )
+
+        node.demo_relation_priors["object"][0] = np.asarray([0.5, 0.5])
+        ambiguous = StateEvaluator(model).evaluate(
+            state_id, features, estimate, mode_by_skill={0: 0}
+        )
+        assert ambiguous.relation_compatibility == pytest.approx(0.5)
+        assert ambiguous.relation_peak_normalized_compatibility == pytest.approx(1.0)
+        # The original overlap remains in the posterior score; only the
+        # cross-family absolute explanation uses the attainable-peak scale.
+        assert ambiguous.relation_log_compatibility == pytest.approx(math.log(0.5))
+    finally:
+        node.demo_relation_priors["object"] = original
 
 
 def test_node_and_edge_scene_factors_use_the_unified_observation(phase2_model) -> None:
@@ -449,7 +691,7 @@ def test_belief_updater_is_single_pass_and_auditable(phase2_model) -> None:
         ee_pose=demo.ee_pose[1],
         frame_poses={"object": demo.frames["object"][1]},
         gripper_state=np.asarray([1.0]),
-        previous_command_pose=demo.action_pose[1],
+        previous_command_pose=demo.action_pose[0],
         previous_ee_pose=demo.ee_pose[0],
         tracking_reliability={"object": 1.0},
         frame_visibility={"object": True},
@@ -507,7 +749,7 @@ def carry_updater(model, demo):
         ee_pose=demo.ee_pose[7],
         frame_poses={"object": demo.frames["object"][7]},
         gripper_state=np.asarray([-1.0]),
-        previous_command_pose=demo.action_pose[7],
+        previous_command_pose=demo.action_pose[6],
         previous_ee_pose=demo.ee_pose[6],
         tracking_reliability={"object": 1.0},
         frame_visibility={"object": True},
@@ -528,7 +770,7 @@ def test_reliable_early_release_can_expand_to_matching_future_segment(
         ee_pose=demo.ee_pose[9],
         frame_poses={"object": demo.frames["object"][9]},
         gripper_state=np.asarray([1.0]),
-        previous_command_pose=demo.action_pose[9],
+        previous_command_pose=demo.action_pose[7],
         previous_ee_pose=demo.ee_pose[7],
         tracking_reliability={"object": 1.0},
         frame_visibility={"object": True},

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..dynamac import pose_log_world, relative_pose
+from ..dynamac import pose_log_nearest, relative_pose
 from .runtime_observation import RuntimeObservation
 
 Array = np.ndarray
@@ -76,12 +76,12 @@ class RuntimeFeatureBuilder:
         actual_motion = (
             np.zeros(6, dtype=np.float64)
             if previous_ee is None
-            else pose_log_world(previous_ee, observation.ee_pose)
+            else pose_log_nearest(previous_ee, observation.ee_pose)
         )
         command_motion = (
             np.zeros(6, dtype=np.float64)
             if previous_ee is None or observation.previous_command_pose is None
-            else pose_log_world(previous_ee, observation.previous_command_pose)
+            else pose_log_nearest(previous_ee, observation.previous_command_pose)
         )
         actual_magnitude = self.motion_magnitude(actual_motion)
         command_magnitude = self.motion_magnitude(command_motion)
@@ -121,14 +121,14 @@ class RuntimeFeatureBuilder:
                 residuals[name] = np.zeros(6, dtype=np.float64)
             else:
                 assert previous_observation is not None
-                frame_motion[name] = pose_log_world(previous_frame, current_frame)
+                frame_motion[name] = pose_log_nearest(previous_frame, current_frame)
                 prior_ee = (
                     previous_observation.ee_pose
                     if observation.previous_ee_pose is None
                     else observation.previous_ee_pose
                 )
                 previous_relative = relative_pose(previous_frame, prior_ee)
-                residuals[name] = pose_log_world(previous_relative, current_relative)
+                residuals[name] = pose_log_nearest(previous_relative, current_relative)
             visibility[name] = observation.visibility(name)
             reliability[name] = observation.reliability(name)
             prior_visible = bool(

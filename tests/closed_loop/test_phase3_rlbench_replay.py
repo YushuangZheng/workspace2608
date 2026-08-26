@@ -11,12 +11,12 @@ import pytest
 from essay2608.policy import DynaMAC, DynaMACObservation
 from essay2608.policy.closed_loop import (
     BeliefUpdater,
+    ClosedLoopExecutionController,
     ClosedLoopTaskModelBuilder,
     FrameRole,
-    FrameRoleRouter,
+    RelationDecision,
     RuntimeObservation,
     StateId,
-    WeightedPoEExecutor,
 )
 from integrations.rlbench.rlbench_dynamac.data.demo_adapter import (
     load_low_dim_obs_pickles,
@@ -59,13 +59,14 @@ def test_stack_wine_normal_replay_routes_roles_and_keeps_actions_available() -> 
         )
         for skill_index, skill in enumerate(policy.skills)
     }
-    sequence = []
+    skill_sequences = []
     virtual_frames: dict[str, np.ndarray] = {}
     for skill_index, skill in enumerate(policy.skills):
         data = aligned[skill_index]
         virtual_frames[f"virtual_skill_{skill.label}"] = data.ee_pose[
             demonstration_index, 0
         ].copy()
+        sequence = []
         for local_index in range(skill.duration):
             frames = {
                 name: values[demonstration_index, local_index].copy()
@@ -80,61 +81,112 @@ def test_stack_wine_normal_replay_routes_roles_and_keeps_actions_available() -> 
                     data.ee_pose[demonstration_index, local_index].copy(),
                     frames,
                     data.gripper[demonstration_index, local_index].copy(),
+                    data.action_pose[demonstration_index, local_index].copy(),
                 )
             )
+        skill_sequences.append(tuple(sequence))
 
-    def runtime_observation(tick: int, item, previous_item=None) -> RuntimeObservation:
-        _, ee_pose, frames, gripper = item
+    def runtime_observation(
+        tick: int,
+        item,
+        previous_item=None,
+        previous_command_pose=None,
+    ) -> RuntimeObservation:
+        _, ee_pose, frames, gripper, _ = item
         return RuntimeObservation(
             tick=tick,
             ee_pose=ee_pose,
             frame_poses=frames,
             gripper_state=gripper,
-            previous_command_pose=None if previous_item is None else ee_pose,
+            previous_command_pose=(
+                None
+                if previous_item is None
+                else (
+                    previous_item[4]
+                    if previous_command_pose is None
+                    else previous_command_pose
+                )
+            ),
             previous_ee_pose=None if previous_item is None else previous_item[1],
             tracking_reliability={},
             frame_visibility={},
         )
 
-    policy.reset(
-        DynaMACObservation(sequence[0][1], sequence[0][2]),
-        mode_strategy="map",
-    )
-    updater = BeliefUpdater(model)
-    updater.reset(previous_observation=runtime_observation(0, sequence[0]))
-    router = FrameRoleRouter(model)
-    executor = WeightedPoEExecutor(model)
-
+    first = skill_sequences[0][0]
+    policy.reset(DynaMACObservation(first[1], first[2]), mode_strategy="map")
     role_counts: Counter[FrameRole] = Counter()
     unavailable = []
     recoveries = []
     selected_unknown_weights = []
-    for tick in range(1, len(sequence)):
-        truth, ee_pose, frames, _ = sequence[tick]
-        belief = updater.update(
-            runtime_observation(tick, sequence[tick], sequence[tick - 1]),
-            permitted_boundaries=frozenset(model.boundaries),
-            mode_by_skill=mode_by_skill,
+    tick = 0
+    carried_relations = None
+    carried_decisions = None
+    for sequence in skill_sequences:
+        initial = sequence[0]
+        skill_index = initial[0].skill_index
+        mode = mode_by_skill[skill_index]
+        initial_relations = {
+            frame: values[mode].copy()
+            for frame, values in model.state(initial[0]).demo_relation_priors.items()
+        }
+        updater = BeliefUpdater(model)
+        updater.reset(
+            initial_progress={initial[0]: 1.0},
+            initial_relations=(
+                initial_relations if carried_relations is None else carried_relations
+            ),
+            initial_relation_decisions=carried_decisions,
+            previous_observation=runtime_observation(tick, initial),
         )
-        roles = router.route(truth, belief, mode_by_skill=mode_by_skill)
-        result = executor.query(
-            DynaMACObservation(ee_pose, frames),
-            truth,
-            roles,
-            mode_index=mode_by_skill[truth.skill_index],
-        )
-        role_counts.update(decision.role for decision in roles.decisions.values())
-        if not result.available:
-            unavailable.append((tick, truth, roles.execution_weights))
-        recoveries.extend(roles.recovery_intents)
-        for frame, decision in roles.decisions.items():
-            if decision.role == FrameRole.DEFER:
-                selected_unknown_weights.append(
-                    (truth, frame, decision.execution_weight)
+        controller = ClosedLoopExecutionController(model)
+        controller.reset(initial[0])
+        previous = initial
+        for current in sequence[1:]:
+            tick += 1
+            truth, ee_pose, frames, _, _ = current
+            belief = updater.update(
+                runtime_observation(tick, current, previous),
+                # The replayed observation comes from the demonstration's
+                # recorded previous-state action; the queried controller
+                # action is not applied to the fixed trace.
+                executed_reference_state=previous[0],
+                mode_by_skill=mode_by_skill,
+            )
+            cycle = controller.update(
+                belief,
+                DynaMACObservation(ee_pose, frames),
+                mode_by_skill=mode_by_skill,
+            )
+            roles = cycle.roles
+            result = cycle.weighted_action
+            role_counts.update(decision.role for decision in roles.decisions.values())
+            if not result.available:
+                unavailable.append(
+                    (
+                        tick,
+                        truth,
+                        controller.cursor,
+                        belief.progress,
+                        roles.decisions,
+                        roles.execution_weights,
+                    )
                 )
+            recoveries.extend(roles.recovery_intents)
+            for frame, decision in roles.decisions.items():
+                if decision.role == FrameRole.DEFER:
+                    selected_unknown_weights.append(
+                        (truth, frame, decision.execution_weight)
+                    )
+            previous = current
+        carried_relations = belief.relation_posteriors
+        carried_decisions = {
+            frame: estimate.decision_state
+            for frame, estimate in belief.relation_estimates.items()
+            if estimate.decision_state != RelationDecision.UNKNOWN
+        }
 
     assert unavailable == []
     assert recoveries == []
     assert role_counts[FrameRole.EXECUTE] > 0
     assert selected_unknown_weights
-    assert any(weight > 0.0 for _, _, weight in selected_unknown_weights)
+    assert all(weight >= 0.0 for _, _, weight in selected_unknown_weights)

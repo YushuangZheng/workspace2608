@@ -1,0 +1,13 @@
+{
+  "frame_roles": {
+    "expected_relation_probability": 0.7,
+    "minimum_tracking_reliability": 0.25,
+    "minimum_information_weight": 0.1
+  },
+  "mismatch": {
+    "no_plausible_cycles": 3,
+    "relation_mismatch_cycles": 3,
+    "persistent_hold_cycles": 20,
+    "stalled_progress_cycles": 20
+  }
+}
