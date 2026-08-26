@@ -1,0 +1,28 @@
+{
+  "schema": "essay2608-phase5-behavior-ab-config-v2",
+  "tasks": [
+    "stack_wine",
+    "place_cups",
+    "open_microwave",
+    "wipe_desk",
+    "bimanual_handover_item",
+    "bimanual_lift_tray",
+    "bimanual_put_bottle_in_fridge",
+    "bimanual_sweep_to_dustpan"
+  ],
+  "demonstration_indices": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "verification_outcomes": [
+    "linked",
+    "external"
+  ],
+  "reference_reentry_robot_compatibility": 0.01,
+  "maximum_simulation_cycles": 120,
+  "stuck_recovery_waypoint_cycles": 1,
+  "stuck_recovery_attempts": 1
+}

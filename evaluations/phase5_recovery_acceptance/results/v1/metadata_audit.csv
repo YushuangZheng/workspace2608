@@ -1,0 +1,13 @@
+task,arm,formal_link_anchors,pending_candidates,unlink_events,resolved_link_origins,constructed_link_goals,activated_pending_goals,constructed_unlink_goals,instantiated_link_waypoints,unlink_legal_reentry_states,accepted
+stack_wine,single,1,0,0,96,1,0,0,16,0,1
+place_cups,single,1,0,1,108,1,0,1,16,2,1
+open_microwave,single,1,0,0,52,1,0,0,16,0,1
+wipe_desk,single,1,0,0,180,1,0,0,16,0,1
+bimanual_handover_item,left,1,0,1,140,1,0,1,16,4,1
+bimanual_handover_item,right,0,1,0,0,0,1,0,0,0,1
+bimanual_lift_tray,left,2,0,0,59,2,0,0,32,0,1
+bimanual_lift_tray,right,2,2,0,58,2,2,0,32,0,1
+bimanual_put_bottle_in_fridge,left,1,0,1,156,1,0,1,16,2,1
+bimanual_put_bottle_in_fridge,right,0,0,0,0,0,0,0,0,0,1
+bimanual_sweep_to_dustpan,left,1,2,0,55,1,2,0,16,0,1
+bimanual_sweep_to_dustpan,right,0,2,0,0,0,2,0,0,0,1

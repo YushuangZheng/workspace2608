@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,6 +14,7 @@ from .progress_filter import (
     ProgressEstimate,
     ProgressFilter,
     ProgressFilterConfig,
+    ProgressStatus,
 )
 from .progress_prior import ProgressPrior, ProgressPriorBuilder, ProgressPriorConfig
 from .relation_filter import (
@@ -169,6 +170,27 @@ class BeliefUpdater:
         self._progress_posterior = {
             state: float(value / total) for state, value in initial_progress.items()
         }
+        initial_state = max(
+            self._progress_posterior,
+            key=lambda state: (
+                self._progress_posterior[state],
+                -self._global_index[state],
+            ),
+        )
+        probabilities = np.asarray(tuple(self._progress_posterior.values()))
+        entropy = float(
+            -np.sum(probabilities * np.log(np.maximum(probabilities, 1.0e-300)))
+        )
+        self._last_progress = ProgressEstimate(
+            prior=dict(self._progress_posterior),
+            posterior=dict(self._progress_posterior),
+            nominal_state=initial_state,
+            estimated_state=initial_state,
+            confidence=float(self._progress_posterior[initial_state]),
+            entropy=entropy,
+            best_explanation_score=1.0,
+            status=ProgressStatus.ALIGNED,
+        )
         self._relation_posteriors = {
             frame: np.asarray(value, dtype=np.float64).copy()
             for frame, value in (initial_relations or {}).items()
@@ -381,6 +403,7 @@ class BeliefUpdater:
         }
         self._previous_observation = observation
         self._last_tick = observation.tick
+        self._last_progress = progress
         return ClosedLoopBelief(
             tick=observation.tick,
             runtime_features=features,
@@ -390,6 +413,69 @@ class BeliefUpdater:
             relation_changes=changes,
             local_candidates=progress_prior.candidates,
             expanded_candidates=expanded,
+        )
+
+    def update_frozen(
+        self,
+        observation: RuntimeObservation,
+        *,
+        mode_by_skill: Mapping[int, int] | None = None,
+    ) -> ClosedLoopBelief:
+        """Update relation evidence while freezing the normal progress posterior.
+
+        ``VERIFY_LINK`` and ``RECOVERY`` actions are not normal task actions, so
+        their observations must not advance or realign the task clock.  The
+        same feature builder and relation filter still consume the real motion.
+        Candidate scores are diagnostic only; they do not alter beta until an
+        explicit reentry decision resets it.
+        """
+
+        if self._last_tick is not None and observation.tick <= self._last_tick:
+            raise ValueError("BeliefUpdater 每个递增控制周期只能更新一次")
+        features = self.feature_builder.build(observation, self._previous_observation)
+        frozen_progress = dict(self._progress_posterior)
+        relation_estimates = self.relation_filter.update(
+            frozen_progress,
+            features,
+            self._relation_posteriors,
+            previous_decisions=self._stable_decisions,
+            mode_by_skill=mode_by_skill,
+        )
+        changes = self._relation_changes(relation_estimates)
+        candidates = tuple(sorted(frozen_progress, key=self._global_index.__getitem__))
+        scores = self.state_evaluator.evaluate_many(
+            candidates,
+            features,
+            relation_estimates,
+            mode_by_skill=mode_by_skill,
+        )
+        best_explanation = max(
+            (score.normalized_explanation_score for score in scores.values()),
+            default=self._last_progress.best_explanation_score,
+        )
+        progress = replace(
+            self._last_progress,
+            prior=frozen_progress,
+            posterior=frozen_progress,
+            best_explanation_score=float(best_explanation),
+        )
+        self._relation_posteriors = {
+            frame: estimate.posterior.copy()
+            for frame, estimate in relation_estimates.items()
+        }
+        self._previous_observation = observation
+        self._last_tick = observation.tick
+        self._last_progress = progress
+        return ClosedLoopBelief(
+            tick=observation.tick,
+            runtime_features=features,
+            relation_estimates=dict(relation_estimates),
+            progress=progress,
+            candidate_scores=scores,
+            relation_changes=changes,
+            local_candidates=candidates,
+            expanded_candidates=(),
+            update_sequence=("frozen_progress", "relation_posterior"),
         )
 
 

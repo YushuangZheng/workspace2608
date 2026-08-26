@@ -1,0 +1,2 @@
+normal_trials,reference_threshold,calibrated_threshold,minimum_truth_robot_compatibility,reference_selected,calibrated_selected,reference_exact,calibrated_exact,reference_incorrect_selected,calibrated_incorrect_selected,reference_mae,calibrated_mae
+240,0.01,0.001,0.002194842207866676,239,240,180,181,59,59,1.7291666666666667,0.6375

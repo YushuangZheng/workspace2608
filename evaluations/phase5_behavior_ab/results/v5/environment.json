@@ -1,0 +1,7 @@
+{
+  "python": "3.12.4",
+  "numpy": "1.26.4",
+  "git_commit": "639d2c6b252721a5492be3bbed91a3c16aa37ab6",
+  "dirty_worktree_expected": true,
+  "executor": "deterministic_ideal_follower"
+}

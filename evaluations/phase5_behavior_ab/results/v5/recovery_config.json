@@ -1,0 +1,39 @@
+{
+  "verification": {
+    "control_period_seconds": 0.05,
+    "probe_speed": 0.02,
+    "maximum_probe_seconds": 1.0,
+    "minimum_probe_motion": 0.002,
+    "minimum_information_weight": 0.1,
+    "minimum_tracking_reliability": 0.25,
+    "minimum_approach_displacement": 0.0001,
+    "task_history_length": 12,
+    "return_position_tolerance": 0.002,
+    "maximum_return_cycles": 80,
+    "action_position_variance": 1e-05,
+    "action_rotation_variance": 0.0001
+  },
+  "recovery": {
+    "covariance_inflation": 0.0001,
+    "pose_position_tolerance": 0.004,
+    "maximum_waypoint_cycles": 40,
+    "maximum_relation_verify_cycles": 30,
+    "maximum_attempts_per_goal": 2,
+    "maximum_total_cycles": 400,
+    "maximum_reentry_cycles": 40,
+    "minimum_information_weight": 0.1,
+    "unlink_open_cycles": 2,
+    "open_gripper_command": 1.0,
+    "unlink_fallback_distance": 0.05,
+    "action_position_variance": 0.0002,
+    "action_rotation_variance": 0.0005,
+    "boundary_relation_mismatch_cycles": 3
+  },
+  "reentry": {
+    "minimum_explanation_score": 0.001,
+    "minimum_robot_compatibility": 0.001,
+    "minimum_scene_compatibility": 0.01,
+    "minimum_relation_compatibility": 0.6,
+    "require_relation_evidence_when_available": true
+  }
+}
