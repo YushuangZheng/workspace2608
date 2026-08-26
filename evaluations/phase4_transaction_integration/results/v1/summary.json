@@ -1,0 +1,8 @@
+{
+  "schema": "essay2608-phase4-transaction-integration-v1",
+  "task": "bimanual_lift_tray",
+  "trials": 5,
+  "accepted": 5,
+  "partial_commits": 0,
+  "all_accepted": true
+}

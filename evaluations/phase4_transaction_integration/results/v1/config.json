@@ -1,0 +1,13 @@
+{
+  "schema": "essay2608-phase4-transaction-integration-v1",
+  "claim_boundary": "本验证使用冻结 V4 LiftTray 的五条正常示范构造真实技能 1 末端信念，并仅对右臂进度后验施加两周期受控延迟；它验证真实任务模型、正式阶段四配置、MultiArmBoundaryController 与 TransitionTransactionCoordinator 的同快照联合提交闭环，不代表完整 RLBench 在线任务成功率。",
+  "task": "bimanual_lift_tray",
+  "demonstration_indices": [0, 1, 2, 3, 4],
+  "source_skill": 1,
+  "target_skill": 2,
+  "leading_arm": "left",
+  "delayed_arm": "right",
+  "delayed_cycles": 2,
+  "terminal_hold_cycles": 4,
+  "runtime_config": "configs/closed_loop_boundary/bimanual_lift_tray.json"
+}

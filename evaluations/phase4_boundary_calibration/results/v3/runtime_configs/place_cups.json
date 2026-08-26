@@ -1,0 +1,28 @@
+{
+  "default_relation_probability": 0.7,
+  "minimum_tracking_reliability": 0.25,
+  "minimum_scene_reliability": 0.25,
+  "minimum_information_weight": 0.1,
+  "calibrations": {
+    "single:0->1": {
+      "local_score_threshold": 0.0795660708079127,
+      "confirmation_cycles": 2,
+      "relation_thresholds": {}
+    },
+    "single:1->2": {
+      "local_score_threshold": 0.35691577640102157,
+      "confirmation_cycles": 2,
+      "relation_thresholds": {}
+    },
+    "single:2->3": {
+      "local_score_threshold": 0.09068298832404029,
+      "confirmation_cycles": 2,
+      "relation_thresholds": {}
+    },
+    "single:3->4": {
+      "local_score_threshold": 0.1812971773393053,
+      "confirmation_cycles": 2,
+      "relation_thresholds": {}
+    }
+  }
+}

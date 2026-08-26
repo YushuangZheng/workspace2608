@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from ..dynamac import DynaMACObservation
 from .belief_updater import ClosedLoopBelief
+from .boundary_runtime import TransitionRequest
 from .execution_cursor import ClosedLoopCursor, ExecutionDecision
 from .frame_roles import (
     FrameRoleConfig,
@@ -97,10 +98,43 @@ class ClosedLoopExecutionController:
         self.role_router.reset()
         self.mismatch_tracker.reset()
         self._last_tick: int | None = None
+        self._last_boundary_transition_tick: int | None = None
 
     @property
     def cursor(self) -> ClosedLoopCursor:
         return self._cursor
+
+    def validate_boundary_transition(self, request: TransitionRequest) -> None:
+        """Validate a staged cross-skill request without changing the cursor."""
+
+        if request.arm_id != self.task_model.arm_id:
+            raise ValueError("跨界请求不属于当前执行控制器")
+        if not request.permitted:
+            raise ValueError("未放行的跨界请求不能提交")
+        if request.boundary_id not in self.task_model.boundaries:
+            raise KeyError(f"任务模型不存在边界 {request.boundary_id.token}")
+        if self._last_tick != request.tick:
+            raise ValueError("跨界请求必须提交到产生它的同一控制周期")
+        if self._last_boundary_transition_tick == request.tick:
+            raise ValueError("同一机械臂每个周期最多提交一个跨界")
+        if self._cursor.reference_state != request.source_state:
+            raise ValueError("跨界请求源状态与执行游标不一致")
+        boundary = self.task_model.boundaries[request.boundary_id]
+        expected_target = self.task_model.skill_states[boundary.target_skill][0]
+        if request.target_state != expected_target:
+            raise ValueError("跨界目标必须是下一技能的首状态")
+
+    def commit_boundary_transition(self, request: TransitionRequest) -> None:
+        """Commit one already batch-validated boundary request."""
+
+        self.validate_boundary_transition(request)
+        self._cursor = ClosedLoopCursor(
+            nominal_state=self._cursor.nominal_state,
+            estimated_state=self._cursor.estimated_state,
+            reference_state=request.target_state,
+        )
+        self._cursor.validate(self.task_model)
+        self._last_boundary_transition_tick = request.tick
 
     def _decision(
         self,

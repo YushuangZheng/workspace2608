@@ -7,6 +7,20 @@ from .boundary_model import (
     RelationGuardDistribution,
     ReliabilityStatistics,
 )
+from .boundary_runtime import (
+    BoundaryCalibration,
+    BoundaryRuntimeConfig,
+    ConditionId,
+    ConditionKind,
+    ConditionResult,
+    LocalCompletionResult,
+    TransitionRequest,
+)
+from .bimanual_controller import (
+    BimanualBoundaryController,
+    BoundaryCycleResult,
+    MultiArmBoundaryController,
+)
 from .belief_updater import (
     BeliefUpdater,
     BeliefUpdaterConfig,
@@ -19,6 +33,7 @@ from .execution_controller import (
     ExecutionCycleResult,
 )
 from .execution_cursor import ClosedLoopCursor, ExecutionDecision
+from .entry_guard import EntryGuard
 from .frame_roles import (
     FrameRole,
     FrameRoleConfig,
@@ -74,6 +89,10 @@ from .state_evaluator import (
 from .state_index import StateId, StateTopology, build_state_topology
 from .task_model import ClosedLoopTaskModel, StateNode
 from .task_model_builder import ClosedLoopTaskModelBuilder, ClosedLoopTaskModelConfig
+from .transition_transaction import (
+    TransitionCommitResult,
+    TransitionTransactionCoordinator,
+)
 from .weighted_poe import (
     WeightedPoEExecutor,
     WeightedPoEResult,
@@ -83,6 +102,10 @@ from .weighted_poe import (
 __all__ = [
     "BoundaryId",
     "BoundaryModel",
+    "BoundaryCalibration",
+    "BoundaryRuntimeConfig",
+    "BimanualBoundaryController",
+    "BoundaryCycleResult",
     "BeliefUpdater",
     "BeliefUpdaterConfig",
     "CandidateExpansionConfig",
@@ -94,6 +117,10 @@ __all__ = [
     "ClosedLoopTaskModel",
     "ClosedLoopTaskModelBuilder",
     "ClosedLoopTaskModelConfig",
+    "ConditionId",
+    "ConditionKind",
+    "ConditionResult",
+    "EntryGuard",
     "FactorDistribution",
     "FactorId",
     "ExecutionCycleResult",
@@ -106,7 +133,9 @@ __all__ = [
     "GaussianComponentAudit",
     "LinkPendingCandidate",
     "LinkRecoveryAnchor",
+    "LocalCompletionResult",
     "LocalCompletionModel",
+    "MultiArmBoundaryController",
     "MismatchConfig",
     "MismatchCounters",
     "MismatchEvent",
@@ -141,6 +170,9 @@ __all__ = [
     "StateNode",
     "StateQueryAdapter",
     "StateTopology",
+    "TransitionCommitResult",
+    "TransitionRequest",
+    "TransitionTransactionCoordinator",
     "UnlinkEventMetadata",
     "WeightedPoEExecutor",
     "WeightedPoEResult",

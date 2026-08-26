@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -1234,6 +1234,161 @@ def test_bimanual_builder_reuses_synchronized_peer_frames() -> None:
             left_boundary.local_completion_model.own_relation_conditions
         ).union(right_boundary.local_completion_model.own_relation_conditions)
         assert guaranteed.isdisjoint(left_boundary.relation_conditions)
+
+
+def test_bimanual_transaction_group_uses_confirmed_boundary_straddling_links() -> None:
+    left = demonstrations()
+    right = demonstrations(right_arm=True)
+    policy = BimanualDynaMAC(config=config()).fit(left, right)
+    builder = ClosedLoopTaskModelBuilder()
+    left_model, right_model = builder.build_bimanual(
+        policy,
+        left,
+        right,
+        recoverable_frames=("object",),
+    )
+
+    # Remove the ordinary boundary guards so the only remaining shared hard
+    # evidence is each arm's all-demo LINK trajectory crossing 0 -> 1.
+    for model in (left_model, right_model):
+        boundary_id = next(
+            boundary_id
+            for boundary_id in model.boundaries
+            if boundary_id.source_skill == 0
+        )
+        boundary = model.boundaries[boundary_id]
+        model.boundaries[boundary_id] = replace(
+            boundary,
+            relation_conditions={},
+            scene_conditions={},
+            scene_condition_thresholds={},
+            condition_reliability={},
+            affected_arms=(model.arm_id,),
+            transaction_group=None,
+        )
+
+    builder._assign_transaction_groups(left_model, right_model, left, right)
+    left_boundary = next(
+        boundary
+        for boundary in left_model.boundaries.values()
+        if boundary.source_skill == 0
+    )
+    right_boundary = next(
+        boundary
+        for boundary in right_model.boundaries.values()
+        if boundary.source_skill == 0
+    )
+    assert left_boundary.transaction_group is not None
+    assert left_boundary.transaction_group == right_boundary.transaction_group
+    assert left_boundary.affected_arms == ("left", "right")
+    assert right_boundary.affected_arms == ("left", "right")
+
+    # Replacing the formal events with equally supported Pending candidates
+    # must remove the hard transaction evidence.
+    for model in (left_model, right_model):
+        boundary_id = next(
+            boundary_id
+            for boundary_id in model.boundaries
+            if boundary_id.source_skill == 0
+        )
+        boundary = model.boundaries[boundary_id]
+        anchor = next(iter(model.link_anchors.values()))
+        event_id = RelationEventId(
+            arm_id=model.arm_id,
+            frame_id=anchor.frame_id,
+            skill_index=anchor.event_id.skill_index,
+            mode=anchor.event_id.mode,
+            occurrence=anchor.event_id.occurrence,
+            transition="link_pending",
+        )
+        model.link_pending_events[event_id] = LinkPendingCandidate(
+            event_id=event_id,
+            arm_id=model.arm_id,
+            frame_id=anchor.frame_id,
+            candidate_state=anchor.linked_entry_states[0],
+            context_state=anchor.context_state,
+            local_means=anchor.local_means,
+            local_covariances=anchor.local_covariances,
+            gripper_commands=anchor.gripper_commands,
+            support_fraction=anchor.support_fraction,
+            demonstration_indices=anchor.demonstration_indices,
+            event_local_indices=anchor.event_local_indices,
+        )
+        model.link_anchors.clear()
+        model.boundaries[boundary_id] = replace(
+            boundary,
+            affected_arms=(model.arm_id,),
+            transaction_group=None,
+        )
+    builder._assign_transaction_groups(left_model, right_model, left, right)
+    assert all(
+        boundary.transaction_group is None
+        for model in (left_model, right_model)
+        for boundary in model.boundaries.values()
+        if boundary.source_skill == 0
+    )
+
+
+def test_transaction_group_does_not_promote_directional_relation_guard() -> None:
+    left = demonstrations()
+    right = demonstrations(right_arm=True)
+    policy = BimanualDynaMAC(config=config()).fit(left, right)
+    builder = ClosedLoopTaskModelBuilder()
+    left_model, right_model = builder.build_bimanual(
+        policy,
+        left,
+        right,
+        recoverable_frames=("object",),
+    )
+    left_id = next(
+        boundary_id
+        for boundary_id in left_model.boundaries
+        if boundary_id.source_skill == 1
+    )
+    right_id = next(
+        boundary_id
+        for boundary_id in right_model.boundaries
+        if boundary_id.source_skill == 1
+    )
+    left_boundary = left_model.boundaries[left_id]
+    right_boundary = right_model.boundaries[right_id]
+    right_key = "right/object"
+    right_condition = right_boundary.local_completion_model.own_relation_conditions[
+        right_key
+    ]
+    right_statistics = right_boundary.condition_reliability[right_key]
+
+    # Left only waits for a relation established by right; it does not itself
+    # participate in the shared physical link.  This is directional waiting,
+    # not a symmetric atomic boundary.
+    left_model.boundaries[left_id] = replace(
+        left_boundary,
+        local_completion_model=replace(
+            left_boundary.local_completion_model,
+            own_relation_conditions={},
+        ),
+        relation_conditions={right_key: right_condition},
+        scene_conditions={},
+        scene_condition_thresholds={},
+        condition_reliability={right_key: right_statistics},
+        affected_arms=("left",),
+        transaction_group=None,
+    )
+    right_model.boundaries[right_id] = replace(
+        right_boundary,
+        relation_conditions={},
+        scene_conditions={},
+        scene_condition_thresholds={},
+        condition_reliability={right_key: right_statistics},
+        affected_arms=("right",),
+        transaction_group=None,
+    )
+    left_model.link_anchors.clear()
+    right_model.link_anchors.clear()
+
+    builder._assign_transaction_groups(left_model, right_model, left, right)
+    assert left_model.boundaries[left_id].transaction_group is None
+    assert right_model.boundaries[right_id].transaction_group is None
 
 
 def test_bimanual_transaction_group_does_not_force_async_boundaries() -> None:

@@ -2291,10 +2291,71 @@ class ClosedLoopTaskModelBuilder:
             for source, values in positions.items()
         }
 
-    @staticmethod
-    def _joint_dependency_signature(
+    def _boundary_straddling_link_frames(
+        self,
+        model: ClosedLoopTaskModel,
         boundary: BoundaryModel,
+        demonstration_count: int,
+    ) -> frozenset[str]:
+        """Return all-demo LINK relations established across this boundary.
+
+        A LINK event can only be confirmed after the object has moved with the
+        end effector.  For cooperative grasp-and-carry skills, the physical
+        attachment can therefore be established around a skill boundary while
+        the formal event is first observable a few states into the target
+        skill.  Treat that event as boundary evidence only when its saved
+        approach context starts in the source skill, its first confirmed
+        linked state belongs to the target skill, and every normal
+        demonstration supports the event.  LINK_PENDING alone is deliberately
+        excluded because it is not a confirmed physical relation.
+        """
+
+        result = set()
+        expected_demonstrations = set(range(demonstration_count))
+        for anchor in model.link_anchors.values():
+            if (
+                anchor.arm_id != model.arm_id
+                or anchor.event_id.transition != "link"
+                or anchor.event_id.skill_index != boundary.target_skill
+                or anchor.context_state.skill_index != boundary.source_skill
+                or anchor.support_fraction < 1.0 - 1.0e-12
+                or set(anchor.demonstration_indices) != expected_demonstrations
+                or not anchor.linked_entry_states
+                or anchor.linked_entry_states[0].skill_index != boundary.target_skill
+            ):
+                continue
+            target_indices = sorted(
+                {
+                    state.local_index
+                    for state in anchor.linked_entry_states
+                    if state.skill_index == boundary.target_skill
+                }
+            )
+            longest_run = 0
+            current_run = 0
+            previous = None
+            for index in target_indices:
+                current_run = (
+                    current_run + 1
+                    if previous is not None and index == previous + 1
+                    else 1
+                )
+                longest_run = max(longest_run, current_run)
+                previous = index
+            if longest_run >= self.config.relation_minimum_dwell:
+                result.add(anchor.frame_id)
+        return frozenset(result)
+
+    def _joint_dependency_signature(
+        self,
+        model: ClosedLoopTaskModel,
+        boundary: BoundaryModel,
+        demonstration_count: int,
     ) -> tuple[frozenset[str], frozenset[FactorId]]:
+        # Only this arm's own linked relation makes it a physical participant
+        # in a shared coupling.  A guard that merely observes the other arm is
+        # a directional dependency and must not by itself create a transaction.
+        own_prefix = f"{model.arm_id}/"
         linked = {
             key.split("/", 1)[1]
             for conditions in (
@@ -2302,8 +2363,15 @@ class ClosedLoopTaskModelBuilder:
                 boundary.relation_conditions,
             )
             for key, condition in conditions.items()
-            if condition.required_state == "linked"
+            if key.startswith(own_prefix) and condition.required_state == "linked"
         }
+        linked.update(
+            self._boundary_straddling_link_frames(
+                model,
+                boundary,
+                demonstration_count,
+            )
+        )
         return frozenset(linked), frozenset(boundary.scene_conditions)
 
     def _assign_transaction_groups(
@@ -2325,12 +2393,18 @@ class ClosedLoopTaskModelBuilder:
         )
         candidates = []
         for left_id, left_boundary in left_model.boundaries.items():
-            left_linked, left_scene = self._joint_dependency_signature(left_boundary)
+            left_linked, left_scene = self._joint_dependency_signature(
+                left_model,
+                left_boundary,
+                len(left_demonstrations),
+            )
             if not left_linked and not left_scene:
                 continue
             for right_id, right_boundary in right_model.boundaries.items():
                 right_linked, right_scene = self._joint_dependency_signature(
-                    right_boundary
+                    right_model,
+                    right_boundary,
+                    len(right_demonstrations),
                 )
                 shared_linked = left_linked.intersection(right_linked)
                 shared_scene = left_scene.intersection(right_scene)

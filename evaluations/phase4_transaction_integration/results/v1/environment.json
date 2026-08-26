@@ -1,0 +1,8 @@
+{
+  "generated_at_utc": "2026-08-26T12:18:48.555894+00:00",
+  "python": "3.12.4 | packaged by Anaconda, Inc. | (main, Jun 18 2024, 15:12:24) [GCC 11.2.0]",
+  "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+  "git_commit": "b77aff1a102e057a0fe60f11c3b47ae5ea98f305",
+  "git_branch": "dev/yushuang",
+  "git_status": "M source/policy/closed_loop/README.md\n M source/policy/closed_loop/__init__.py\n M source/policy/closed_loop/execution_controller.py\n M source/policy/closed_loop/task_model_builder.py\n M tests/closed_loop/test_phase1_task_model.py\n M \"\\345\\274\\200\\345\\217\\221\\346\\227\\245\\345\\277\\227.md\"\n M \"\\346\\212\\200\\346\\234\\257\\350\\267\\257\\347\\272\\277\\346\\212\\245\\345\\221\\212.md\"\n M \"\\346\\226\\260\\346\\226\\271\\346\\263\\225\\344\\273\\243\\347\\240\\201\\345\\274\\200\\345\\217\\221\\350\\256\\241\\345\\210\\222.md\"\n M \"\\351\\230\\266\\346\\256\\265\\345\\274\\200\\345\\217\\221\\350\\256\\260\\345\\275\\225.md\"\n?? configs/closed_loop_boundary/\n?? evaluations/phase4_boundary_calibration/\n?? evaluations/phase4_transaction_integration/\n?? source/policy/closed_loop/bimanual_controller.py\n?? source/policy/closed_loop/boundary_runtime.py\n?? source/policy/closed_loop/entry_guard.py\n?? source/policy/closed_loop/transition_transaction.py\n?? tests/closed_loop/test_phase4_boundary_guard.py"
+}
