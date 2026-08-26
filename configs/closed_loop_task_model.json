@@ -20,7 +20,7 @@
   "scene_min_loo_accuracy": 0.8,
   "progress_scene_weight": 1.0,
   "boundary_terminal_window": 3,
-  "boundary_relation_support": 0.8,
+  "boundary_relation_support": 0.7,
   "boundary_scene_min_stable_fraction": 1.0,
   "boundary_compatibility_margin": 1e-06,
   "transaction_boundary_tolerance": 0.03

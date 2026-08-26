@@ -13,6 +13,29 @@ from .belief_updater import (
     CandidateExpansionConfig,
     ClosedLoopBelief,
 )
+from .execution_controller import (
+    ClosedLoopExecutionConfig,
+    ClosedLoopExecutionController,
+    ExecutionCycleResult,
+)
+from .execution_cursor import ClosedLoopCursor, ExecutionDecision
+from .frame_roles import (
+    FrameRole,
+    FrameRoleConfig,
+    FrameRoleDecision,
+    FrameRoleRouter,
+    FrameRoleSnapshot,
+    RelationRecoveryIntent,
+    RelationVerificationRequest,
+)
+from .mismatch import (
+    MismatchConfig,
+    MismatchCounters,
+    MismatchEvent,
+    MismatchKind,
+    MismatchTracker,
+    MismatchUpdate,
+)
 from .progress_filter import (
     ProgressEstimate,
     ProgressFilter,
@@ -51,6 +74,11 @@ from .state_evaluator import (
 from .state_index import StateId, StateTopology, build_state_topology
 from .task_model import ClosedLoopTaskModel, StateNode
 from .task_model_builder import ClosedLoopTaskModelBuilder, ClosedLoopTaskModelConfig
+from .weighted_poe import (
+    WeightedPoEExecutor,
+    WeightedPoEResult,
+    weighted_product_of_experts,
+)
 
 __all__ = [
     "BoundaryId",
@@ -59,16 +87,32 @@ __all__ = [
     "BeliefUpdaterConfig",
     "CandidateExpansionConfig",
     "CandidateScore",
+    "ClosedLoopCursor",
+    "ClosedLoopExecutionConfig",
+    "ClosedLoopExecutionController",
     "ClosedLoopBelief",
     "ClosedLoopTaskModel",
     "ClosedLoopTaskModelBuilder",
     "ClosedLoopTaskModelConfig",
     "FactorDistribution",
     "FactorId",
+    "ExecutionCycleResult",
+    "ExecutionDecision",
+    "FrameRole",
+    "FrameRoleConfig",
+    "FrameRoleDecision",
+    "FrameRoleRouter",
+    "FrameRoleSnapshot",
     "GaussianComponentAudit",
     "LinkPendingCandidate",
     "LinkRecoveryAnchor",
     "LocalCompletionModel",
+    "MismatchConfig",
+    "MismatchCounters",
+    "MismatchEvent",
+    "MismatchKind",
+    "MismatchTracker",
+    "MismatchUpdate",
     "ProgressEstimate",
     "ProgressFilter",
     "ProgressFilterConfig",
@@ -84,6 +128,8 @@ __all__ = [
     "RelationFilterConfig",
     "RelationStateKey",
     "RelationGuardDistribution",
+    "RelationRecoveryIntent",
+    "RelationVerificationRequest",
     "ReliabilityStatistics",
     "RuntimeFeatureBuilder",
     "RuntimeFeatureConfig",
@@ -96,5 +142,8 @@ __all__ = [
     "StateQueryAdapter",
     "StateTopology",
     "UnlinkEventMetadata",
+    "WeightedPoEExecutor",
+    "WeightedPoEResult",
     "build_state_topology",
+    "weighted_product_of_experts",
 ]

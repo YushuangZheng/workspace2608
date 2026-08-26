@@ -71,7 +71,10 @@ class ClosedLoopTaskModelConfig:
     scene_min_loo_accuracy: float = 0.8
     progress_scene_weight: float = 1.0
     boundary_terminal_window: int = 3
-    boundary_relation_support: float = 0.8
+    # Boundary support is evaluated on the soft relation distribution.  Keep
+    # it aligned with the stable binary relation decision threshold; cross-
+    # demonstration consistency is enforced separately and remains 5/5.
+    boundary_relation_support: float = 0.7
     boundary_scene_min_stable_fraction: float = 1.0
     boundary_compatibility_margin: float = 1.0e-6
     transaction_boundary_tolerance: float = 0.03
@@ -1105,11 +1108,6 @@ class ClosedLoopTaskModelBuilder:
         unlinks: dict[RelationEventId, UnlinkEventMetadata] = {}
         origins: dict[RelationStateKey, RelationEventId] = {}
         pending_links: dict[RelationEventId, LinkPendingCandidate] = {}
-        # An origin follows the demonstration path, not a numeric mode label.
-        # Adjacent skills may assign the same demonstration to different mode
-        # indices; carrying origins by ``(mode, frame)`` would then silently
-        # lose or misattribute a cross-skill linked relation.
-        active_origin: dict[tuple[int, str], RelationEventId] = {}
         skill_offsets = np.cumsum(
             [0, *(skill.duration for skill in policy.skills)],
             dtype=np.int64,
@@ -1642,42 +1640,18 @@ class ClosedLoopTaskModelBuilder:
                                 ),
                             )
 
-                    events_at = {
-                        index: (transition, event_id)
-                        for transition, index, _, event_id in consensus_events
-                    }
-                    for local_index in range(skill.duration):
-                        event = events_at.get(local_index)
-                        if event is not None and event[0] == "unlink":
-                            for demonstration in members:
-                                active_origin.pop((int(demonstration), frame), None)
-                        if event is not None and event[0] == "link":
-                            for demonstration in members:
-                                active_origin[(int(demonstration), frame)] = event[1]
-                        if relation_states[local_index] == "external":
-                            for demonstration in members:
-                                active_origin.pop((int(demonstration), frame), None)
-                        member_origins = {
-                            active_origin[(int(demonstration), frame)]
-                            for demonstration in members
-                            if (int(demonstration), frame) in active_origin
-                        }
-                        if (
-                            relation_states[local_index] == "linked"
-                            and len(member_origins) == 1
-                            and all(
-                                (int(demonstration), frame) in active_origin
-                                for demonstration in members
-                            )
-                        ):
-                            origins[
-                                RelationStateKey(
-                                    arm_id,
-                                    frame,
-                                    StateId(skill_index, local_index),
-                                    mode,
-                                )
-                            ] = next(iter(member_origins))
+        # Raw per-state covariance evidence may flicker even though a physical
+        # connection cannot disappear without a confirmed UNLINK.  Reconcile
+        # deployment priors and origins from the accepted event state machine;
+        # rejected GMSD pulses remain in the audit scores but cannot become a
+        # control-time linked expectation.
+        origins = self._reconcile_confirmed_relation_paths(
+            policy,
+            states,
+            links,
+            unlinks,
+            arm_id,
+        )
 
         # ``linked_entry_states`` is derived from the completed origin map so
         # it covers legal linked states across later skill and mode boundaries,
@@ -1696,6 +1670,126 @@ class ClosedLoopTaskModelBuilder:
             for event_id, anchor in links.items()
         }
         return links, unlinks, origins, pending_links
+
+    def _reconcile_confirmed_relation_paths(
+        self,
+        policy: DynaMAC,
+        states: dict[StateId, StateNode],
+        links: dict[RelationEventId, LinkRecoveryAnchor],
+        unlinks: dict[RelationEventId, UnlinkEventMetadata],
+        arm_id: str,
+    ) -> dict[RelationStateKey, RelationEventId]:
+        """Apply accepted LINK/UNLINK events as a persistent relation state.
+
+        The covariance/GMSD values remain available in
+        ``demo_relation_scores``.  Only modes whose demonstrations have a
+        confirmed event track are reconciled; Pending-only and purely
+        evidence-based frames keep their soft priors and never gain an origin.
+        """
+
+        skill_offsets = np.cumsum(
+            [0, *(skill.duration for skill in policy.skills)],
+            dtype=np.int64,
+        )
+
+        def global_index(state_id: StateId) -> int:
+            return int(skill_offsets[state_id.skill_index]) + state_id.local_index
+
+        transitions: dict[
+            tuple[int, str],
+            list[tuple[int, str, RelationEventId | None]],
+        ] = {}
+        for event_id, anchor in links.items():
+            if not anchor.linked_entry_states:
+                raise ValueError("正式 LINK 锚点必须包含事件入口状态")
+            event_index = global_index(min(anchor.linked_entry_states))
+            members = _mode_members(
+                policy.skills[event_id.skill_index],
+                event_id.mode,
+            )
+            for demonstration in members:
+                transitions.setdefault(
+                    (int(demonstration), event_id.frame_id), []
+                ).append((event_index, "link", event_id))
+        for event_id, metadata in unlinks.items():
+            event_index = global_index(metadata.release_state)
+            members = _mode_members(
+                policy.skills[event_id.skill_index],
+                event_id.mode,
+            )
+            for demonstration in members:
+                transitions.setdefault(
+                    (int(demonstration), event_id.frame_id), []
+                ).append((event_index, "unlink", None))
+        for values in transitions.values():
+            values.sort(key=lambda value: (value[0], value[1]))
+
+        origins: dict[RelationStateKey, RelationEventId] = {}
+        for state_id, node in sorted(states.items()):
+            state_global_index = global_index(state_id)
+            skill = policy.skills[state_id.skill_index]
+            for mode in range(len(skill.mode_priors)):
+                mode_members = tuple(int(value) for value in _mode_members(skill, mode))
+                for frame in policy.frame_names:
+                    tracks = [
+                        transitions.get((member, frame)) for member in mode_members
+                    ]
+                    if not tracks or any(track is None for track in tracks):
+                        continue
+                    active_origins: list[RelationEventId | None] = []
+                    active_count = 0
+                    for track in tracks:
+                        assert track is not None
+                        # A first accepted UNLINK denotes an initially linked
+                        # relation for which no in-task recovery anchor exists.
+                        active = bool(track and track[0][1] == "unlink")
+                        origin: RelationEventId | None = None
+                        for index, transition, event_id in track:
+                            if index > state_global_index:
+                                break
+                            if transition == "link":
+                                active = True
+                                origin = event_id
+                            else:
+                                active = False
+                                origin = None
+                        if active:
+                            active_count += 1
+                            active_origins.append(origin)
+
+                    # Accepted events determine the persistent relation state,
+                    # but the resulting deployment value is still a *weak
+                    # demonstration prior*.  Writing [0, 1] here would make a
+                    # normal-demo expectation nearly impossible for phase two
+                    # observations to overturn after a real link failure.
+                    # Map unanimous external/linked event states to the same
+                    # soft thresholds used by event detection; mixed modes are
+                    # linearly interpolated between them.
+                    active_fraction = active_count / float(len(mode_members))
+                    linked_probability = (
+                        self.config.relation_unlink_threshold
+                        + active_fraction
+                        * (
+                            self.config.relation_link_threshold
+                            - self.config.relation_unlink_threshold
+                        )
+                    )
+                    node.demo_relation_priors[frame][mode] = np.asarray(
+                        [1.0 - linked_probability, linked_probability],
+                        dtype=np.float64,
+                    )
+                    non_null_origins = {
+                        origin for origin in active_origins if origin is not None
+                    }
+                    if (
+                        active_count == len(mode_members)
+                        and len(non_null_origins) == 1
+                        and len(active_origins) == len(mode_members)
+                    ):
+                        origins[RelationStateKey(arm_id, frame, state_id, mode)] = next(
+                            iter(non_null_origins)
+                        )
+        return origins
 
     def _boundary_loo_coverage(
         self,
@@ -2118,7 +2212,9 @@ class ClosedLoopTaskModelBuilder:
         demonstrations: Sequence[DynaMACDemonstration],
         skill_sequence: Sequence[int],
     ) -> dict[int, Array]:
-        positions = {source: [] for source in range(max(0, len(skill_sequence) - 1))}
+        positions: dict[int, list[float]] = {
+            source: [] for source in range(max(0, len(skill_sequence) - 1))
+        }
         for demonstration in demonstrations:
             denominator = max(1, len(demonstration.skill) - 1)
             for source, target_label in enumerate(skill_sequence[1:]):

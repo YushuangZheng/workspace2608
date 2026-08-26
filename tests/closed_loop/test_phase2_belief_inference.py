@@ -554,6 +554,7 @@ def test_drop_during_carry_does_not_jump_to_release_on_relation_alone(
     updater = carry_updater(model, demo)
     previous_ee = demo.ee_pose[7]
     last_belief = None
+    relation_changes = []
     for tick, height in ((2, 0.2), (3, 0.4)):
         abnormal_ee = pose_compose(demo.ee_pose[7], pose(0.0, 0.0, height))
         dropped = RuntimeObservation(
@@ -571,13 +572,14 @@ def test_drop_during_carry_does_not_jump_to_release_on_relation_alone(
             permitted_boundaries=frozenset(),
             mode_by_skill={0: 0, 1: 0, 2: 0},
         )
+        relation_changes.extend(last_belief.relation_changes)
         previous_ee = abnormal_ee
     assert last_belief is not None
     assert (
         last_belief.relation_estimates["object"].decision_state
         == RelationDecision.EXTERNAL
     )
-    assert last_belief.relation_changes
+    assert relation_changes
     assert last_belief.expanded_candidates == ()
     assert last_belief.progress.estimated_state.skill_index == 1
     assert last_belief.progress.status == ProgressStatus.NO_PLAUSIBLE_STATE

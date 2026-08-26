@@ -1,0 +1,556 @@
+{
+  "schema": "essay2608-phase23-component-ab-result-v1",
+  "progress_trials": 300,
+  "relation_trials": 100,
+  "tick_rows": 10180,
+  "skipped_relation_candidates": [
+    {
+      "task": "stack_wine",
+      "arm": "single",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "stack_wine",
+      "arm": "single",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "stack_wine",
+      "arm": "single",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "stack_wine",
+      "arm": "single",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "stack_wine",
+      "arm": "single",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "place_cups",
+      "arm": "single",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "place_cups",
+      "arm": "single",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "place_cups",
+      "arm": "single",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "place_cups",
+      "arm": "single",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "place_cups",
+      "arm": "single",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "open_microwave",
+      "arm": "single",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "open_microwave",
+      "arm": "single",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "open_microwave",
+      "arm": "single",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "open_microwave",
+      "arm": "single",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "open_microwave",
+      "arm": "single",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "wipe_desk",
+      "arm": "single",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "wipe_desk",
+      "arm": "single",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "wipe_desk",
+      "arm": "single",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "wipe_desk",
+      "arm": "single",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "wipe_desk",
+      "arm": "single",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "left",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "left",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "left",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "left",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "left",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 0,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 1,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 2,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 3,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "arm": "right",
+      "demonstration": 4,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "left",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "left",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "left",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "left",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "left",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "right",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "right",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "right",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "right",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_lift_tray",
+      "arm": "right",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "left",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "left",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "left",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "left",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "left",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 0,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 1,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 2,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 3,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_put_bottle_in_fridge",
+      "arm": "right",
+      "demonstration": 4,
+      "intervention": "false_coupling",
+      "reason": "no stable selected external segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "left",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "left",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "left",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "left",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "left",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "right",
+      "demonstration": 0,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "right",
+      "demonstration": 1,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "right",
+      "demonstration": 2,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "right",
+      "demonstration": 3,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    },
+    {
+      "task": "bimanual_sweep_to_dustpan",
+      "arm": "right",
+      "demonstration": 4,
+      "intervention": "break_link",
+      "reason": "no stable selected linked segment"
+    }
+  ],
+  "summary": [
+    {
+      "family": "progress",
+      "scenario": "normal",
+      "trials": 60,
+      "baseline_mae": 0.0,
+      "proposed_mae": 0.8209876543209875,
+      "absolute_mae_reduction": -0.8209876543209875,
+      "relative_mae_reduction": 0.0,
+      "proposed_win_rate": 0.0,
+      "baseline_exact_rate": 1.0,
+      "proposed_exact_rate": 0.5753086419753086
+    },
+    {
+      "family": "progress",
+      "scenario": "skip",
+      "trials": 120,
+      "baseline_mae": 1.9843478260869565,
+      "proposed_mae": 1.466289855072464,
+      "absolute_mae_reduction": 0.5180579710144926,
+      "relative_mae_reduction": 0.2610721589249196,
+      "proposed_win_rate": 0.6083333333333333,
+      "baseline_exact_rate": 0.33391304347826084,
+      "proposed_exact_rate": 0.3960724637681159
+    },
+    {
+      "family": "progress",
+      "scenario": "stutter",
+      "trials": 120,
+      "baseline_mae": 3.095454545454546,
+      "proposed_mae": 1.5214646464646464,
+      "absolute_mae_reduction": 1.5739898989898997,
+      "relative_mae_reduction": 0.5084842551802905,
+      "proposed_win_rate": 0.8,
+      "baseline_exact_rate": 0.2545454545454545,
+      "proposed_exact_rate": 0.432020202020202
+    },
+    {
+      "family": "relation",
+      "scenario": "false_coupling_control",
+      "trials": 50,
+      "baseline_detection_rate": 0.0,
+      "proposed_detection_rate": 0.0,
+      "proposed_mean_block_rate": 0.008333333333333333,
+      "median_detection_latency": "",
+      "active_expert_suppression_rate": 0.0
+    },
+    {
+      "family": "relation",
+      "scenario": "false_coupling_perturbed",
+      "trials": 50,
+      "baseline_detection_rate": 0.0,
+      "proposed_detection_rate": 1.0,
+      "proposed_mean_block_rate": 1.0,
+      "median_detection_latency": 0.0,
+      "active_expert_suppression_rate": 1.0
+    }
+  ]
+}

@@ -37,6 +37,8 @@ class RuntimeFeatures:
     gripper_change: Array
     frame_visibility: dict[str, bool]
     tracking_reliability: dict[str, float]
+    frame_pair_available: dict[str, bool]
+    paired_tracking_reliability: dict[str, float]
     actual_motion_magnitude: float
     command_motion_magnitude: float
     command_response_consistency: float
@@ -103,6 +105,8 @@ class RuntimeFeatureBuilder:
         residuals: dict[str, Array] = {}
         visibility: dict[str, bool] = {}
         reliability: dict[str, float] = {}
+        pair_available: dict[str, bool] = {}
+        paired_tracking_reliability: dict[str, float] = {}
         information: dict[str, float] = {}
         for name, current_frame in observation.frame_poses.items():
             current_relative = relative_pose(current_frame, observation.ee_pose)
@@ -137,10 +141,10 @@ class RuntimeFeatureBuilder:
                 if prior_visible and previous_observation is not None
                 else 0.0
             )
+            pair_available[name] = bool(visibility[name] and prior_visible)
+            paired_tracking_reliability[name] = paired_reliability
             information[name] = (
-                excitation * paired_reliability
-                if visibility[name] and prior_visible
-                else 0.0
+                excitation * paired_reliability if pair_available[name] else 0.0
             )
 
         if previous_observation is None:
@@ -174,6 +178,8 @@ class RuntimeFeatureBuilder:
             gripper_change=gripper_change.copy(),
             frame_visibility=visibility,
             tracking_reliability=reliability,
+            frame_pair_available=pair_available,
+            paired_tracking_reliability=paired_tracking_reliability,
             actual_motion_magnitude=actual_magnitude,
             command_motion_magnitude=command_magnitude,
             command_response_consistency=command_response,

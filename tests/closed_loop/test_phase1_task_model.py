@@ -427,6 +427,77 @@ def test_relation_events_require_motion_and_follow_comotion_then_detachment() ->
     assert np.all(release_gripper > 0.0)
 
 
+def test_confirmed_relation_events_override_flickering_state_evidence() -> None:
+    class FlickeringPriorBuilder(ClosedLoopTaskModelBuilder):
+        def _joint_relation_event_probability_sequence(
+            self,
+            policy,
+            aligned,
+            frame,
+            members,
+            final_skill,
+        ):
+            count = sum(
+                policy.skills[index].duration for index in range(final_skill + 1)
+            )
+            probabilities = np.zeros(count, dtype=np.float64)
+            probabilities[6:] = 1.0
+            return probabilities
+
+        def _build_states(self, policy, aligned):
+            states, skill_states = super()._build_states(policy, aligned)
+            for global_index, state_id in enumerate(sorted(states)):
+                linked = 0.95 if global_index % 2 else 0.05
+                states[state_id].demo_relation_priors["object"][:] = np.asarray(
+                    [1.0 - linked, linked]
+                )
+            return states, skill_states
+
+    policy, demos = fitted_policy()
+    builder = FlickeringPriorBuilder()
+    model = builder.build(
+        policy,
+        demos,
+        recoverable_frames=("object",),
+    )
+    anchor = next(iter(model.link_anchors.values()))
+    event_start = min(anchor.linked_entry_states)
+    ordered = tuple(sorted(model.states))
+    event_index = ordered.index(event_start)
+    for index, state_id in enumerate(ordered):
+        prior = model.state(state_id).demo_relation_priors["object"][0]
+        if index < event_index:
+            np.testing.assert_allclose(
+                prior,
+                np.asarray(
+                    [
+                        1.0 - builder.config.relation_unlink_threshold,
+                        builder.config.relation_unlink_threshold,
+                    ]
+                ),
+            )
+            assert not any(
+                key.frame_id == "object" and key.state_id == state_id
+                for key in model.link_origins
+            )
+        else:
+            np.testing.assert_allclose(
+                prior,
+                np.asarray(
+                    [
+                        1.0 - builder.config.relation_link_threshold,
+                        builder.config.relation_link_threshold,
+                    ]
+                ),
+            )
+            assert any(
+                key.frame_id == "object"
+                and key.state_id == state_id
+                and event_id == anchor.event_id
+                for key, event_id in model.link_origins.items()
+            )
+
+
 def test_link_anchor_starts_after_same_arm_latest_cross_frame_unlink() -> None:
     class CrossFrameEventBuilder(ClosedLoopTaskModelBuilder):
         def _joint_relation_event_probability_sequence(
