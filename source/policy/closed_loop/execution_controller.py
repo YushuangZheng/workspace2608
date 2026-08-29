@@ -135,14 +135,39 @@ class ClosedLoopExecutionController:
         task_model: ClosedLoopTaskModel,
         config: ClosedLoopExecutionConfig = ClosedLoopExecutionConfig(),
         progress_filter_config: ProgressFilterConfig = ProgressFilterConfig(),
+        *,
+        dynamic_frame_roles: bool = True,
     ) -> None:
         self.task_model = task_model
         self.config = config
         self.progress_filter_config = progress_filter_config
+        self.dynamic_frame_roles = bool(dynamic_frame_roles)
         self.role_router = FrameRoleRouter(task_model, config.frame_roles)
         self.weighted_poe = WeightedPoEExecutor(task_model)
         self.mismatch_tracker = MismatchTracker(config.mismatch)
         self.reset()
+
+    def _route_roles(
+        self,
+        state_id: StateId,
+        belief: ClosedLoopBelief,
+        *,
+        mode_by_skill: Mapping[int, int] | None = None,
+        captured_virtual_frames: frozenset[str] = frozenset(),
+        commit: bool = True,
+    ) -> FrameRoleSnapshot:
+        route = (
+            self.role_router.route
+            if self.dynamic_frame_roles
+            else self.role_router.route_fixed
+        )
+        return route(
+            state_id,
+            belief,
+            mode_by_skill=mode_by_skill,
+            captured_virtual_frames=captured_virtual_frames,
+            commit=commit,
+        )
 
     def reset(self, initial_state: StateId | None = None) -> None:
         if initial_state is None:
@@ -189,6 +214,7 @@ class ClosedLoopExecutionController:
             left.recovery_intents != right.recovery_intents
             or left.verification_requests != right.verification_requests
             or left.confirmed_link_events != right.confirmed_link_events
+            or left.rejected_link_events != right.rejected_link_events
         ):
             return False
         for frame in sorted(left.decisions):
@@ -234,7 +260,7 @@ class ClosedLoopExecutionController:
         observation: DynaMACObservation,
         mode_by_skill: Mapping[int, int] | None,
     ) -> tuple[FrameRoleSnapshot, WeightedPoEResult]:
-        roles = self.role_router.route(
+        roles = self._route_roles(
             state_id,
             belief,
             mode_by_skill=mode_by_skill,
@@ -442,12 +468,50 @@ class ClosedLoopExecutionController:
         """
 
         state_id = self._cursor.reference_state
-        roles = self.role_router.route(
+        roles = self._route_roles(
             state_id,
             belief,
             mode_by_skill=mode_by_skill,
             commit=False,
         )
+        return self.weighted_poe.query(
+            observation,
+            state_id,
+            roles,
+            mode_index=self._mode_index(state_id, mode_by_skill),
+        )
+
+    def query_reentry_alignment(
+        self,
+        state_id: StateId,
+        belief: ClosedLoopBelief,
+        observation: DynaMACObservation,
+        *,
+        mode_by_skill: Mapping[int, int] | None = None,
+    ) -> WeightedPoEResult:
+        """Query one legal recovery-alignment target without TASK commits.
+
+        This is a read-only recovery action query: it does not change beta,
+        the execution cursor, role history, mismatch counters, or the task
+        clock.  A critical relation role still blocks the query exactly as it
+        would block normal execution.
+        """
+
+        if state_id not in self.task_model.states:
+            raise KeyError(f"恢复重入对齐引用未知状态 {state_id}")
+        roles = self._route_roles(
+            state_id,
+            belief,
+            mode_by_skill=mode_by_skill,
+            commit=False,
+        )
+        if roles.blocks_advance:
+            return WeightedPoEResult(
+                state_id=state_id,
+                stream_weights=roles.execution_weights,
+                participating_frames=(),
+                action=None,
+            )
         return self.weighted_poe.query(
             observation,
             state_id,
@@ -629,7 +693,7 @@ class ClosedLoopExecutionController:
         if belief.progress.estimated_state not in self.task_model.states:
             raise KeyError("estimated_state 不在任务模型中")
 
-        roles = self.role_router.route(
+        roles = self._route_roles(
             cursor_before.reference_state,
             belief,
             mode_by_skill=mode_by_skill,
@@ -651,7 +715,7 @@ class ClosedLoopExecutionController:
         if control_equivalence.accepted:
             reasons = tuple(dict.fromkeys((control_equivalence.reason, *reasons)))
         if proposed_reference != cursor_before.reference_state:
-            proposed_roles = self.role_router.route(
+            proposed_roles = self._route_roles(
                 proposed_reference,
                 belief,
                 mode_by_skill=mode_by_skill,
@@ -687,7 +751,7 @@ class ClosedLoopExecutionController:
             decision = ExecutionDecision.HOLD
             proposed_reference = cursor_before.reference_state
             reasons = tuple(dict.fromkeys((*reasons, "no_positive_execution_stream")))
-            roles = self.role_router.route(
+            roles = self._route_roles(
                 proposed_reference,
                 belief,
                 mode_by_skill=mode_by_skill,
@@ -765,7 +829,7 @@ class ClosedLoopExecutionController:
         if target.skill_index == source_skill:
             raise RuntimeError("边界后动作重查询要求 reference_state 已跨技能")
         source_terminal = self.task_model.skill_states[source_skill][-1]
-        source_roles = self.role_router.route(
+        source_roles = self._route_roles(
             source_terminal,
             belief,
             mode_by_skill=mode_by_skill,

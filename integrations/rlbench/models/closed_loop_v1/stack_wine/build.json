@@ -10,13 +10,13 @@
     "episode4"
   ],
   "base_model_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/v4",
-  "closed_loop_output_root": "/tmp/essay2608-closed-loop-all-calibrated-3P8Csz",
+  "closed_loop_output_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/closed_loop_v1_next",
   "files": {
     "configs/closed_loop_task_model.json": "158694feb75e7c2259af7c60092114885d5e9df29be97ebde32d688d3cbde765",
     "configs/closed_loop_belief.json": "59bb5d51e37b17500680e23374febf3574422d5c9d5c2f60eb55461b244bb128",
-    "configs/closed_loop_execution.json": "8a70274114dd73f70c6ca48f03e58d733d69c51590034d50d789b4f4f29e4699",
-    "configs/closed_loop_recovery.json": "ff9c3d2d37b4be49d62517f45524a9caca03fac7b5d30d95879c13fe5de7713c",
-    "configs/closed_loop_boundary/stack_wine.json": "03aa022f4fbd8b8f78ac9bb06952d98f27e2b4da9c8906fb91c28388506f3e03",
+    "configs/closed_loop_execution.json": "960a3d8b19309dbb53cc9efe89479811b75e65885d3449c4ce5ff84dd55ff881",
+    "configs/closed_loop_recovery.json": "3d9c8f56c873f95a717ff7721e0d4db2c800fa6464144caedf5fb4b408468618",
+    "configs/closed_loop_boundary/stack_wine.json": "37bc63971c57d335daab525d36fb1187d41a70aa80475808b752722745edd2e4",
     "integrations/rlbench/models/v4/stack_wine/model.npz": "6779ac3fc2f63fde6bbe9bc4e137eca3f9600a006e1e4c173a6dd7501bf6beac",
     "integrations/rlbench/data/training/main/stack_wine/all_variations/episodes/episode0/low_dim_obs.pkl": "bbd2a2661461aeef08ab588c7760089726cd8e14e13295d5cba64ff272cb8f11",
     "integrations/rlbench/data/training/main/stack_wine/all_variations/episodes/episode1/low_dim_obs.pkl": "1aa681ef481191e785b51d4187aa630f795858a7386b6f3f5e7dbc2a2bfbec13",
@@ -31,7 +31,7 @@
     ],
     "models": {
       "single": {
-        "schema_version": 3,
+        "schema_version": 4,
         "arm_id": "single",
         "base_policy_fingerprint": "79cee027633640306a59fc516fecb38be74a66ce4b7c76bd8b2ff3115038541a",
         "base_policy_selection_semantics_id": "eq5_skill_majority_gate_timestep_availability_before_eq6_and_poe_time_state_position3d_unimodal_v1",
@@ -146,18 +146,18 @@
         "minimum_information_weight": 0.1,
         "calibrations": {
           "single:0->1": {
-            "local_score_threshold": 0.05538487292215119,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.09389245550091932,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "single:1->2": {
-            "local_score_threshold": 0.4015123877122173,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.40264554965283483,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "single:2->3": {
-            "local_score_threshold": 0.012572731088955779,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.015373675139229987,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           }
         }
@@ -168,6 +168,8 @@
           "probe_speed": 0.02,
           "maximum_probe_seconds": 1.0,
           "minimum_probe_motion": 0.002,
+          "minimum_response_samples": 3,
+          "maximum_response_residual_ratio": 0.85,
           "minimum_information_weight": 0.1,
           "minimum_tracking_reliability": 0.25,
           "minimum_approach_displacement": 0.0001,
@@ -185,13 +187,19 @@
           "maximum_attempts_per_goal": 2,
           "maximum_total_cycles": 400,
           "maximum_reentry_cycles": 40,
+          "minimum_relation_confirmation_cycles": 2,
           "minimum_information_weight": 0.1,
           "unlink_open_cycles": 2,
           "open_gripper_command": 1.0,
           "unlink_fallback_distance": 0.05,
           "action_position_variance": 0.0002,
           "action_rotation_variance": 0.0005,
-          "boundary_relation_mismatch_cycles": 3
+          "boundary_relation_mismatch_cycles": 3,
+          "link_frame_stability_confirmation_cycles": 3,
+          "link_frame_stability_translation_tolerance": 0.001,
+          "link_frame_stability_rotation_tolerance": 0.017453292519943295,
+          "link_frame_restart_translation": 0.01,
+          "link_frame_restart_rotation": 0.17453292519943295
         },
         "reentry": {
           "minimum_explanation_score": 0.001,
@@ -201,6 +209,12 @@
           "require_relation_evidence_when_available": true
         }
       }
+    },
+    "feature_profile": {
+      "name": "full",
+      "dynamic_frame_roles": true,
+      "relation_scene_boundary_guards": true,
+      "auxiliary_verification_recovery": true
     },
     "initialized": false,
     "pending": false,

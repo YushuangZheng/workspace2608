@@ -10,6 +10,7 @@ from typing import Any, Hashable, Literal, Mapping
 import numpy as np
 
 from ..dynamac import DynaMAC, DynaMACAction, DynaMACObservation
+from .ablation import ClosedLoopFeatureProfile
 from .belief_updater import BeliefUpdater, ClosedLoopBelief
 from .bimanual_controller import BoundaryCycleResult, MultiArmBoundaryController
 from .config import ClosedLoopPolicyConfig
@@ -54,6 +55,8 @@ class ClosedLoopMultiStreamPolicy:
         self,
         task_models: Mapping[str, ClosedLoopTaskModel],
         config: ClosedLoopPolicyConfig,
+        *,
+        feature_profile: ClosedLoopFeatureProfile | str = "full",
     ) -> None:
         if not task_models:
             raise ValueError("闭环顶层策略至少需要一只机械臂")
@@ -62,6 +65,13 @@ class ClosedLoopMultiStreamPolicy:
             raise ValueError("闭环顶层策略模型 arm_id 与映射键不一致")
         self.arms = tuple(sorted(self.task_models))
         self.config = config
+        self.feature_profile = (
+            ClosedLoopFeatureProfile.named(feature_profile)
+            if isinstance(feature_profile, str)
+            else feature_profile
+        )
+        if not isinstance(self.feature_profile, ClosedLoopFeatureProfile):
+            raise TypeError("feature_profile 必须是名称或 ClosedLoopFeatureProfile")
         self.belief_updaters = {
             arm: BeliefUpdater(model, config.belief)
             for arm, model in self.task_models.items()
@@ -71,6 +81,7 @@ class ClosedLoopMultiStreamPolicy:
                 model,
                 config.execution,
                 config.belief.progress_filter,
+                dynamic_frame_roles=self.feature_profile.dynamic_frame_roles,
             )
             for arm, model in self.task_models.items()
         }
@@ -83,6 +94,7 @@ class ClosedLoopMultiStreamPolicy:
             self.execution_controllers,
             config.boundary,
             belief_updaters=self.belief_updaters,
+            relation_scene_guards=(self.feature_profile.relation_scene_boundary_guards),
         )
         self.recovery_trigger = RecoveryTriggerTracker(
             self.task_models,
@@ -594,7 +606,12 @@ class ClosedLoopMultiStreamPolicy:
             return evaluation
         reasons = dict(evaluation.rejection_reasons)
         reasons[decision.state_id] = ("boundary_transaction_not_committed",)
-        return ReentryEvaluation(None, evaluation.scores, reasons)
+        return ReentryEvaluation(
+            None,
+            evaluation.scores,
+            reasons,
+            alignment_state=None,
+        )
 
     def act(
         self,
@@ -737,17 +754,24 @@ class ClosedLoopMultiStreamPolicy:
                         else self._task_command(action)
                     )
 
-        trigger = self.recovery_trigger.update(
-            {arm: result.mismatch for arm, result in executions.items()},
-            transition_requests=None if boundary is None else boundary.requests,
-            beliefs=beliefs,
-            mode_by_arm_skill=self._mode_by_arm_skill,
+        trigger = (
+            self.recovery_trigger.update(
+                {arm: result.mismatch for arm, result in executions.items()},
+                transition_requests=None if boundary is None else boundary.requests,
+                beliefs=beliefs,
+                mode_by_arm_skill=self._mode_by_arm_skill,
+            )
+            if self.feature_profile.auxiliary_verification_recovery
+            else RecoveryTriggerDecision(False, (), ())
         )
         recovery_results: dict[str, RecoveryManagerResult] = {}
         failures: dict[str, str] = {}
         for arm in self.arms:
             manager = self.recovery_managers[arm]
-            if manager.mode == ExecutionMode.TASK:
+            if (
+                manager.mode == ExecutionMode.TASK
+                and self.feature_profile.auxiliary_verification_recovery
+            ):
                 verification_request = self._verification_request(
                     arm,
                     executions.get(arm),
@@ -945,6 +969,25 @@ class ClosedLoopMultiStreamPolicy:
                 and arm not in committed_reentry_arms
             ):
                 evaluation = self._without_cross_skill_decision(evaluation)
+            if evaluation.decision is None and evaluation.alignment_state is not None:
+                weighted = self.execution_controllers[arm].query_reentry_alignment(
+                    evaluation.alignment_state,
+                    beliefs[arm],
+                    dynamac[arm],
+                    mode_by_skill=self._mode_by_arm_skill[arm],
+                )
+                if weighted.action is not None:
+                    action = weighted.action
+                    commands[arm] = ArmCommand(
+                        pose=action.pose,
+                        covariance=(
+                            action.covariance
+                            + np.eye(6, dtype=np.float64)
+                            * self.config.recovery.recovery.covariance_inflation
+                        ),
+                        gripper=action.gripper,
+                        source="recovery_reentry_alignment",
+                    )
             result = self.recovery_managers[arm].commit_reentry(
                 evaluation,
                 belief=beliefs[arm],
@@ -1007,6 +1050,7 @@ class ClosedLoopMultiStreamPolicy:
         result: dict[str, Any] = {
             "tick": tick,
             "lifecycle": self._lifecycle.value,
+            "feature_profile": self.feature_profile.to_dict(),
             "recovery_trigger": json_ready(trigger),
             "boundary": json_ready(boundary),
             "arms": {},
@@ -1113,6 +1157,7 @@ class ClosedLoopMultiStreamPolicy:
             "arms": list(self.arms),
             "models": {arm: self.task_models[arm].summary() for arm in self.arms},
             "config": self.config.to_dict(),
+            "feature_profile": self.feature_profile.to_dict(),
             "initialized": self.initialized,
             "pending": self.pending,
             "failed": self.failed,
@@ -1136,12 +1181,13 @@ class ClosedLoopMultiStreamPolicy:
         directory: str | Path,
         *,
         base_policies: Mapping[str, DynaMAC],
+        feature_profile: ClosedLoopFeatureProfile | str = "full",
     ) -> ClosedLoopMultiStreamPolicy:
         models, config, _ = load_policy_bundle(
             directory,
             base_policies=base_policies,
         )
-        return cls(models, config)
+        return cls(models, config, feature_profile=feature_profile)
 
 
 __all__ = ["ClosedLoopMultiStreamPolicy"]

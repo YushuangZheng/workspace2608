@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -332,6 +332,68 @@ def test_relation_filter_bounds_one_cycle_outliers_but_accepts_sustained_motion(
     assert disconnected.decision_state == RelationDecision.EXTERNAL
 
 
+def test_relation_filter_keeps_mixed_component_contact_wobble_ambiguous(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    feature_builder = RuntimeFeatureBuilder()
+    relation_filter = RelationFilter(
+        model,
+        RelationFilterConfig(demonstration_prior_strength=0.0),
+        feature_builder=feature_builder,
+    )
+    progress = {StateId(0, 1): 1.0}
+    initial = observation(0, 0.0, 0.4, previous_ee_x=None)
+    carried_observation = observation(1, 0.1, 0.5, previous_ee_x=0.0)
+    carried = feature_builder.build(carried_observation, initial)
+    confirmed = relation_filter.update(
+        progress, carried, {"object": np.asarray([0.5, 0.5])}
+    )["object"]
+    assert confirmed.decision_state == RelationDecision.LINKED
+
+    # This is a translation-dominant, grasp-like motion with small relative
+    # translation residual but a compliant rotational wobble.  Translation
+    # supports co-motion while rotation supports a disconnect.  The two
+    # action-conditioned components must produce bounded ambiguous evidence,
+    # not erase an already motion-confirmed link as one scalar residual did.
+    actual_motion = np.asarray([0.00559, 0.0, 0.0, 0.0, 0.0, 0.0123], dtype=np.float64)
+    mixed_residual = np.asarray(
+        [0.00064, 0.0, 0.0, 0.0, 0.0, 0.02155], dtype=np.float64
+    )
+    mixed = replace(
+        carried,
+        actual_ee_motion=actual_motion,
+        relative_motion_residuals={"object": mixed_residual},
+        actual_motion_magnitude=feature_builder.motion_magnitude(actual_motion),
+        action_excitation=0.529,
+        relation_information_weight={"object": 0.529},
+    )
+    previous = confirmed
+    for _ in range(4):
+        estimate = relation_filter.update(
+            progress,
+            mixed,
+            {"object": previous.posterior},
+            previous_decisions={"object": RelationDecision.LINKED},
+            previous_evidence_decisions={"object": RelationDecision.LINKED},
+        )["object"]
+        assert estimate.decision_state != RelationDecision.EXTERNAL
+        previous = estimate
+
+    # By contrast, a fully excited translation without frame response remains
+    # decisive external evidence; the component split does not hide a drop.
+    dropped_observation = observation(2, 0.2, 0.5, previous_ee_x=0.1)
+    dropped = feature_builder.build(dropped_observation, carried_observation)
+    disconnected = relation_filter.update(
+        progress,
+        dropped,
+        {"object": previous.posterior},
+        previous_decisions={"object": RelationDecision.LINKED},
+        previous_evidence_decisions={"object": RelationDecision.LINKED},
+    )["object"]
+    assert disconnected.decision_state == RelationDecision.EXTERNAL
+
+
 def test_invisible_or_unreliable_relation_is_unknown(phase2_model) -> None:
     model, _ = phase2_model
     builder = RuntimeFeatureBuilder()
@@ -431,6 +493,74 @@ def test_static_cycle_can_finish_only_an_evidence_supported_confirmation(
     )["object"]
     assert supported.informative is False
     assert supported.decision_state == RelationDecision.LINKED
+
+
+def test_static_hold_does_not_let_demo_prior_erase_confirmed_relation(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    builder = RuntimeFeatureBuilder()
+    relation_filter = RelationFilter(model, feature_builder=builder)
+    progress = {StateId(1, 1): 1.0}
+    previous_observation = observation(0, 0.1, 0.5, previous_ee_x=None)
+    static = builder.build(
+        observation(1, 0.1, 0.5, previous_ee_x=0.1),
+        previous_observation,
+    )
+    posterior = np.asarray([0.92, 0.08], dtype=np.float64)
+
+    # This fixture state's demo prior supports linked.  During a deliberate
+    # HOLD there is nevertheless no new physical evidence that an observed
+    # external relation has relinked.  Five quiet recursive updates must keep
+    # the confirmed direction instead of repeatedly treating the same demo
+    # prior as five fresh observations.
+    assert relation_filter.demonstration_prior(progress, "object")[1] > 0.5
+    for _ in range(5):
+        estimate = relation_filter.update(
+            progress,
+            static,
+            {"object": posterior},
+            previous_decisions={"object": RelationDecision.EXTERNAL},
+            previous_evidence_decisions={"object": RelationDecision.EXTERNAL},
+        )["object"]
+        assert estimate.informative is False
+        assert estimate.decision_state == RelationDecision.EXTERNAL
+        posterior = estimate.posterior
+
+
+def test_long_static_hold_preserves_motion_confirmed_decision_despite_soft_diffusion(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    builder = RuntimeFeatureBuilder()
+    relation_filter = RelationFilter(
+        model,
+        RelationFilterConfig(demonstration_prior_strength=0.0),
+        feature_builder=builder,
+    )
+    progress = {StateId(0, 1): 1.0}
+    previous_observation = observation(0, 0.1, 0.5, previous_ee_x=None)
+    static = builder.build(
+        observation(1, 0.1, 0.5, previous_ee_x=0.1),
+        previous_observation,
+    )
+    posterior = np.asarray([0.05, 0.95], dtype=np.float64)
+
+    # A Markov posterior approaches 0.5 when no new action-conditioned
+    # evidence arrives.  That uncertainty must not turn an already
+    # motion-confirmed relation into Unknown merely because the task holds.
+    for _ in range(300):
+        estimate = relation_filter.update(
+            progress,
+            static,
+            {"object": posterior},
+            previous_decisions={"object": RelationDecision.LINKED},
+            previous_evidence_decisions={"object": RelationDecision.LINKED},
+        )["object"]
+        assert estimate.informative is False
+        assert estimate.decision_state == RelationDecision.LINKED
+        posterior = estimate.posterior
+    assert posterior[1] < relation_filter.config.decision_probability
 
 
 def test_only_stable_informative_decision_replaces_relation_confirmation(

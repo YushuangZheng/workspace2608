@@ -22,7 +22,7 @@ from .progress_filter import ProgressStatus
 from .relation_filter import RelationDecision, RelationEstimate
 from .runtime_features import RuntimeFeatures
 from .scene_factors import FactorId
-from .state_evaluator import joint_peak_normalized_pose_support
+from .state_evaluator import joint_poe_pose_support
 from .state_index import StateId
 from .task_model import ClosedLoopTaskModel
 
@@ -93,6 +93,8 @@ class EntryGuard:
         task_models: Mapping[str, ClosedLoopTaskModel],
         arm_id: str,
         config: BoundaryRuntimeConfig,
+        *,
+        relation_scene_guards: bool = True,
     ) -> None:
         if arm_id not in task_models:
             raise KeyError(f"入口守卫缺少机械臂 {arm_id} 的任务模型")
@@ -102,6 +104,7 @@ class EntryGuard:
         self.arm_id = arm_id
         self.task_model = self.task_models[arm_id]
         self.config = config
+        self.relation_scene_guards = bool(relation_scene_guards)
         self.reset()
 
     def reset(self) -> None:
@@ -161,9 +164,7 @@ class EntryGuard:
             if key.startswith(prefix)
         }
         results = []
-        joint_entries: list[
-            tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]
-        ] = []
+        joint_entries: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, float]] = []
         all_available = bool(selected)
         features = belief.runtime_features
         for key, distribution in sorted(selected.items()):
@@ -186,7 +187,6 @@ class EntryGuard:
                         features.frame_poses[frame],
                         distribution.mean,
                         distribution.covariance,
-                        value,
                         reliability,
                     )
                 )
@@ -212,8 +212,9 @@ class EntryGuard:
                 )
             )
         if all_available:
-            joint_compatibility, _, _ = joint_peak_normalized_pose_support(
+            joint_compatibility, _, _ = joint_poe_pose_support(
                 joint_entries,
+                features.ee_pose,
                 diagonalize=(
                     self.task_model.base_policy.config.diagonalize_transformed_covariance
                 ),
@@ -425,9 +426,12 @@ class EntryGuard:
         own_relation_values = []
         own_relations_available = True
         verification_requests: dict[str, RelationVerificationRequest] = {}
-        for key, condition in sorted(
+        own_relation_conditions = (
             boundary.local_completion_model.own_relation_conditions.items()
-        ):
+            if self.relation_scene_guards
+            else ()
+        )
+        for key, condition in sorted(own_relation_conditions):
             relation_arm, frame = key.split("/", 1)
             if relation_arm != self.arm_id:
                 raise ValueError("本臂必要关系不能引用其他机械臂")
@@ -487,7 +491,10 @@ class EntryGuard:
         )
 
         guard_results = []
-        for key, condition in sorted(boundary.relation_conditions.items()):
+        relation_conditions = (
+            boundary.relation_conditions.items() if self.relation_scene_guards else ()
+        )
+        for key, condition in sorted(relation_conditions):
             relation_arm, frame = key.split("/", 1)
             if relation_arm not in beliefs:
                 raise KeyError(f"边界关系条件缺少机械臂 {relation_arm} 信念")
@@ -516,7 +523,10 @@ class EntryGuard:
         features_by_arm = {
             arm: belief.runtime_features for arm, belief in beliefs.items()
         }
-        for factor, distribution in sorted(boundary.scene_conditions.items()):
+        scene_conditions = (
+            boundary.scene_conditions.items() if self.relation_scene_guards else ()
+        )
+        for factor, distribution in sorted(scene_conditions):
             condition_id = ConditionId(
                 ConditionKind.GUARD_SCENE, self.arm_id, factor.token
             )

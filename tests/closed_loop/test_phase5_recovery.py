@@ -227,6 +227,27 @@ def features_for(model, demonstrations, state: StateId, *, motion: float = 0.01)
     return RuntimeFeatureBuilder().build(current, previous)
 
 
+def verification_response_features(
+    base,
+    *,
+    ee_translation: float,
+    frame_translation: float,
+):
+    """Return one reliable response to a previously issued verification action."""
+
+    actual = np.asarray([ee_translation, 0.0, 0.0, 0.0, 0.0, 0.0])
+    frame = np.asarray([frame_translation, 0.0, 0.0, 0.0, 0.0, 0.0])
+    return replace(
+        base,
+        actual_ee_motion=actual,
+        frame_world_motion={"object": frame},
+        actual_motion_magnitude=abs(ee_translation),
+        frame_pair_available={"object": True},
+        paired_tracking_reliability={"object": 1.0},
+        relation_information_weight={"object": 1.0},
+    )
+
+
 def belief_for(
     model,
     demonstrations,
@@ -333,25 +354,32 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
     np.testing.assert_array_equal(first.action.gripper_command, [-1.0])
     np.testing.assert_array_equal(first.action.pose[3:], entry[3:])
 
-    moved = first.action.pose
-    informative_features = replace(
+    informative_features = verification_response_features(
         static_features,
-        actual_motion_magnitude=0.005,
+        ee_translation=-0.005,
+        frame_translation=-0.005,
     )
-    returning = controller.update(
-        current_pose=moved,
-        features=informative_features,
-        estimate=relation(RelationDecision.LINKED),
-    )
+    step = first
+    for _ in range(config.minimum_response_samples):
+        assert step.action is not None
+        step = controller.update(
+            current_pose=step.action.pose,
+            features=informative_features,
+            estimate=relation(RelationDecision.LINKED),
+        )
+    returning = step
     assert returning.phase == VerificationPhase.RETURN
     assert returning.probe_exit_reason == ProbeExitReason.STABLE_RELATION
     assert returning.action is not None
-    np.testing.assert_allclose(returning.action.pose, entry)
-    complete = controller.update(
-        current_pose=entry,
-        features=informative_features,
-        estimate=relation(RelationDecision.LINKED),
-    )
+    step = returning
+    while step.phase == VerificationPhase.RETURN:
+        assert step.action is not None
+        step = controller.update(
+            current_pose=step.action.pose,
+            features=informative_features,
+            estimate=relation(RelationDecision.LINKED),
+        )
+    complete = step
     assert complete.phase == VerificationPhase.COMPLETE
     assert complete.decision == RelationDecision.LINKED
 
@@ -421,6 +449,114 @@ def test_verify_link_timeout_still_returns_and_unsafe_return_fails(
     )
     assert failed.phase == VerificationPhase.FAILED
     assert failed.failure_reason == "collision"
+
+
+def test_verify_link_rejects_single_tick_external_when_probe_window_comoves(
+    phase5_case,
+) -> None:
+    model, demonstrations, pending = phase5_case
+    controller = RelationVerificationController(
+        RelationVerificationConfig(
+            probe_speed=0.10,
+            maximum_probe_seconds=0.50,
+            minimum_probe_motion=0.001,
+            minimum_response_samples=3,
+        )
+    )
+    request = RelationVerificationRequest(
+        "single", "object", "linked", pending.event_id
+    )
+    entry = pose(0.02)
+    controller.start(
+        request,
+        pending,
+        task_state=pending.candidate_state,
+        relation_state=RelationDecision.EXTERNAL,
+        grasp_event=0,
+        entry_pose=entry,
+        gripper_command=np.asarray([-1.0]),
+        recent_task_poses=(pose(0.0), entry),
+    )
+    base = features_for(model, demonstrations, pending.candidate_state)
+    no_response_yet = replace(base, actual_motion_magnitude=0.0)
+    step = controller.update(
+        current_pose=entry,
+        features=no_response_yet,
+        estimate=relation(RelationDecision.EXTERNAL),
+    )
+    response = verification_response_features(
+        base,
+        ee_translation=-0.005,
+        frame_translation=-0.0045,
+    )
+    for _ in range(3):
+        assert step.action is not None
+        step = controller.update(
+            current_pose=step.action.pose,
+            features=response,
+            estimate=relation(RelationDecision.EXTERNAL),
+        )
+    assert step.phase == VerificationPhase.PROBE
+    assert step.response_decision == RelationDecision.LINKED
+    assert step.decision == RelationDecision.UNKNOWN
+
+    assert step.action is not None
+    step = controller.update(
+        current_pose=step.action.pose,
+        features=response,
+        estimate=relation(RelationDecision.LINKED),
+    )
+    assert step.phase == VerificationPhase.RETURN
+    assert step.decision == RelationDecision.LINKED
+
+
+def test_verify_link_accepts_external_when_probe_window_does_not_respond(
+    phase5_case,
+) -> None:
+    model, demonstrations, pending = phase5_case
+    controller = RelationVerificationController(
+        RelationVerificationConfig(
+            probe_speed=0.10,
+            maximum_probe_seconds=0.50,
+            minimum_probe_motion=0.001,
+            minimum_response_samples=3,
+        )
+    )
+    request = RelationVerificationRequest(
+        "single", "object", "linked", pending.event_id
+    )
+    entry = pose(0.02)
+    controller.start(
+        request,
+        pending,
+        task_state=pending.candidate_state,
+        relation_state=RelationDecision.EXTERNAL,
+        grasp_event=0,
+        entry_pose=entry,
+        gripper_command=np.asarray([-1.0]),
+        recent_task_poses=(pose(0.0), entry),
+    )
+    base = features_for(model, demonstrations, pending.candidate_state)
+    step = controller.update(
+        current_pose=entry,
+        features=replace(base, actual_motion_magnitude=0.0),
+        estimate=relation(RelationDecision.EXTERNAL),
+    )
+    response = verification_response_features(
+        base,
+        ee_translation=-0.005,
+        frame_translation=0.0,
+    )
+    for _ in range(3):
+        assert step.action is not None
+        step = controller.update(
+            current_pose=step.action.pose,
+            features=response,
+            estimate=relation(RelationDecision.EXTERNAL),
+        )
+    assert step.phase == VerificationPhase.RETURN
+    assert step.response_decision == RelationDecision.EXTERNAL
+    assert step.decision == RelationDecision.EXTERNAL
 
 
 def test_pending_activation_is_episode_local_and_anchor_reinstantiates(
@@ -498,12 +634,17 @@ def test_pending_failed_link_uses_provisional_template_then_activates_on_success
         if result.action is not None:
             current = result.action.pose
         if result.goal_phase is not None and result.goal_phase.value == "verify":
-            result = recovery.update(
-                current_pose=current,
-                current_gripper=np.asarray([-1.0]),
-                frame_poses={"object": frame},
-                relation_estimates={"object": relation(RelationDecision.LINKED)},
-            )
+            for _ in range(20):
+                result = recovery.update(
+                    current_pose=current,
+                    current_gripper=np.asarray([-1.0]),
+                    frame_poses={"object": frame},
+                    relation_estimates={"object": relation(RelationDecision.LINKED)},
+                )
+                if result.action is not None:
+                    current = result.action.pose
+                if result.phase != RecoveryPhase.EXECUTING:
+                    break
         if result.phase != RecoveryPhase.EXECUTING:
             break
 
@@ -661,17 +802,108 @@ def test_link_and_unlink_recovery_are_bounded_and_supply_reentry_states(
         if result.action is not None:
             assert np.all(result.action.gripper_command == 1.0)
             current = result.action.pose
-        if result.goal_phase is not None and result.goal_phase.value == "verify":
-            result = recovery.update(
-                current_pose=current,
-                current_gripper=np.asarray([1.0]),
-                frame_poses={"object": demonstrations[0].frames["object"][10]},
-                relation_estimates={"object": relation(RelationDecision.EXTERNAL)},
-            )
+            if result.goal_phase is not None and result.goal_phase.value == "verify":
+                for _ in range(2):
+                    result = recovery.update(
+                        current_pose=current,
+                        current_gripper=np.asarray([1.0]),
+                        frame_poses={"object": demonstrations[0].frames["object"][10]},
+                        relation_estimates={
+                            "object": relation(RelationDecision.EXTERNAL)
+                        },
+                    )
         if result.phase != RecoveryPhase.EXECUTING:
             break
     assert result.phase == RecoveryPhase.REENTRY
     assert set(result.legal_reentry_states) == set(unlink_goal.legal_reentry_states)
+
+
+def test_recovery_relation_goal_finishes_before_unnecessary_anchor_timeout(
+    phase5_case,
+) -> None:
+    model, demonstrations, _ = phase5_case
+    registry = EpisodeLinkAnchorRegistry(model)
+    goal = RelationGoalPlanner(registry, UnlinkMetadataRepository(model)).plan(
+        (
+            RelationRecoveryIntent(
+                "single",
+                "object",
+                RelationDecision.LINKED,
+                RelationDecision.EXTERNAL,
+            ),
+        ),
+        source_state=StateId(1, 2),
+        mode=0,
+    )[0]
+    recovery = RelationRecoveryController(
+        registry,
+        RecoveryConfig(
+            pose_position_tolerance=1.0e-6,
+            maximum_waypoint_cycles=1,
+            maximum_attempts_per_goal=1,
+        ),
+    )
+    recovery.start((goal,))
+
+    result = recovery.update(
+        current_pose=pose(-10.0),
+        current_gripper=np.asarray([-1.0]),
+        frame_poses={"object": demonstrations[0].frames["object"][6]},
+        relation_estimates={"object": relation(RelationDecision.LINKED)},
+    )
+    assert result.phase == RecoveryPhase.EXECUTING
+    result = recovery.update(
+        current_pose=pose(-10.0),
+        current_gripper=np.asarray([-1.0]),
+        frame_poses={"object": demonstrations[0].frames["object"][6]},
+        relation_estimates={"object": relation(RelationDecision.LINKED)},
+    )
+
+    assert result.phase == RecoveryPhase.REENTRY
+    assert result.failure is None
+    assert result.action is None
+    assert result.completed_goals == (goal,)
+
+
+def test_recovery_does_not_complete_link_goal_from_one_informative_pulse(
+    phase5_case,
+) -> None:
+    model, demonstrations, _ = phase5_case
+    registry = EpisodeLinkAnchorRegistry(model)
+    goal = RelationGoalPlanner(registry, UnlinkMetadataRepository(model)).plan(
+        (
+            RelationRecoveryIntent(
+                "single",
+                "object",
+                RelationDecision.LINKED,
+                RelationDecision.EXTERNAL,
+            ),
+        ),
+        source_state=StateId(1, 2),
+        mode=0,
+    )[0]
+    recovery = RelationRecoveryController(registry)
+    recovery.start((goal,))
+    frame = demonstrations[0].frames["object"][6]
+    current = demonstrations[0].ee_pose[4]
+
+    pulse = recovery.update(
+        current_pose=current,
+        current_gripper=np.asarray([-1.0]),
+        frame_poses={"object": frame},
+        relation_estimates={"object": relation(RelationDecision.LINKED)},
+    )
+    assert pulse.phase == RecoveryPhase.EXECUTING
+    if pulse.action is not None:
+        current = pulse.action.pose
+    rejected = recovery.update(
+        current_pose=current,
+        current_gripper=np.asarray([-1.0]),
+        frame_poses={"object": frame},
+        relation_estimates={"object": relation(RelationDecision.EXTERNAL)},
+    )
+    assert rejected.phase == RecoveryPhase.EXECUTING
+    assert rejected.completed_goals == ()
 
 
 def test_link_recovery_actively_probes_after_a_static_final_grasp(
@@ -723,6 +955,15 @@ def test_link_recovery_actively_probes_after_a_static_final_grasp(
     assert probe is not None
     assert probe.link_probe_phase == "probe"
     assert np.all(probe.action.gripper_command == -1.0)
+    confirming = recovery.update(
+        current_pose=current,
+        current_gripper=np.asarray([-1.0]),
+        frame_poses={"object": frame},
+        relation_estimates={"object": relation(RelationDecision.LINKED)},
+    )
+    assert confirming.link_probe_phase == "probe"
+    assert confirming.action is not None
+    current = confirming.action.pose
     returning = recovery.update(
         current_pose=current,
         current_gripper=np.asarray([-1.0]),
@@ -736,12 +977,18 @@ def test_link_recovery_actively_probes_after_a_static_final_grasp(
     assert np.all(returning.action.gripper_command == -1.0)
 
     current = returning.action.pose
-    complete = recovery.update(
-        current_pose=current,
-        current_gripper=np.asarray([-1.0]),
-        frame_poses={"object": frame},
-        relation_estimates={"object": relation(RelationDecision.LINKED)},
-    )
+    complete = returning
+    for _ in range(20):
+        complete = recovery.update(
+            current_pose=current,
+            current_gripper=np.asarray([-1.0]),
+            frame_poses={"object": frame},
+            relation_estimates={"object": relation(RelationDecision.LINKED)},
+        )
+        if complete.action is not None:
+            current = complete.action.pose
+        if complete.phase != RecoveryPhase.EXECUTING:
+            break
     assert complete.phase == RecoveryPhase.REENTRY
     assert complete.link_probe_motion >= 5.0e-4
 
@@ -768,6 +1015,7 @@ def test_recovery_failure_has_hard_attempt_limit(phase5_case) -> None:
         RecoveryConfig(
             maximum_waypoint_cycles=1,
             maximum_attempts_per_goal=1,
+            link_frame_stability_confirmation_cycles=1,
         ),
     )
     recovery.start((goal,))
@@ -788,6 +1036,66 @@ def test_recovery_failure_has_hard_attempt_limit(phase5_case) -> None:
     assert result.phase == RecoveryPhase.FAILED
     assert result.failure is not None
     assert result.failure.reason == "link_waypoint_timeout"
+
+
+def test_link_recovery_waits_for_and_locks_a_stable_object_frame(phase5_case) -> None:
+    model, demonstrations, _ = phase5_case
+    registry = EpisodeLinkAnchorRegistry(model)
+    goal = RelationGoalPlanner(registry, UnlinkMetadataRepository(model)).plan(
+        (
+            RelationRecoveryIntent(
+                "single",
+                "object",
+                RelationDecision.LINKED,
+                RelationDecision.EXTERNAL,
+            ),
+        ),
+        source_state=StateId(1, 2),
+        mode=0,
+    )[0]
+    recovery = RelationRecoveryController(
+        registry,
+        RecoveryConfig(
+            link_frame_stability_confirmation_cycles=2,
+            link_frame_stability_translation_tolerance=1.0e-4,
+            link_frame_restart_translation=0.01,
+        ),
+    )
+    recovery.start((goal,))
+    current = demonstrations[0].ee_pose[4]
+    frame = demonstrations[0].frames["object"][6].copy()
+
+    first = recovery.update(
+        current_pose=current,
+        current_gripper=np.asarray([-1.0]),
+        frame_poses={"object": frame},
+        relation_estimates={"object": relation(RelationDecision.EXTERNAL)},
+    )
+    assert first.action is not None
+    assert first.action.source == "recovery_link_settle"
+    np.testing.assert_allclose(first.action.pose, current)
+    assert np.all(first.action.gripper_command == 1.0)
+
+    locked = recovery.update(
+        current_pose=current,
+        current_gripper=np.asarray([1.0]),
+        frame_poses={"object": frame},
+        relation_estimates={"object": relation(RelationDecision.EXTERNAL)},
+    )
+    assert locked.action is not None
+    assert locked.action.source == "recovery_link_anchor"
+
+    moved_frame = frame.copy()
+    moved_frame[0] += 0.02
+    restarted = recovery.update(
+        current_pose=current,
+        current_gripper=np.asarray([1.0]),
+        frame_poses={"object": moved_frame},
+        relation_estimates={"object": relation(RelationDecision.EXTERNAL)},
+    )
+    assert restarted.action is not None
+    assert restarted.action.source == "recovery_link_settle"
+    np.testing.assert_allclose(restarted.action.pose, current)
 
 
 def test_reentry_uses_full_state_and_requires_cross_skill_guard(phase5_case) -> None:
@@ -886,9 +1194,11 @@ def test_reentry_reuses_recovery_covariance_without_changing_normal_scores(
     )
 
     assert strict.decision is None
+    assert strict.alignment_state == state
     assert strict.scores[state].robot_covariance_inflation == 0.0
     assert "robot_incompatible" in strict.rejection_reasons[state]
     assert widened.decision is not None
+    assert widened.alignment_state is None
     assert widened.decision.state_id == state
     assert widened.scores[state].robot_covariance_inflation == recovery_inflation
     assert (
@@ -955,17 +1265,21 @@ def test_manager_modes_pending_activation_and_persistent_recovery_trigger(
     linked_belief = replace(
         belief,
         relation_estimates={"object": relation(RelationDecision.LINKED)},
-        runtime_features=replace(
+        runtime_features=verification_response_features(
             belief.runtime_features,
-            actual_motion_magnitude=0.005,
+            ee_translation=-0.005,
+            frame_translation=-0.005,
         ),
     )
-    returning = manager.update_verification(
-        linked_belief,
-        current_pose=first.verification.action.pose,
-    )
-    assert returning.mode == ExecutionMode.VERIFY_LINK
-    complete = manager.update_verification(linked_belief, current_pose=entry)
+    step = first
+    while manager.mode == ExecutionMode.VERIFY_LINK:
+        assert step.verification is not None
+        assert step.verification.action is not None
+        step = manager.update_verification(
+            linked_belief,
+            current_pose=step.verification.action.pose,
+        )
+    complete = step
     assert complete.mode == ExecutionMode.TASK
     assert "object" in manager.anchor_registry.active_pending
 

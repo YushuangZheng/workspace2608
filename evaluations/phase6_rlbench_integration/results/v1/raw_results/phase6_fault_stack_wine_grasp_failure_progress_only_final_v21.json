@@ -1,0 +1,4026 @@
+{
+  "schema": "dynamac-table-i-evaluation-v4",
+  "release": "v4",
+  "policy_type": "closed_loop_multistream",
+  "closed_loop_feature_profile": "progress_only",
+  "protocol_label": "local_table_i_v3",
+  "paper_comparable": false,
+  "task": "stack_wine",
+  "scenario": "static",
+  "episodes": 3,
+  "episodes_requested": 3,
+  "episodes_completed": 3,
+  "seed": 2608000000,
+  "variation": 0,
+  "variation_count": 1,
+  "variation_schedule": [
+    0,
+    0,
+    0
+  ],
+  "horizon": 700,
+  "evaluation_protocol_id": "rlbench-stage6-current-seeded-pseudo6-then-bounded-trac-distance-then-cartesian-continuation-collision-aware-or-relaxed-sampling-path-converged-joint-target-cartesian-feedback-dynamac-global-skill-boundary-transition-lookahead-v1-single-primary-request-raw-joint-hold-same-transaction-primary-attempt1-committed-shared-clock-final-settle-up-to-raw10-staged34-deterministic-source-reset1-formal-root-state-audit2-contact-delta-diagnostic-v5+rlbench-discrete-gripper-unimanual-velocity0p04-attach1-detach-before-open1-transfer-detect1-retry-pending-close1-v3+phase6-physical-fault-v1",
+  "fixed_eval_set": {
+    "evaluation_set_id": "rlbench_eval_v2",
+    "manifest_sha256": "dcccb0557291f35a76e2a340bf31244cf4c748ee34351d749eec9198780bd876",
+    "spec_sha256": "fa4d174edccd195dce8a2b5709d54f8cae614ec1a0e460133e6ca470eeb635de",
+    "selected_batch_sha256": "59f0233100f4453f04a64b43c7e74d5897fce8c664695e3a34eb8d8fcd660e69",
+    "selected_batch_fingerprint": "473e1d00b0142c4e0ae4675252a0109d2433d832bd1d8f9c92704c80e447619b",
+    "formal_access": "canonical_id_read_only_no_generation"
+  },
+  "controller": {
+    "schema": "dynamac-global-absolute-ee-controller-v1",
+    "profile": "stage6_hybrid_cartesian_executor_v16",
+    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v18",
+    "command": "absolute_world_end_effector_pose",
+    "ik_order": "current_seeded_continuous_pseudo_inverse_then_bounded_trac_ik_distance_then_bounded_cartesian_continuation_then_collision_aware_or_relaxed_sampling_then_collision_aware_linear_then_bounded_nonlinear_path_then_collision_relaxed_linear",
+    "primary_ik": "current_seeded_coppeliasim_pseudo_inverse",
+    "primary_ik_parameters": {
+      "max_iterations": 6,
+      "damping": 0.1
+    },
+    "bounded_trac_ik": {
+      "solve_type": "Distance",
+      "timeout_s": 0.05,
+      "epsilon": 1e-05,
+      "cartesian_translation_tolerance_m": 0.0005,
+      "cartesian_rotation_tolerance_rad": 0.0008726646259971648,
+      "joint_window_rad": 0.35,
+      "fk_translation_residual_max_m": 0.002,
+      "fk_rotation_residual_max_rad": 0.017453292519943295,
+      "exact_live_coppeliasim_chain_required": true,
+      "exact_live_chain_schema": "coppeliasim-moving-frame-panda-chain-v1",
+      "exact_live_chain_source": "live_coppeliasim_moving_frame_segments",
+      "bounded_cartesian_api_required": true,
+      "joint_delta_abs_max_rad": 0.35,
+      "joint_delta_l2_max_rad": 0.5,
+      "dependency": {
+        "build_id": "pytracik-v0.0.3-8c8fd2d8-bounded-cartesian-ce1f9053bfc7-cpython38-v1",
+        "package": "pytracik",
+        "package_version": "0.0.3",
+        "repository": "https://github.com/chenhaox/pytracik",
+        "upstream_commit": "8c8fd2d8ca70334af9b747987f1156ebb1da25cc",
+        "source_archive_sha256": "6ab16912c8bbad74214b553a6b49ac39f3a48362b512f187fc08d852af946f8a",
+        "bounded_patch_sha256": "ce1f9053bfc70b6d1a562fe2c830a8f04d8cc59a985941fc3163c3268fe4b565",
+        "conda_lock_sha256": "22b236e3cff3df2fdaf736390ed0583b93c8cbe2adaee9d0c64d4e5e5e4ba7d7",
+        "required_python_abi": "cp38",
+        "required_python_version": [
+          3,
+          8
+        ],
+        "required_python_api": "trac_ik.TracIK.ik_with_bounds",
+        "required_native_api": "pytracik.ik_with_bounds",
+        "binary_distributed_in_repository": false
+      }
+    },
+    "sampling_ik": {
+      "trials": 100,
+      "max_configs": 5,
+      "max_time_ms": 10,
+      "ignore_collisions": false,
+      "selection": "nearest_current_joint_l2",
+      "candidate_validation": "shape_finite_noncyclic_joint_limits",
+      "hard_joint_delta_rejection": false
+    },
+    "far_path": {
+      "translation_threshold_m": 0.1,
+      "entry_condition": "all_three_ik_methods_failed_and_strictly_far",
+      "ignore_collisions": false,
+      "trials": 200,
+      "max_configs": 10,
+      "max_time_ms": 20,
+      "trials_per_goal": 1
+    },
+    "prepare_all_arms_before_physics": true,
+    "joint_target_max_steps": 200,
+    "primary_action_requests_per_policy_tick": 1,
+    "primary_failure_resolution": "one_raw_current_joint_hold_then_commit_same_transaction",
+    "policy_clock_semantics_id": "policy-tick-single-primary-request-then-raw-joint-hold-commit-v1",
+    "formal_horizon_domain": "committed_policy_ticks",
+    "task_specific_controller_branches": false,
+    "legacy_v4_frozen_profile_used": false,
+    "post_execution_cartesian_verification": true,
+    "cartesian_translation_tolerance_m": 0.0005,
+    "cartesian_rotation_tolerance_rad": 0.0008726646259971648,
+    "control_acceptance_translation_tolerance_m": 0.001,
+    "control_acceptance_rotation_tolerance_rad": 0.0017453292519943296,
+    "stopped_resolution": "report_observed_stall_to_closed_loop",
+    "fallback_collision_policy": "collision_aware_first_then_bounded_relaxation",
+    "cartesian_continuation": {
+      "entry_condition": "full_target_local_ik_exhausted",
+      "translation_step_m": 0.005,
+      "rotation_step_rad": 0.03490658503988659,
+      "backoff_factors": [
+        1.0,
+        0.5,
+        0.25,
+        0.125
+      ],
+      "max_segments_per_policy_action": 8,
+      "max_raw_physics_steps_per_policy_action": 8,
+      "interpolation": "linear_translation_shortest_xyzw_slerp",
+      "progress_feedback": "physical_pose_reobserved_between_segments",
+      "commit_semantics": "reach_or_report_bounded_progress_for_closed_loop_reobservation",
+      "task_specific": false
+    },
+    "path_fallback": {
+      "order": "collision_aware_linear_then_collision_aware_rrt_connect_after_measured_stall_or_for_far_targets_then_collision_relaxed_linear",
+      "linear_steps": 50,
+      "collision_relaxed_linear_enabled": true,
+      "nonlinear_minimum_translation_m": 0.1,
+      "near_nonlinear_entry_condition": "same_target_measured_stall_exhausted_local_solver_tiers",
+      "task_specific": false
+    },
+    "sampling_collision_policy": "collision_aware_then_collision_relaxed",
+    "same_target_alternate_solver_after_primary_stall": true,
+    "physical_stall_resolution": "same_target_bounded_solver_escalation_then_report_stall",
+    "physical_stall_solver_order": "pseudo_inverse_then_trac_ik_distance_then_cartesian_continuation_then_sampling_then_path",
+    "physical_stall_sampling_candidate_validation": "shape_finite_joint_limits_and_joint_continuity",
+    "unreported_hidden_motion_after_physical_stall": false,
+    "joint_target_execution": "shared_clock_joint_target_until_reached_or_stopped",
+    "same_target_ik_solution_cache": true,
+    "same_target_ik_solution_cache_semantics": "reuse_only_after_measured_cartesian_progress_and_invalidate_before_bounded_stall_escalation",
+    "worker_clock_handshake_id": "policy-tick-single-primary-request-then-raw-joint-hold-commit-v1",
+    "worker_gripper_timing_handshake": {
+      "protocol_id": "dynamac-global-skill-boundary-transition-lookahead-v1",
+      "rule": "committed_reference_state_command",
+      "policy_pose_tick": "t",
+      "default_gripper_tick": "t",
+      "boundary_transition_gripper_tick": "t_plus_1",
+      "lookahead_scope": "discrete_transition_at_learned_skill_boundary_only",
+      "lookahead_source": "not_required_after_guarded_reference_commit",
+      "terminal_behavior": "repeat_final_gripper_command",
+      "bimanual_boundary_semantics": "independent_per_arm",
+      "pose_predictions_per_policy_tick": 1,
+      "task_specific_branches": false,
+      "task_name_or_tick_special_cases": false,
+      "training_labels_modified": false,
+      "checkpoint_refit_required": false
+    },
+    "formal_episode_initialization": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+    "final_settling": {
+      "protocol_id": "rlbench-hold-final-command-up-to-10-raw-physics-steps-v3",
+      "physics_steps": 10,
+      "maximum_physics_steps": 10,
+      "entry_condition": "normal_policy_complete_without_terminal_outcome",
+      "command_semantics": "hold_existing_joint_targets_and_gripper_state",
+      "step_api": "Scene.step",
+      "success_and_failure_check": "Task.success_after_each_raw_physics_step",
+      "early_stop": "first_success_or_explicit_terminate",
+      "policy_clock_advanced": false,
+      "dynamic_clock_advanced": false,
+      "task_specific_adaptation": false
+    },
+    "gripper_protocol": {
+      "protocol_id": "rlbench-discrete-gripper-unimanual-velocity0p04-attach1-detach-before-open1-transfer-detect1-retry-pending-close1-v3",
+      "action_mode": "Discrete",
+      "arm_layout": "unimanual",
+      "actuation_velocity": 0.04,
+      "demonstration_actuation_velocity": 0.04,
+      "velocity_aligned_with_demonstrations": true,
+      "attach_grasped_objects": true,
+      "detach_before_open": true,
+      "ownership_transfer_requires_receiver_detection": true,
+      "delayed_attachment_retry": true,
+      "delayed_attachment_retry_scope": "unresolved_open_to_closed_command_until_attach_or_reopen",
+      "implementation": "project_subclass_with_pending_close_attachment_retry"
+    },
+    "gripper_timing": {
+      "protocol_id": "dynamac-global-skill-boundary-transition-lookahead-v1",
+      "rule": "committed_reference_state_command",
+      "policy_pose_tick": "t",
+      "default_gripper_tick": "t",
+      "boundary_transition_gripper_tick": "t_plus_1",
+      "lookahead_scope": "discrete_transition_at_learned_skill_boundary_only",
+      "lookahead_source": "not_required_after_guarded_reference_commit",
+      "terminal_behavior": "repeat_final_gripper_command",
+      "bimanual_boundary_semantics": "independent_per_arm",
+      "pose_predictions_per_policy_tick": 1,
+      "task_specific_branches": false,
+      "task_name_or_tick_special_cases": false,
+      "training_labels_modified": false,
+      "checkpoint_refit_required": false
+    },
+    "scene_launch": {
+      "protocol_id": "rlbench-prestep-explicit-base-vision-sensors-v1",
+      "applied": true,
+      "scope": "all_base_scene_vision_sensors",
+      "camera_observations_requested": false,
+      "task_model_loaded_during_rewrite": false,
+      "populated_scene_steps_before_patch": 0,
+      "physics_modified": false,
+      "task_modified": false,
+      "policy_input_modified": false,
+      "source_scene_sha256": "66e1cfa0a6ee5a5e635917d23ce1b5f8ba7159ee1a5326588d798030b972306a",
+      "vision_sensors": [
+        "cam_front",
+        "cam_front_mask",
+        "cam_over_shoulder_left",
+        "cam_over_shoulder_left_mask",
+        "cam_over_shoulder_right",
+        "cam_over_shoulder_right_mask",
+        "cam_overhead",
+        "cam_overhead_mask",
+        "cam_wrist",
+        "cam_wrist_mask"
+      ],
+      "vision_sensor_handling": [
+        {
+          "name": "cam_front",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_front_mask",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_over_shoulder_left",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_over_shoulder_left_mask",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_over_shoulder_right",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_over_shoulder_right_mask",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_overhead",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_overhead_mask",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_wrist",
+          "before": 0,
+          "after": 1
+        },
+        {
+          "name": "cam_wrist_mask",
+          "before": 0,
+          "after": 1
+        }
+      ],
+      "qt_qpa_platform": "offscreen",
+      "qt_qpa_platform_defaulted": true,
+      "vision_sensor_count": 10,
+      "derived_scene_sha256": "fffe16ecc8fc9ae896f1ddc70dbbc8624a5bc26bbcf591dedae662047632f798"
+    },
+    "rlbench_commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
+    "pyrep_commit": "b8bd1d7a3182adcd570d001649c0849047ebf197"
+  },
+  "model_identity": {
+    "model_schema_version": 13,
+    "selection_semantics_id": "eq5_skill_majority_gate_timestep_availability_before_eq6_and_poe_time_state_position3d_unimodal_v1",
+    "tapas_reference_commit": "52e35214b9baa7b190b87196c36b9e98f4006149",
+    "config": {
+      "tau_m": 0.005,
+      "tau_omega": 0.5,
+      "eq6_empty_selection": "keep_argmax",
+      "eq6_covariance_scope": "eq5_weighted_subspace",
+      "policy_model": "time_state",
+      "kinematic_analysis_enabled": true,
+      "eq5_position_weight": 1.0,
+      "eq5_rotation_weight": 0.0,
+      "link_mask_scope": "skill_majority_gate_timestep",
+      "link_filter": "none",
+      "temporal_variance_window": 5,
+      "temporal_variance_threshold": 0.0001,
+      "position_variance_floor": 1e-06,
+      "rotation_variance_floor": 1e-06,
+      "covariance_estimation_method": "diagonal_empirical_ridge",
+      "diagonalize_transformed_covariance": true,
+      "resampling_method": "tapas_subsample",
+      "modal_partition_method": "none",
+      "preliminary_analysis": "paper_order_pooled",
+      "maximum_modes": 8,
+      "minimum_mode_size": 2,
+      "clustering_length": 20,
+      "gripper_clustering_scale": 1.0,
+      "clustering_variance_floor": 1e-06,
+      "clustering_restarts": 64,
+      "dbscan_epsilon": 0.1,
+      "dbscan_min_samples": 2,
+      "gmm_maximum_iterations": 100,
+      "default_mode_strategy": "map",
+      "random_seed": 2608
+    },
+    "fingerprint": "79cee027633640306a59fc516fecb38be74a66ce4b7c76bd8b2ff3115038541a",
+    "training_manifest_schema": "dynamac-direct-training-v3",
+    "manifest_authenticated": true,
+    "training_config": {
+      "tau_m": 0.005,
+      "tau_omega": 0.5,
+      "eq6_empty_selection": "keep_argmax",
+      "eq6_covariance_scope": "eq5_weighted_subspace",
+      "policy_model": "time_state",
+      "kinematic_analysis_enabled": true,
+      "eq5_position_weight": 1.0,
+      "eq5_rotation_weight": 0.0,
+      "link_mask_scope": "skill_majority_gate_timestep",
+      "link_filter": "none",
+      "temporal_variance_window": 5,
+      "temporal_variance_threshold": 0.0001,
+      "position_variance_floor": 1e-06,
+      "rotation_variance_floor": 1e-06,
+      "covariance_estimation_method": "diagonal_empirical_ridge",
+      "diagonalize_transformed_covariance": true,
+      "resampling_method": "tapas_subsample",
+      "modal_partition_method": "none",
+      "preliminary_analysis": "paper_order_pooled",
+      "maximum_modes": 8,
+      "minimum_mode_size": 2,
+      "clustering_length": 20,
+      "gripper_clustering_scale": 1.0,
+      "clustering_variance_floor": 1e-06,
+      "clustering_restarts": 64,
+      "dbscan_epsilon": 0.1,
+      "dbscan_min_samples": 2,
+      "gmm_maximum_iterations": 100,
+      "default_mode_strategy": "map",
+      "random_seed": 2608
+    },
+    "training_adapter_protocol": {
+      "schema": "rlbench-dynamac-demo-adapter-v3",
+      "pose_target_timing": "time-state current EE pose from obs[t]",
+      "gripper_action_timing": "time-state current gripper state from obs[t]",
+      "action_timing": "obs[t] current state",
+      "pose_and_gripper_sample_aligned": true
+    },
+    "checkpoint_trigger_audit_fingerprint": "9bc07dfc00c627fa14a4fc7fb45727fad83ce1851ad89f099deedcccee323184",
+    "v3_trigger_anchor_evidence": {
+      "schema": "dynamac-v3-trigger-anchor-evidence-v1",
+      "intervention_protocol_schema": "rlbench-dynamac-v3-interventions-v2",
+      "intervention_protocol_fingerprint": "50c8502cc5dd6d4dffe51b88e4fc5957cb4cc5d1af0de240fdf299dbc818ba33",
+      "profile_family": "dynamic_environment",
+      "checkpoint_trigger_audit_fingerprint": "9bc07dfc00c627fa14a4fc7fb45727fad83ce1851ad89f099deedcccee323184",
+      "anchors": {
+        "stack_wine": {
+          "anchor_arm": "single",
+          "skill_label": 0,
+          "duration": 72,
+          "evidence_frame": "wine_bottle",
+          "local_tick": 58,
+          "phase": 0.8169014084507042,
+          "phase_formula": "local_tick / (skill_duration - 1)",
+          "resolved_global_tick": 58,
+          "selected_by_eq6": [
+            true
+          ],
+          "availability_runs": [
+            [
+              [
+                0,
+                71
+              ]
+            ]
+          ],
+          "poe_active_runs": [
+            [
+              [
+                0,
+                71
+              ]
+            ]
+          ],
+          "required_active_window": [
+            58,
+            67
+          ],
+          "validated": true,
+          "interaction_arm": "single",
+          "interaction_object": "wine_bottle",
+          "interaction_event": "open gripper approaching the wine bottle before grasp",
+          "expected_gripper_state": "open"
+        }
+      },
+      "validated": true,
+      "fingerprint": "deaaf7933d278d2855bc647e7d369747b69bbc0132f0d97bbc7805151c54ddfd"
+    },
+    "policy_type": "closed_loop_multistream",
+    "closed_loop_bundle": {
+      "name": "closed_loop_multistream",
+      "arms": [
+        "single"
+      ],
+      "models": {
+        "single": {
+          "schema_version": 4,
+          "arm_id": "single",
+          "base_policy_fingerprint": "79cee027633640306a59fc516fecb38be74a66ce4b7c76bd8b2ff3115038541a",
+          "base_policy_selection_semantics_id": "eq5_skill_majority_gate_timestep_availability_before_eq6_and_poe_time_state_position3d_unimodal_v1",
+          "state_count": 181,
+          "skill_state_counts": {
+            "0": 72,
+            "1": 11,
+            "2": 59,
+            "3": 39
+          },
+          "boundary_count": 3,
+          "link_anchor_count": 1,
+          "link_pending_count": 0,
+          "unlink_event_count": 0,
+          "link_origin_count": 96,
+          "relation_frames": [
+            "wine_bottle",
+            "success_sensor"
+          ],
+          "scene_factor_count": 0,
+          "builder_config": {
+            "boundary_compatibility_margin": 1e-06,
+            "boundary_relation_support": 0.7,
+            "boundary_scene_min_stable_fraction": 1.0,
+            "boundary_terminal_window": 3,
+            "link_anchor_horizon": 16,
+            "progress_scene_weight": 1.0,
+            "reentry_horizon": 4,
+            "relation_alpha": 6.0,
+            "relation_comotion_residual_ratio": 0.1,
+            "relation_comotion_residual_threshold": 1e-05,
+            "relation_epsilon": 1e-12,
+            "relation_event_alignment_tolerance": 2,
+            "relation_event_support": 0.8,
+            "relation_link_threshold": 0.7,
+            "relation_minimum_dwell": 2,
+            "relation_minimum_excitation": 3e-07,
+            "relation_unlink_threshold": 0.3,
+            "scene_max_neighborhood": 2,
+            "scene_min_loo_accuracy": 0.8,
+            "scene_min_loo_gain": 1e-06,
+            "scene_min_stable_fraction": 0.8,
+            "scene_min_support": 0.8,
+            "scene_recognition_neighborhood": 2,
+            "scene_support_confidence": 0.99,
+            "transaction_boundary_tolerance": 0.03
+          }
+        }
+      },
+      "config": {
+        "belief": {
+          "runtime_features": {
+            "rotation_length_scale": 0.1,
+            "full_excitation_motion": 0.01
+          },
+          "progress_prior": {
+            "incomplete_weight": 0.2,
+            "normal_completion_weight": 0.65,
+            "early_completion_weight": 0.15,
+            "local_backward_radius": 1,
+            "local_forward_radius": 2
+          },
+          "relation_filter": {
+            "persistence_probability": 0.98,
+            "demonstration_prior_strength": 0.35,
+            "minimum_information_weight": 0.1,
+            "minimum_tracking_reliability": 0.25,
+            "maximum_decision_entropy": 0.62,
+            "decision_probability": 0.7,
+            "residual_ratio_scale": 0.25,
+            "residual_motion_floor": 0.0005,
+            "observation_outlier_probability": 0.002,
+            "gripper_log_bias": 0.15,
+            "probability_floor": 1e-12
+          },
+          "state_evaluator": {
+            "scene_weight": 1.0,
+            "relation_weight": 1.0,
+            "probability_floor": 1e-12
+          },
+          "progress_filter": {
+            "minimum_confidence": 0.55,
+            "maximum_normalized_entropy": 0.8,
+            "minimum_explanation_score": 1e-05,
+            "probability_floor": 1e-300
+          },
+          "candidate_expansion": {
+            "extension_prior_mass": 0.08,
+            "minimum_relation_compatibility": 0.6,
+            "minimum_robot_compatibility": 0.01,
+            "minimum_scene_compatibility": 0.01
+          }
+        },
+        "execution": {
+          "frame_roles": {
+            "expected_relation_probability": 0.7,
+            "minimum_tracking_reliability": 0.25,
+            "minimum_information_weight": 0.1
+          },
+          "mismatch": {
+            "no_plausible_cycles": 20,
+            "relation_mismatch_cycles": 5,
+            "persistent_hold_cycles": 20,
+            "stalled_progress_cycles": 20
+          },
+          "minimum_action_equivalence_compatibility": 0.8
+        },
+        "boundary": {
+          "default_relation_probability": 0.7,
+          "minimum_tracking_reliability": 0.25,
+          "minimum_scene_reliability": 0.25,
+          "minimum_information_weight": 0.1,
+          "calibrations": {
+            "single:0->1": {
+              "local_score_threshold": 0.09389245550091932,
+              "confirmation_cycles": 1,
+              "relation_thresholds": {}
+            },
+            "single:1->2": {
+              "local_score_threshold": 0.40264554965283483,
+              "confirmation_cycles": 1,
+              "relation_thresholds": {}
+            },
+            "single:2->3": {
+              "local_score_threshold": 0.015373675139229987,
+              "confirmation_cycles": 1,
+              "relation_thresholds": {}
+            }
+          }
+        },
+        "recovery": {
+          "verification": {
+            "control_period_seconds": 0.05,
+            "probe_speed": 0.02,
+            "maximum_probe_seconds": 1.0,
+            "minimum_probe_motion": 0.002,
+            "minimum_response_samples": 3,
+            "maximum_response_residual_ratio": 0.85,
+            "minimum_information_weight": 0.1,
+            "minimum_tracking_reliability": 0.25,
+            "minimum_approach_displacement": 0.0001,
+            "task_history_length": 12,
+            "return_position_tolerance": 0.002,
+            "maximum_return_cycles": 80,
+            "action_position_variance": 1e-05,
+            "action_rotation_variance": 0.0001
+          },
+          "recovery": {
+            "covariance_inflation": 0.0001,
+            "pose_position_tolerance": 0.004,
+            "maximum_waypoint_cycles": 40,
+            "maximum_relation_verify_cycles": 30,
+            "maximum_attempts_per_goal": 2,
+            "maximum_total_cycles": 400,
+            "maximum_reentry_cycles": 40,
+            "minimum_relation_confirmation_cycles": 2,
+            "minimum_information_weight": 0.1,
+            "unlink_open_cycles": 2,
+            "open_gripper_command": 1.0,
+            "unlink_fallback_distance": 0.05,
+            "action_position_variance": 0.0002,
+            "action_rotation_variance": 0.0005,
+            "boundary_relation_mismatch_cycles": 3,
+            "link_frame_stability_confirmation_cycles": 3,
+            "link_frame_stability_translation_tolerance": 0.001,
+            "link_frame_stability_rotation_tolerance": 0.017453292519943295,
+            "link_frame_restart_translation": 0.01,
+            "link_frame_restart_rotation": 0.17453292519943295
+          },
+          "reentry": {
+            "minimum_explanation_score": 0.001,
+            "minimum_robot_compatibility": 0.001,
+            "minimum_scene_compatibility": 0.01,
+            "minimum_relation_compatibility": 0.6,
+            "require_relation_evidence_when_available": true
+          }
+        }
+      },
+      "feature_profile": {
+        "name": "progress_only",
+        "dynamic_frame_roles": false,
+        "relation_scene_boundary_guards": false,
+        "auxiliary_verification_recovery": false
+      },
+      "initialized": false,
+      "pending": false,
+      "failed": false,
+      "complete": false,
+      "diagnostic_ticks": 0
+    },
+    "closed_loop_feature_profile": {
+      "name": "progress_only",
+      "dynamic_frame_roles": false,
+      "relation_scene_boundary_guards": false,
+      "auxiliary_verification_recovery": false
+    }
+  },
+  "successes": 0,
+  "success_rate": 0.0,
+  "episode_accounting": {
+    "schema": "planned-denominator-trigger-completion-conditional-success-v3",
+    "planned_episode_denominator": 3,
+    "completed_episode_count": 3,
+    "successes_in_planned_denominator": 0,
+    "success_rate_all_planned_episodes": 0.0,
+    "trigger_reached_count": 0,
+    "intervention_complete_count": 0,
+    "dynamic_condition_unexercised_count": 0,
+    "pre_trigger_success_count": 0,
+    "complete_intervention_subset_count": 0,
+    "successes_in_complete_intervention_subset": 0,
+    "success_rate_in_complete_intervention_subset": null
+  },
+  "ik_execution_diagnostics": {
+    "jacobian_failures": 0,
+    "jacobian_candidate_rejections": 0,
+    "sampling_fallback_successes": 0,
+    "sampling_fallback_failures": 0,
+    "sampling_candidates_evaluated": 0,
+    "candidate_rejections_nonfinite": 0,
+    "candidate_rejections_joint_limits": 0,
+    "candidate_rejections_shape": 0,
+    "selected_via_jacobian": 539,
+    "selected_via_sampling": 0,
+    "selected_joint_delta_l2_max": 0.10843759251621032,
+    "selected_joint_delta_abs_max": 0.09568798542022705,
+    "target_pose_count": 1746,
+    "target_translation_m_max": 0.028140706060940705,
+    "target_rotation_rad_max": 0.14187321403835426,
+    "pseudo_inverse_ik_attempts": 539,
+    "pseudo_inverse_ik_successes": 539,
+    "pseudo_inverse_ik_failures": 0,
+    "pseudo_inverse_ik_candidate_rejections": 0,
+    "selected_via_pseudo_inverse": 539,
+    "trac_ik_distance_attempts": 0,
+    "trac_ik_distance_successes": 0,
+    "trac_ik_distance_failures": 0,
+    "trac_ik_distance_factory_failures": 0,
+    "trac_ik_distance_candidate_rejections": 0,
+    "trac_ik_distance_solve_time_ms_total": 0.0,
+    "trac_ik_distance_solve_time_ms_max": 0.0,
+    "trac_ik_distance_reported_solve_time_ms_total": 0.0,
+    "trac_ik_distance_reported_solve_time_ms_max": 0.0,
+    "trac_ik_distance_chain_sources": [],
+    "trac_ik_distance_chain_schemas": [],
+    "trac_ik_distance_chain_source_missing": 0,
+    "trac_ik_distance_chain_schema_missing": 0,
+    "trac_ik_distance_bounded_cartesian_api_uses": 0,
+    "trac_ik_distance_unbounded_cartesian_api_uses": 0,
+    "trac_ik_distance_result_metadata_missing": 0,
+    "trac_ik_distance_fk_translation_error_m_max": 0.0,
+    "trac_ik_distance_fk_rotation_error_rad_max": 0.0,
+    "trac_ik_distance_exhaustions": 0,
+    "sampling_after_trac_attempts": 0,
+    "sampling_after_trac_successes": 0,
+    "sampling_after_trac_failures": 0,
+    "sampling_collision_relaxed_attempts": 0,
+    "sampling_collision_relaxed_successes": 0,
+    "sampling_collision_relaxed_failures": 0,
+    "selected_via_collision_relaxed_sampling": 0,
+    "candidate_rejections_joint_delta_abs": 0,
+    "candidate_rejections_joint_delta_l2": 0,
+    "selected_via_trac_ik_distance": 0,
+    "all_ik_exhaustions": 0,
+    "path_after_all_ik_exhaustion": 0,
+    "far_target_planner_attempts": 0,
+    "far_target_planner_successes": 0,
+    "far_target_planner_failures": 0,
+    "nonlinear_path_attempts": 0,
+    "nonlinear_path_successes": 0,
+    "nonlinear_path_failures": 0,
+    "near_target_nonlinear_planner_attempts": 0,
+    "linear_path_attempts": 0,
+    "linear_path_collision_aware_successes": 0,
+    "linear_path_collision_aware_failures": 0,
+    "linear_path_collision_relaxed_attempts": 0,
+    "linear_path_collision_relaxed_successes": 0,
+    "linear_path_collision_relaxed_failures": 0,
+    "near_target_nonlinear_planner_skips": 0,
+    "commands_prepared_before_physics": 1746,
+    "ik_group_baseline_restore_attempts": 1746,
+    "ik_group_baseline_restore_failures": 0,
+    "trac_ik_distance_controller_invalid_actions": 0,
+    "trac_ik_distance_controller_actions": 1746,
+    "trac_ik_distance_controller_raw_physics_steps": 2183,
+    "trac_ik_distance_controller_raw_physics_steps_max": 4,
+    "cartesian_verification_checks": 1746,
+    "cartesian_verification_failures": 1713,
+    "cartesian_post_translation_error_m_max": 0.005570038384241598,
+    "cartesian_post_rotation_error_rad_max": 0.02030098483869423,
+    "stopped_with_cartesian_residual": 0,
+    "reached_joint_target_with_cartesian_residual": 26,
+    "controller_raw_physics_budget_exhaustions": 0,
+    "cartesian_direct_goal_attempts": 1746,
+    "cartesian_direct_goal_reaches": 33,
+    "cartesian_direct_goal_control_accepts": 479,
+    "cartesian_direct_goal_progress_accepts": 1208,
+    "cartesian_direct_goal_stalls": 26,
+    "physical_stall_solver_escalations": 0,
+    "physical_stall_solver_escalation_exhaustions": 0,
+    "physical_stall_solver_tier_max": 0,
+    "same_target_joint_cache_hits": 1207,
+    "same_target_joint_cache_misses": 539,
+    "same_target_joint_cache_rejections": 0,
+    "same_target_joint_cache_stores": 1720,
+    "same_target_joint_cache_invalidations": 26,
+    "cartesian_goal_directed_progress_accepts": 1208,
+    "cartesian_partial_arm_progress_accepts": 0,
+    "cartesian_continuation_attempts": 0,
+    "cartesian_continuation_successes": 0,
+    "cartesian_continuation_failures": 0,
+    "selected_via_cartesian_continuation": 0,
+    "cartesian_continuation_fraction_min": 1.0,
+    "cartesian_multi_pass_followup_passes": 1207,
+    "cartesian_multi_pass_goals_completed": 488,
+    "cartesian_multi_pass_limit_exhaustions": 0,
+    "cartesian_multi_pass_solver_exhaustions_after_progress": 0,
+    "joint_target_reached": 527,
+    "joint_target_progressed": 27,
+    "joint_target_stopped": 0,
+    "joint_target_timeouts": 0,
+    "controller_profile": "stage6_hybrid_cartesian_executor_v16",
+    "controller_config": {
+      "profile": "stage6_hybrid_cartesian_executor_v16",
+      "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v18",
+      "formal_default": false,
+      "global_task_special_cases": false,
+      "ik_order": "current_seeded_continuous_pseudo_inverse_then_bounded_trac_ik_distance_then_bounded_cartesian_continuation_then_collision_aware_or_relaxed_sampling_then_collision_aware_linear_then_bounded_nonlinear_path_then_collision_relaxed_linear",
+      "primary_resolution_method": "current_seeded_coppeliasim_pseudo_inverse",
+      "primary_max_iterations": 6,
+      "primary_damping": 0.1,
+      "external_fallback": "bounded_trac_ik_distance_exact_chain",
+      "external_fallback_entry_condition": "pseudo_inverse_exhausted",
+      "external_solver_live_exact_chain_required": true,
+      "external_solver_bounded_cartesian_api_required": true,
+      "trac_ik_timeout_s": 0.05,
+      "trac_ik_epsilon": 1e-05,
+      "trac_ik_translation_tolerance_m": 0.0005,
+      "trac_ik_rotation_tolerance_rad": 0.0008726646259971648,
+      "trac_ik_joint_window_rad": 0.35,
+      "trac_ik_fk_translation_max_m": 0.002,
+      "trac_ik_fk_rotation_max_rad": 0.017453292519943295,
+      "sampling_entry_condition": "pseudo_inverse_and_trac_ik_exhausted",
+      "sampling_trials": 100,
+      "sampling_max_configs": 5,
+      "sampling_max_time_ms": 10,
+      "sampling_ignore_collisions": false,
+      "sampling_selection": "valid_candidate_nearest_current_joint_state",
+      "sampling_hard_joint_delta_rejection": false,
+      "sampling_fallback": true,
+      "legacy_frozen_ik_helper_used": false,
+      "far_translation_threshold_m": 0.1,
+      "path_entry_condition": "pseudo_inverse_trac_ik_distance_and_sampling_failed_and_translation_strictly_above_threshold",
+      "rotation_alone_triggers_path": false,
+      "path_controller": "collision_aware_get_path_rrt_connect",
+      "far_path_ignore_collisions": false,
+      "prepare_all_arms_before_physics": true,
+      "trac_ik_max_joint_delta_abs_rad": 0.35,
+      "trac_ik_max_joint_delta_l2_rad": 0.5,
+      "pseudo_candidate_validation": "shape_finite_and_joint_limits",
+      "trac_candidate_validation": "shape_finite_joint_limits_and_joint_continuity",
+      "sampling_candidate_validation": "shape_finite_and_joint_limits",
+      "planner_trials": 200,
+      "planner_max_configs": 10,
+      "planner_max_time_ms": 20,
+      "planner_trials_per_goal": 1,
+      "ik_group_post_prepare_method": "pseudo_inverse",
+      "ik_group_post_prepare_max_iterations": 6,
+      "ik_group_post_prepare_damping": 0.1,
+      "pseudo_inverse_continuity_gate": true,
+      "post_execution_cartesian_verification": true,
+      "cartesian_translation_tolerance_m": 0.0005,
+      "cartesian_rotation_tolerance_rad": 0.0008726646259971648,
+      "control_acceptance_translation_tolerance_m": 0.001,
+      "control_acceptance_rotation_tolerance_rad": 0.0017453292519943296,
+      "cartesian_continuation": {
+        "entry_condition": "full_target_local_ik_exhausted",
+        "translation_step_m": 0.005,
+        "rotation_step_rad": 0.03490658503988659,
+        "backoff_factors": [
+          1.0,
+          0.5,
+          0.25,
+          0.125
+        ],
+        "max_segments_per_policy_action": 8,
+        "max_raw_physics_steps_per_policy_action": 8,
+        "interpolation": "linear_translation_shortest_xyzw_slerp",
+        "progress_feedback": "physical_pose_reobserved_between_segments",
+        "commit_semantics": "reach_or_report_bounded_progress_for_closed_loop_reobservation",
+        "task_specific": false
+      },
+      "path_fallback": {
+        "order": "collision_aware_linear_then_collision_aware_rrt_connect_after_measured_stall_or_for_far_targets_then_collision_relaxed_linear",
+        "linear_steps": 50,
+        "collision_relaxed_linear_enabled": true,
+        "nonlinear_minimum_translation_m": 0.1,
+        "near_nonlinear_entry_condition": "same_target_measured_stall_exhausted_local_solver_tiers",
+        "task_specific": false
+      },
+      "sampling_collision_policy": "collision_aware_then_collision_relaxed",
+      "stopped_resolution": "report_observed_stall_to_closed_loop",
+      "physical_stall_resolution": "same_target_bounded_solver_escalation_then_report_stall",
+      "fallback_collision_policy": "collision_aware_first_then_bounded_relaxation",
+      "same_target_alternate_solver_after_primary_stall": true,
+      "physical_stall_solver_order": "pseudo_inverse_then_trac_ik_distance_then_cartesian_continuation_then_sampling_then_path",
+      "physical_stall_sampling_candidate_validation": "shape_finite_joint_limits_and_joint_continuity",
+      "unreported_hidden_motion_after_physical_stall": false,
+      "joint_target_execution": "shared_clock_joint_target_until_reached_or_stopped",
+      "same_target_ik_solution_cache": true,
+      "same_target_ik_solution_cache_semantics": "reuse_only_after_measured_cartesian_progress_and_invalidate_before_bounded_stall_escalation",
+      "task_specific_controller_branches": false
+    },
+    "cartesian_pre_execution_control_accepts": 15,
+    "cartesian_policy_action_physics_budget_exhaustions": 5,
+    "cartesian_policy_action_raw_physics_steps_max": 8
+  },
+  "gripper_protocol": {
+    "protocol_id": "rlbench-discrete-gripper-unimanual-velocity0p04-attach1-detach-before-open1-transfer-detect1-retry-pending-close1-v3",
+    "action_mode": "Discrete",
+    "arm_layout": "unimanual",
+    "actuation_velocity": 0.04,
+    "demonstration_actuation_velocity": 0.04,
+    "velocity_aligned_with_demonstrations": true,
+    "attach_grasped_objects": true,
+    "detach_before_open": true,
+    "ownership_transfer_requires_receiver_detection": true,
+    "delayed_attachment_retry": true,
+    "delayed_attachment_retry_scope": "unresolved_open_to_closed_command_until_attach_or_reopen",
+    "implementation": "project_subclass_with_pending_close_attachment_retry"
+  },
+  "gripper_timing": {
+    "protocol_id": "dynamac-global-skill-boundary-transition-lookahead-v1",
+    "rule": "skill_boundary_transition_lookahead",
+    "policy_pose_tick": "t",
+    "default_gripper_tick": "t",
+    "boundary_transition_gripper_tick": "t_plus_1",
+    "lookahead_scope": "discrete_transition_at_learned_skill_boundary_only",
+    "lookahead_source": "read_only_policy_core_without_pose_prediction",
+    "terminal_behavior": "repeat_final_gripper_command",
+    "bimanual_boundary_semantics": "independent_per_arm",
+    "pose_predictions_per_policy_tick": 1,
+    "task_specific_branches": false,
+    "task_name_or_tick_special_cases": false,
+    "training_labels_modified": false,
+    "checkpoint_refit_required": false
+  },
+  "protocol": {
+    "label": "local_table_i_v3",
+    "paper_comparable": false,
+    "comparison_scope": "diagnostic_against_paper_targets_not_protocol_exact",
+    "dynamic_method": "static",
+    "motion_protocol": {
+      "protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "episode_instance_semantics": "offline_certified_source_seed_strictly_reconstructed_by_reset_false",
+      "goal_object": "task.boundary_root()",
+      "goal_sampling": "independent_disposable_staging_environment",
+      "goal_sampling_max_attempts": 100,
+      "source_selection_max_attempts": 20,
+      "fresh_task_generation_protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+      "candidate_isolation": "prestop_unload_if_present_stop_physics_fresh_task_reload_single_reset_verify_instance_false",
+      "candidate_source_policy": "every_candidate_reconstructs_selected_source_seed_A",
+      "source_reconstruction_schema": "dynamac-rlbench-source-reconstruction-audit-v1",
+      "source_reconstruction_tolerances": {
+        "translation_m": 1e-06,
+        "rotation_rad": 1e-06,
+        "scalar_state": 1e-06,
+        "joint_position": 1e-06
+      },
+      "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord",
+      "task_object_velocity_role": "finite_diagnostic_not_identity_comparison",
+      "staging_waypoint_validation": "A_seed_offline_via_exactly_one_explicit_Task.validate_then_discard;B_via_fresh_source_reconstruction_and_exactly_one_Task.validate",
+      "task_tree_state_schema": "rlbench-task-tree-dual-frame-state-v1",
+      "source_replay_task_tree_comparison": "all_objects_world",
+      "root_motion_task_tree_comparison": "boundary_root_subtree_relative_else_world",
+      "goal_validation_task_tree_comparison": "all_objects_world",
+      "formal_episode_initialization": "prestop_unload_if_present_stop_physics_fresh_task_reload_then_selected_source_seed_variation_single_reset_verify_instance_false",
+      "calls_task_validate_after_formal_reset": false,
+      "formal_intervention_sampling": false,
+      "formal_intervention_task_get_state": false,
+      "formal_intervention_task_restore_state": false,
+      "formal_rollout_receives": "immutable_numeric_A_B_poses_and_fingerprint",
+      "formal_intervention_state_audit_schema": "rlbench-formal-boundary-root-same-instance-state-audit-v2",
+      "formal_intervention_state_reference": "current_policy_evolved_formal_state_immediately_before_each_root_command",
+      "formal_intervention_task_tree_comparison": "strict_1e-6_boundary_root_subtree_relative_else_world",
+      "formal_intervention_semantic_guard": "exact",
+      "formal_intervention_registry_and_grasp_guard": "same_python_identities_membership_and_parentage",
+      "formal_intervention_collision_audit": "record_exact_post_command_pair_delta_diagnostic_only",
+      "robot_collision_validation": "reject_candidate_external_pairs_absent_at_source",
+      "trigger_clock": "committed_policy_ticks",
+      "duplicate_policy_tick_motion": false,
+      "smooth_schedule": "one_fraction_per_unique_committed_policy_tick",
+      "smooth_fractions": "1_over_n_through_n_over_n",
+      "smooth_endpoint_validation": "final_goal_pose_reached",
+      "calls_task_init_episode_from_sampler": false,
+      "calls_scene_kidnap": false,
+      "calls_scene_move_task_smoothly": false
+    },
+    "legacy_trigger_fraction_ignored": 0.3333333333333333,
+    "trigger_reference_domain": "successfully_committed_policy_ticks",
+    "fitted_policy_steps": 181,
+    "trigger_policy_step": null,
+    "trigger_authentication": {
+      "trigger_step": 58,
+      "profile_key": "stack_wine",
+      "profile": {
+        "anchor_arm": "single",
+        "interaction_arm": "single",
+        "interaction_object": "wine_bottle",
+        "interaction_event": "open gripper approaching the wine bottle before grasp",
+        "expected_gripper_state": "open",
+        "skill_label": 0,
+        "evidence_frame": "wine_bottle",
+        "expected_duration": 72,
+        "local_tick": 58,
+        "phase": 0.8169014084507042,
+        "required_active_window": [
+          58,
+          67
+        ]
+      },
+      "evidence": {
+        "anchor_arm": "single",
+        "skill_label": 0,
+        "duration": 72,
+        "evidence_frame": "wine_bottle",
+        "local_tick": 58,
+        "phase": 0.8169014084507042,
+        "phase_formula": "local_tick / (skill_duration - 1)",
+        "resolved_global_tick": 58,
+        "selected_by_eq6": [
+          true
+        ],
+        "availability_runs": [
+          [
+            [
+              0,
+              71
+            ]
+          ]
+        ],
+        "poe_active_runs": [
+          [
+            [
+              0,
+              71
+            ]
+          ]
+        ],
+        "required_active_window": [
+          58,
+          67
+        ],
+        "validated": true,
+        "interaction_arm": "single",
+        "interaction_object": "wine_bottle",
+        "interaction_event": "open gripper approaching the wine bottle before grasp",
+        "expected_gripper_state": "open"
+      },
+      "evidence_fingerprint": "deaaf7933d278d2855bc647e7d369747b69bbc0132f0d97bbc7805151c54ddfd",
+      "intervention_protocol_fingerprint": "50c8502cc5dd6d4dffe51b88e4fc5957cb4cc5d1af0de240fdf299dbc818ba33"
+    },
+    "intervention_registry_schema": "rlbench-dynamac-v3-interventions-v2",
+    "intervention_registry_fingerprint": "50c8502cc5dd6d4dffe51b88e4fc5957cb4cc5d1af0de240fdf299dbc818ba33",
+    "smooth_motion_calls": 10,
+    "intervention_max_attempts": 100,
+    "dynamic_episode_accounting_schema": "planned-denominator-trigger-completion-conditional-success-v3",
+    "pre_intervention_failure_policy": "retain_failure_with_null_intervention_effectiveness",
+    "pre_intervention_success_policy": "retain_success_in_planned_denominator_with_unexercised_condition",
+    "smooth_terminal_progress_policy": "strict_effective_prefix_until_episode_terminal",
+    "episodes_intervention_eligible": 0,
+    "episodes_pre_intervention_terminal": 0,
+    "episodes_dynamic_condition_unexercised": 0,
+    "pre_trigger_successes": 0,
+    "planned_episode_denominator": 3,
+    "completed_episode_count": 3,
+    "episodes_with_intervention": 0,
+    "episodes_with_effective_intervention": 0,
+    "episodes_with_complete_intervention": 0,
+    "successes_in_complete_intervention_subset": 0,
+    "success_rate_in_complete_intervention_subset": null,
+    "all_episodes_intervened": false,
+    "all_interventions_effective": null,
+    "all_eligible_interventions_effective": null,
+    "protocol_valid": true,
+    "source": "frozen V3 task-specific trigger plus independently staged waypoint-validated boundary-root motion",
+    "staged_motion_plan_cache": {
+      "schema": "dynamac-rlbench-staged-motion-plan-batch-v3.4",
+      "protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "batch_fingerprint": "473e1d00b0142c4e0ae4675252a0109d2433d832bd1d8f9c92704c80e447619b",
+      "plan_fingerprints": [
+        "0aff209f22749abae93601247bd20b5d93da3a8a2e4d592548aa44b846c7a82a",
+        "8408a70329515b8ee9c974bf7f6868ff11d0ca1fc4d3a3a415a7fd4a033c6f30",
+        "8ee0e2dd67d707629752d9a153bc0868a21bb96fb76dba5f5f951f0c88e1eefe"
+      ],
+      "scenario_independent": true,
+      "seed_domain": "logical_episode=base_seed+episode;A=certified_selected_source_seed_rebuilt_with_reset_false;B=deterministic_post_source_reconstruction_candidate_seed;scenario_excluded",
+      "goal_sampling_max_attempts": 100,
+      "source_selection_max_attempts": 20,
+      "motion_source_protocol_schema": "rlbench-dynamac-v3-motion-sources-v1",
+      "motion_source_protocol_fingerprint": "884021e9e0c4da39ffe176c38ed05eb49e2279b60c1b1f1907897ea197754ddc",
+      "formal_dynamic_reset_verify_instance": false,
+      "cache_key": {
+        "task": "stack_wine",
+        "base_seed": 2608000000,
+        "episodes": 3,
+        "variation_schedule": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "formal_access": "canonical_eval_set_read_only",
+      "staging_shutdown_before_formal_launch": true,
+      "fresh_task_generation_per_formal_episode": true
+    },
+    "claim_boundary": "The live five-demonstration cohort, fixed variation, segmentation, and dynamic displacement distribution remain explicit local choices. V3 trigger ticks are preregistered and checkpoint-authenticated, but the paper's exact Table I datasets and full DynaBench protocol remain unavailable, so these results are not paper-comparable."
+  },
+  "results": [
+    {
+      "episode": 0,
+      "success": false,
+      "steps": 188,
+      "control_attempts": 188,
+      "reason": "policy_complete_after_final_settling",
+      "invalid_actions": 0,
+      "interventions": [],
+      "final_settling": {
+        "protocol_id": "rlbench-hold-final-command-up-to-10-raw-physics-steps-v3",
+        "physics_steps": 10,
+        "maximum_physics_steps": 10,
+        "entry_condition": "normal_policy_complete_without_terminal_outcome",
+        "command_semantics": "hold_existing_joint_targets_and_gripper_state",
+        "step_api": "Scene.step",
+        "success_and_failure_check": "Task.success_after_each_raw_physics_step",
+        "early_stop": "first_success_or_explicit_terminate",
+        "policy_clock_advanced": false,
+        "dynamic_clock_advanced": false,
+        "task_specific_adaptation": false,
+        "attempted": true,
+        "available": true,
+        "steps_executed": 10,
+        "first_terminal_step": null,
+        "stop_reason": "maximum_physics_steps_reached",
+        "success": false,
+        "terminate": false
+      },
+      "primary_failure_joint_hold_commits": 0,
+      "policy_clock_semantics_id": "policy-tick-single-primary-request-then-raw-joint-hold-commit-v1",
+      "committed_policy_steps": 188,
+      "dynamic_clock_steps": 188,
+      "staged_source_binding": {
+        "required": true,
+        "matched": true,
+        "formal_source_bound": true,
+        "source_seed": 2608000000,
+        "root": {
+          "preserved": true,
+          "translation_error_m": 0.0,
+          "rotation_error_rad": 0.0,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+        },
+        "low_dim_state": {
+          "preserved": true,
+          "comparison_mode": "pose_chunks_sign_invariant",
+          "chunk_count": 2,
+          "raw_l2": 0.0,
+          "raw_max_abs": 0.0,
+          "max_translation_m": 0.0,
+          "max_rotation_rad": 0.0,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "scalar_tolerance": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+        },
+        "deterministic_source_reconstruction": {
+          "schema": "dynamac-rlbench-source-reconstruction-audit-v1",
+          "root": {
+            "preserved": true,
+            "translation_error_m": 0.0,
+            "rotation_error_rad": 0.0,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+          },
+          "low_dim_state": {
+            "preserved": true,
+            "comparison_mode": "pose_chunks_sign_invariant",
+            "chunk_count": 2,
+            "raw_l2": 0.0,
+            "raw_max_abs": 0.0,
+            "max_translation_m": 0.0,
+            "max_rotation_rad": 0.0,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "scalar_tolerance": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+          },
+          "task_tree": {
+            "matched": true,
+            "topology_matched": true,
+            "comparison_mode": "all_objects_world",
+            "expected_object_count": 14,
+            "actual_object_count": 14,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "joint_tolerance": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord",
+            "all_parents_matched": true,
+            "all_subtree_memberships_matched": true,
+            "max_translation_error_m": 0.0,
+            "max_rotation_error_rad": 0.0,
+            "max_joint_position_error": 0.0
+          },
+          "robot_numeric_state": {
+            "structure_matched": true,
+            "max_joint_position_error": 0.0,
+            "max_joint_target_position_error": 0.0,
+            "max_joint_velocity_error": 0.0,
+            "max_tip_translation_error_m": 0.0,
+            "max_tip_rotation_error_rad": 0.0,
+            "joint_tolerance": 1e-06,
+            "velocity_tolerance": 1e-06,
+            "tip_translation_tolerance_m": 1e-06,
+            "tip_rotation_tolerance_rad": 1e-06,
+            "passed": true
+          },
+          "exact_matches": {
+            "task_name": true,
+            "task_semantics": true,
+            "descriptions": true,
+            "stable_grasp_state": true,
+            "robot_external_collision_pairs": true
+          },
+          "task_object_velocities_finite": true,
+          "passed": true
+        },
+        "formal_sampling_or_restore": false,
+        "formal_task_validate_calls": 0,
+        "formal_waypoint_cache_state": "none",
+        "staging_source_certification_reused": true,
+        "fresh_task_generation_protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "selected_source_fresh_task_generation": {
+          "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+          "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+          "generation_index": 2,
+          "episode_seed": 2608000000,
+          "variation": 0,
+          "task_name": "stack_wine",
+          "physics_running_before_stop": true,
+          "physics_stopped_before_task_reload": true,
+          "previous_task_present": true,
+          "previous_task_unloaded_before_stop": true,
+          "previous_task_unloaded_while_physics_running": true,
+          "scene_task_absent_before_stop": true,
+          "task_model_loaded_fresh": true,
+          "fresh_task_python_instance_created": true,
+          "task_model_only_reloaded": true,
+          "base_scene_reloaded": false,
+          "physics_started_by_task_environment": true,
+          "rng_seeded_after_reload_immediately_before_reset": true,
+          "variation_set_after_seed_before_reset": true,
+          "task_environment_reset_calls": 1,
+          "reset_verify_instance": false,
+          "reset_random_placement_expected": true,
+          "reset_robot_collision_check_count": 1,
+          "reset_robot_collision_check_results": [
+            false
+          ],
+          "fingerprint": "8a9abba36a28b8506ec55790763fe7bc19640028b0b81d3b846e49f304590a3b"
+        },
+        "formal_source_fresh_task_generation": {
+          "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+          "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+          "generation_index": 1,
+          "episode_seed": 2608000000,
+          "variation": 0,
+          "task_name": "stack_wine",
+          "physics_running_before_stop": false,
+          "physics_stopped_before_task_reload": true,
+          "previous_task_present": false,
+          "previous_task_unloaded_before_stop": false,
+          "previous_task_unloaded_while_physics_running": false,
+          "scene_task_absent_before_stop": true,
+          "task_model_loaded_fresh": true,
+          "fresh_task_python_instance_created": true,
+          "task_model_only_reloaded": true,
+          "base_scene_reloaded": false,
+          "physics_started_by_task_environment": true,
+          "rng_seeded_after_reload_immediately_before_reset": true,
+          "variation_set_after_seed_before_reset": true,
+          "task_environment_reset_calls": 1,
+          "reset_verify_instance": false,
+          "reset_random_placement_expected": true,
+          "reset_robot_collision_check_count": 1,
+          "reset_robot_collision_check_results": [
+            false
+          ],
+          "fingerprint": "71287af83aedd5942a993e5c94cc1d6997036126009b6945e320a66bd540203e"
+        },
+        "task_name": "stack_wine",
+        "task_semantics_matched": true,
+        "task_tree_matched": true,
+        "task_tree_state_schema": "rlbench-task-tree-dual-frame-state-v1",
+        "task_tree_match": {
+          "matched": true,
+          "topology_matched": true,
+          "comparison_mode": "all_objects_world",
+          "expected_object_count": 14,
+          "actual_object_count": 14,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "joint_tolerance": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord",
+          "all_parents_matched": true,
+          "all_subtree_memberships_matched": true,
+          "max_translation_error_m": 0.0,
+          "max_rotation_error_rad": 0.0,
+          "max_joint_position_error": 0.0
+        },
+        "task_descriptions_matched": true,
+        "robot_external_collision_pairs_matched": true,
+        "selected_source_fingerprint": "46366724c84c2e4773dc18d14ed259fdde9b58333ff3d89bbc5f0a20e3f21433",
+        "formal_source_fingerprint": "46366724c84c2e4773dc18d14ed259fdde9b58333ff3d89bbc5f0a20e3f21433",
+        "motion_plan_fingerprint": "0aff209f22749abae93601247bd20b5d93da3a8a2e4d592548aa44b846c7a82a",
+        "formal_observation_refreshed_after_binding": true
+      },
+      "fresh_task_generation": {
+        "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+        "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "generation_index": 1,
+        "episode_seed": 2608000000,
+        "variation": 0,
+        "task_name": "stack_wine",
+        "physics_running_before_stop": false,
+        "physics_stopped_before_task_reload": true,
+        "previous_task_present": false,
+        "previous_task_unloaded_before_stop": false,
+        "previous_task_unloaded_while_physics_running": false,
+        "scene_task_absent_before_stop": true,
+        "task_model_loaded_fresh": true,
+        "fresh_task_python_instance_created": true,
+        "task_model_only_reloaded": true,
+        "base_scene_reloaded": false,
+        "physics_started_by_task_environment": true,
+        "rng_seeded_after_reload_immediately_before_reset": true,
+        "variation_set_after_seed_before_reset": true,
+        "task_environment_reset_calls": 1,
+        "reset_verify_instance": false,
+        "reset_random_placement_expected": true,
+        "reset_robot_collision_check_count": 1,
+        "reset_robot_collision_check_results": [
+          false
+        ],
+        "fingerprint": "71287af83aedd5942a993e5c94cc1d6997036126009b6945e320a66bd540203e"
+      },
+      "motion_plan_fingerprint": "0aff209f22749abae93601247bd20b5d93da3a8a2e4d592548aa44b846c7a82a",
+      "motion_plan_protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "motion_plan_evidence": {
+        "plan_fingerprint": "0aff209f22749abae93601247bd20b5d93da3a8a2e4d592548aa44b846c7a82a",
+        "source_waypoint_validated": true,
+        "goal_waypoint_validated": true,
+        "formal_rollout_sample_or_restore": false,
+        "formal_source_bound": true,
+        "formal_task_name_bound": "stack_wine",
+        "formal_task_semantics_matched": true,
+        "formal_task_tree_matched": true,
+        "formal_deterministic_source_reconstruction_passed": true,
+        "formal_task_validate_calls": 0,
+        "formal_observation_refreshed_after_binding": true,
+        "formal_robot_external_collision_pairs_matched": true,
+        "selected_source_fingerprint": "46366724c84c2e4773dc18d14ed259fdde9b58333ff3d89bbc5f0a20e3f21433",
+        "formal_source_fingerprint": "46366724c84c2e4773dc18d14ed259fdde9b58333ff3d89bbc5f0a20e3f21433"
+      },
+      "trigger_step": null,
+      "intervention_eligible": false,
+      "intervention_reached": false,
+      "pre_intervention_terminal": false,
+      "pre_intervention_terminal_outcome": null,
+      "dynamic_condition_exercised": false,
+      "dynamic_condition_unexercised": null,
+      "intervention_effective": null,
+      "intervention_complete": null,
+      "physical_fault": {
+        "schema": "essay2608.rlbench.physical_fault.v1",
+        "spec": {
+          "kind": "grasp_failure",
+          "arm": "single",
+          "earliest_step": 0,
+          "duration_cycles": 8,
+          "motion_trigger_distance": 0.005,
+          "close_occurrence": 1,
+          "minimum_grasped_cycles": 3,
+          "mismatch_translation": [
+            0.04,
+            0.0,
+            0.0
+          ]
+        },
+        "triggered": true,
+        "events": [
+          {
+            "kind": "grasp_failure",
+            "policy_step": 90,
+            "protocol_effective": true,
+            "arm": "single",
+            "close_occurrence": 1,
+            "end_condition": "explicit_open_then_new_close_occurrence"
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 90,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 91,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 92,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 93,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 94,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 95,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 96,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 97,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 98,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 99,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 100,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 101,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 102,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 103,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 104,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 105,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 106,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 107,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 108,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 109,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 110,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 111,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 112,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 113,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 114,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 115,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 116,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 117,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 118,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 119,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 120,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 121,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 122,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 123,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 124,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 125,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 126,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 127,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 128,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 129,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 130,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 131,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 132,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 133,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 134,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 135,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 136,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 137,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 138,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 139,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 140,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 141,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 142,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 143,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 144,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 145,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 146,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 147,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 148,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 149,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 150,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 151,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 152,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 153,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 154,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 155,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 156,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 157,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 158,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 159,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 160,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 161,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 162,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 163,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 164,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 165,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 166,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 167,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 168,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 169,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 170,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 171,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 172,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 173,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 174,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 175,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 176,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 177,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 178,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 179,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 180,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 181,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 182,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 183,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 184,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 185,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 186,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_failure_occurrence_ended",
+            "policy_step": 187,
+            "arm": "single",
+            "protocol_effective": true
+          }
+        ],
+        "policy_steps_observed": 188,
+        "policy_state_mutated": false,
+        "observation_hidden": false
+      }
+    },
+    {
+      "episode": 1,
+      "success": false,
+      "steps": 183,
+      "control_attempts": 183,
+      "reason": "policy_complete_after_final_settling",
+      "invalid_actions": 0,
+      "interventions": [],
+      "final_settling": {
+        "protocol_id": "rlbench-hold-final-command-up-to-10-raw-physics-steps-v3",
+        "physics_steps": 10,
+        "maximum_physics_steps": 10,
+        "entry_condition": "normal_policy_complete_without_terminal_outcome",
+        "command_semantics": "hold_existing_joint_targets_and_gripper_state",
+        "step_api": "Scene.step",
+        "success_and_failure_check": "Task.success_after_each_raw_physics_step",
+        "early_stop": "first_success_or_explicit_terminate",
+        "policy_clock_advanced": false,
+        "dynamic_clock_advanced": false,
+        "task_specific_adaptation": false,
+        "attempted": true,
+        "available": true,
+        "steps_executed": 10,
+        "first_terminal_step": null,
+        "stop_reason": "maximum_physics_steps_reached",
+        "success": false,
+        "terminate": false
+      },
+      "primary_failure_joint_hold_commits": 0,
+      "policy_clock_semantics_id": "policy-tick-single-primary-request-then-raw-joint-hold-commit-v1",
+      "committed_policy_steps": 183,
+      "dynamic_clock_steps": 183,
+      "staged_source_binding": {
+        "required": true,
+        "matched": true,
+        "formal_source_bound": true,
+        "source_seed": 2608000001,
+        "root": {
+          "preserved": true,
+          "translation_error_m": 0.0,
+          "rotation_error_rad": 0.0,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+        },
+        "low_dim_state": {
+          "preserved": true,
+          "comparison_mode": "pose_chunks_sign_invariant",
+          "chunk_count": 2,
+          "raw_l2": 0.0,
+          "raw_max_abs": 0.0,
+          "max_translation_m": 0.0,
+          "max_rotation_rad": 0.0,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "scalar_tolerance": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+        },
+        "deterministic_source_reconstruction": {
+          "schema": "dynamac-rlbench-source-reconstruction-audit-v1",
+          "root": {
+            "preserved": true,
+            "translation_error_m": 0.0,
+            "rotation_error_rad": 0.0,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+          },
+          "low_dim_state": {
+            "preserved": true,
+            "comparison_mode": "pose_chunks_sign_invariant",
+            "chunk_count": 2,
+            "raw_l2": 0.0,
+            "raw_max_abs": 0.0,
+            "max_translation_m": 0.0,
+            "max_rotation_rad": 0.0,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "scalar_tolerance": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+          },
+          "task_tree": {
+            "matched": true,
+            "topology_matched": true,
+            "comparison_mode": "all_objects_world",
+            "expected_object_count": 14,
+            "actual_object_count": 14,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "joint_tolerance": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord",
+            "all_parents_matched": true,
+            "all_subtree_memberships_matched": true,
+            "max_translation_error_m": 0.0,
+            "max_rotation_error_rad": 0.0,
+            "max_joint_position_error": 0.0
+          },
+          "robot_numeric_state": {
+            "structure_matched": true,
+            "max_joint_position_error": 0.0,
+            "max_joint_target_position_error": 0.0,
+            "max_joint_velocity_error": 0.0,
+            "max_tip_translation_error_m": 0.0,
+            "max_tip_rotation_error_rad": 0.0,
+            "joint_tolerance": 1e-06,
+            "velocity_tolerance": 1e-06,
+            "tip_translation_tolerance_m": 1e-06,
+            "tip_rotation_tolerance_rad": 1e-06,
+            "passed": true
+          },
+          "exact_matches": {
+            "task_name": true,
+            "task_semantics": true,
+            "descriptions": true,
+            "stable_grasp_state": true,
+            "robot_external_collision_pairs": true
+          },
+          "task_object_velocities_finite": true,
+          "passed": true
+        },
+        "formal_sampling_or_restore": false,
+        "formal_task_validate_calls": 0,
+        "formal_waypoint_cache_state": "none",
+        "staging_source_certification_reused": true,
+        "fresh_task_generation_protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "selected_source_fresh_task_generation": {
+          "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+          "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+          "generation_index": 5,
+          "episode_seed": 2608000001,
+          "variation": 0,
+          "task_name": "stack_wine",
+          "physics_running_before_stop": true,
+          "physics_stopped_before_task_reload": true,
+          "previous_task_present": true,
+          "previous_task_unloaded_before_stop": true,
+          "previous_task_unloaded_while_physics_running": true,
+          "scene_task_absent_before_stop": true,
+          "task_model_loaded_fresh": true,
+          "fresh_task_python_instance_created": true,
+          "task_model_only_reloaded": true,
+          "base_scene_reloaded": false,
+          "physics_started_by_task_environment": true,
+          "rng_seeded_after_reload_immediately_before_reset": true,
+          "variation_set_after_seed_before_reset": true,
+          "task_environment_reset_calls": 1,
+          "reset_verify_instance": false,
+          "reset_random_placement_expected": true,
+          "reset_robot_collision_check_count": 1,
+          "reset_robot_collision_check_results": [
+            false
+          ],
+          "fingerprint": "ea20312553812472a40d9da65a77381ea11eb1771cec931c2b22d5e7ac23946d"
+        },
+        "formal_source_fresh_task_generation": {
+          "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+          "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+          "generation_index": 2,
+          "episode_seed": 2608000001,
+          "variation": 0,
+          "task_name": "stack_wine",
+          "physics_running_before_stop": true,
+          "physics_stopped_before_task_reload": true,
+          "previous_task_present": true,
+          "previous_task_unloaded_before_stop": true,
+          "previous_task_unloaded_while_physics_running": true,
+          "scene_task_absent_before_stop": true,
+          "task_model_loaded_fresh": true,
+          "fresh_task_python_instance_created": true,
+          "task_model_only_reloaded": true,
+          "base_scene_reloaded": false,
+          "physics_started_by_task_environment": true,
+          "rng_seeded_after_reload_immediately_before_reset": true,
+          "variation_set_after_seed_before_reset": true,
+          "task_environment_reset_calls": 1,
+          "reset_verify_instance": false,
+          "reset_random_placement_expected": true,
+          "reset_robot_collision_check_count": 1,
+          "reset_robot_collision_check_results": [
+            false
+          ],
+          "fingerprint": "0a30e01f375eef3a0cbc07cd03f6adccd3c88d2e2db62489ac14a7b4a53d2a84"
+        },
+        "task_name": "stack_wine",
+        "task_semantics_matched": true,
+        "task_tree_matched": true,
+        "task_tree_state_schema": "rlbench-task-tree-dual-frame-state-v1",
+        "task_tree_match": {
+          "matched": true,
+          "topology_matched": true,
+          "comparison_mode": "all_objects_world",
+          "expected_object_count": 14,
+          "actual_object_count": 14,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "joint_tolerance": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord",
+          "all_parents_matched": true,
+          "all_subtree_memberships_matched": true,
+          "max_translation_error_m": 0.0,
+          "max_rotation_error_rad": 0.0,
+          "max_joint_position_error": 0.0
+        },
+        "task_descriptions_matched": true,
+        "robot_external_collision_pairs_matched": true,
+        "selected_source_fingerprint": "b6ae0b488994845611ac356a85ea89389151641a4345b94c0e37a849a3c23ba3",
+        "formal_source_fingerprint": "b6ae0b488994845611ac356a85ea89389151641a4345b94c0e37a849a3c23ba3",
+        "motion_plan_fingerprint": "8408a70329515b8ee9c974bf7f6868ff11d0ca1fc4d3a3a415a7fd4a033c6f30",
+        "formal_observation_refreshed_after_binding": true
+      },
+      "fresh_task_generation": {
+        "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+        "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "generation_index": 2,
+        "episode_seed": 2608000001,
+        "variation": 0,
+        "task_name": "stack_wine",
+        "physics_running_before_stop": true,
+        "physics_stopped_before_task_reload": true,
+        "previous_task_present": true,
+        "previous_task_unloaded_before_stop": true,
+        "previous_task_unloaded_while_physics_running": true,
+        "scene_task_absent_before_stop": true,
+        "task_model_loaded_fresh": true,
+        "fresh_task_python_instance_created": true,
+        "task_model_only_reloaded": true,
+        "base_scene_reloaded": false,
+        "physics_started_by_task_environment": true,
+        "rng_seeded_after_reload_immediately_before_reset": true,
+        "variation_set_after_seed_before_reset": true,
+        "task_environment_reset_calls": 1,
+        "reset_verify_instance": false,
+        "reset_random_placement_expected": true,
+        "reset_robot_collision_check_count": 1,
+        "reset_robot_collision_check_results": [
+          false
+        ],
+        "fingerprint": "0a30e01f375eef3a0cbc07cd03f6adccd3c88d2e2db62489ac14a7b4a53d2a84"
+      },
+      "motion_plan_fingerprint": "8408a70329515b8ee9c974bf7f6868ff11d0ca1fc4d3a3a415a7fd4a033c6f30",
+      "motion_plan_protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "motion_plan_evidence": {
+        "plan_fingerprint": "8408a70329515b8ee9c974bf7f6868ff11d0ca1fc4d3a3a415a7fd4a033c6f30",
+        "source_waypoint_validated": true,
+        "goal_waypoint_validated": true,
+        "formal_rollout_sample_or_restore": false,
+        "formal_source_bound": true,
+        "formal_task_name_bound": "stack_wine",
+        "formal_task_semantics_matched": true,
+        "formal_task_tree_matched": true,
+        "formal_deterministic_source_reconstruction_passed": true,
+        "formal_task_validate_calls": 0,
+        "formal_observation_refreshed_after_binding": true,
+        "formal_robot_external_collision_pairs_matched": true,
+        "selected_source_fingerprint": "b6ae0b488994845611ac356a85ea89389151641a4345b94c0e37a849a3c23ba3",
+        "formal_source_fingerprint": "b6ae0b488994845611ac356a85ea89389151641a4345b94c0e37a849a3c23ba3"
+      },
+      "trigger_step": null,
+      "intervention_eligible": false,
+      "intervention_reached": false,
+      "pre_intervention_terminal": false,
+      "pre_intervention_terminal_outcome": null,
+      "dynamic_condition_exercised": false,
+      "dynamic_condition_unexercised": null,
+      "intervention_effective": null,
+      "intervention_complete": null,
+      "physical_fault": {
+        "schema": "essay2608.rlbench.physical_fault.v1",
+        "spec": {
+          "kind": "grasp_failure",
+          "arm": "single",
+          "earliest_step": 0,
+          "duration_cycles": 8,
+          "motion_trigger_distance": 0.005,
+          "close_occurrence": 1,
+          "minimum_grasped_cycles": 3,
+          "mismatch_translation": [
+            0.04,
+            0.0,
+            0.0
+          ]
+        },
+        "triggered": true,
+        "events": [
+          {
+            "kind": "grasp_failure",
+            "policy_step": 86,
+            "protocol_effective": true,
+            "arm": "single",
+            "close_occurrence": 1,
+            "end_condition": "explicit_open_then_new_close_occurrence"
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 86,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 87,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 88,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 89,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 90,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 91,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 92,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 93,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 94,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 95,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 96,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 97,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 98,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 99,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 100,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 101,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 102,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 103,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 104,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 105,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 106,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 107,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 108,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 109,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 110,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 111,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 112,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 113,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 114,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 115,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 116,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 117,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 118,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 119,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 120,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 121,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 122,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 123,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 124,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 125,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 126,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 127,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 128,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 129,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 130,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 131,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 132,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 133,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 134,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 135,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 136,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 137,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 138,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 139,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 140,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 141,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 142,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 143,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 144,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 145,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 146,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 147,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 148,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 149,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 150,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 151,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 152,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 153,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 154,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 155,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 156,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 157,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 158,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 159,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 160,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 161,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 162,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 163,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 164,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 165,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 166,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 167,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 168,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 169,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 170,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 171,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 172,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 173,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 174,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 175,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 176,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 177,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 178,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 179,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 180,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 181,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_failure_occurrence_ended",
+            "policy_step": 182,
+            "arm": "single",
+            "protocol_effective": true
+          }
+        ],
+        "policy_steps_observed": 183,
+        "policy_state_mutated": false,
+        "observation_hidden": false
+      }
+    },
+    {
+      "episode": 2,
+      "success": false,
+      "steps": 183,
+      "control_attempts": 183,
+      "reason": "policy_complete_after_final_settling",
+      "invalid_actions": 0,
+      "interventions": [],
+      "final_settling": {
+        "protocol_id": "rlbench-hold-final-command-up-to-10-raw-physics-steps-v3",
+        "physics_steps": 10,
+        "maximum_physics_steps": 10,
+        "entry_condition": "normal_policy_complete_without_terminal_outcome",
+        "command_semantics": "hold_existing_joint_targets_and_gripper_state",
+        "step_api": "Scene.step",
+        "success_and_failure_check": "Task.success_after_each_raw_physics_step",
+        "early_stop": "first_success_or_explicit_terminate",
+        "policy_clock_advanced": false,
+        "dynamic_clock_advanced": false,
+        "task_specific_adaptation": false,
+        "attempted": true,
+        "available": true,
+        "steps_executed": 10,
+        "first_terminal_step": null,
+        "stop_reason": "maximum_physics_steps_reached",
+        "success": false,
+        "terminate": false
+      },
+      "primary_failure_joint_hold_commits": 0,
+      "policy_clock_semantics_id": "policy-tick-single-primary-request-then-raw-joint-hold-commit-v1",
+      "committed_policy_steps": 183,
+      "dynamic_clock_steps": 183,
+      "staged_source_binding": {
+        "required": true,
+        "matched": true,
+        "formal_source_bound": true,
+        "source_seed": 2608000002,
+        "root": {
+          "preserved": true,
+          "translation_error_m": 0.0,
+          "rotation_error_rad": 0.0,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+        },
+        "low_dim_state": {
+          "preserved": true,
+          "comparison_mode": "pose_chunks_sign_invariant",
+          "chunk_count": 2,
+          "raw_l2": 0.0,
+          "raw_max_abs": 0.0,
+          "max_translation_m": 0.0,
+          "max_rotation_rad": 0.0,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "scalar_tolerance": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+        },
+        "deterministic_source_reconstruction": {
+          "schema": "dynamac-rlbench-source-reconstruction-audit-v1",
+          "root": {
+            "preserved": true,
+            "translation_error_m": 0.0,
+            "rotation_error_rad": 0.0,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+          },
+          "low_dim_state": {
+            "preserved": true,
+            "comparison_mode": "pose_chunks_sign_invariant",
+            "chunk_count": 2,
+            "raw_l2": 0.0,
+            "raw_max_abs": 0.0,
+            "max_translation_m": 0.0,
+            "max_rotation_rad": 0.0,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "scalar_tolerance": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord"
+          },
+          "task_tree": {
+            "matched": true,
+            "topology_matched": true,
+            "comparison_mode": "all_objects_world",
+            "expected_object_count": 14,
+            "actual_object_count": 14,
+            "translation_tolerance_m": 1e-06,
+            "rotation_tolerance_rad": 1e-06,
+            "joint_tolerance": 1e-06,
+            "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord",
+            "all_parents_matched": true,
+            "all_subtree_memberships_matched": true,
+            "max_translation_error_m": 0.0,
+            "max_rotation_error_rad": 0.0,
+            "max_joint_position_error": 0.0
+          },
+          "robot_numeric_state": {
+            "structure_matched": true,
+            "max_joint_position_error": 0.0,
+            "max_joint_target_position_error": 0.0,
+            "max_joint_velocity_error": 0.0,
+            "max_tip_translation_error_m": 0.0,
+            "max_tip_rotation_error_rad": 0.0,
+            "joint_tolerance": 1e-06,
+            "velocity_tolerance": 1e-06,
+            "tip_translation_tolerance_m": 1e-06,
+            "tip_rotation_tolerance_rad": 1e-06,
+            "passed": true
+          },
+          "exact_matches": {
+            "task_name": true,
+            "task_semantics": true,
+            "descriptions": true,
+            "stable_grasp_state": true,
+            "robot_external_collision_pairs": true
+          },
+          "task_object_velocities_finite": true,
+          "passed": true
+        },
+        "formal_sampling_or_restore": false,
+        "formal_task_validate_calls": 0,
+        "formal_waypoint_cache_state": "none",
+        "staging_source_certification_reused": true,
+        "fresh_task_generation_protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "selected_source_fresh_task_generation": {
+          "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+          "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+          "generation_index": 8,
+          "episode_seed": 2608000002,
+          "variation": 0,
+          "task_name": "stack_wine",
+          "physics_running_before_stop": true,
+          "physics_stopped_before_task_reload": true,
+          "previous_task_present": true,
+          "previous_task_unloaded_before_stop": true,
+          "previous_task_unloaded_while_physics_running": true,
+          "scene_task_absent_before_stop": true,
+          "task_model_loaded_fresh": true,
+          "fresh_task_python_instance_created": true,
+          "task_model_only_reloaded": true,
+          "base_scene_reloaded": false,
+          "physics_started_by_task_environment": true,
+          "rng_seeded_after_reload_immediately_before_reset": true,
+          "variation_set_after_seed_before_reset": true,
+          "task_environment_reset_calls": 1,
+          "reset_verify_instance": false,
+          "reset_random_placement_expected": true,
+          "reset_robot_collision_check_count": 1,
+          "reset_robot_collision_check_results": [
+            false
+          ],
+          "fingerprint": "5f9b4c8da52d2fb0feec8cd3239be8fc9f35603d3414e085aaafe3db6698d34b"
+        },
+        "formal_source_fresh_task_generation": {
+          "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+          "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+          "generation_index": 3,
+          "episode_seed": 2608000002,
+          "variation": 0,
+          "task_name": "stack_wine",
+          "physics_running_before_stop": true,
+          "physics_stopped_before_task_reload": true,
+          "previous_task_present": true,
+          "previous_task_unloaded_before_stop": true,
+          "previous_task_unloaded_while_physics_running": true,
+          "scene_task_absent_before_stop": true,
+          "task_model_loaded_fresh": true,
+          "fresh_task_python_instance_created": true,
+          "task_model_only_reloaded": true,
+          "base_scene_reloaded": false,
+          "physics_started_by_task_environment": true,
+          "rng_seeded_after_reload_immediately_before_reset": true,
+          "variation_set_after_seed_before_reset": true,
+          "task_environment_reset_calls": 1,
+          "reset_verify_instance": false,
+          "reset_random_placement_expected": true,
+          "reset_robot_collision_check_count": 1,
+          "reset_robot_collision_check_results": [
+            false
+          ],
+          "fingerprint": "c60c516306e9252f2add818c97cf71dfc319b1fa0bae7040cd2c340df6467a4e"
+        },
+        "task_name": "stack_wine",
+        "task_semantics_matched": true,
+        "task_tree_matched": true,
+        "task_tree_state_schema": "rlbench-task-tree-dual-frame-state-v1",
+        "task_tree_match": {
+          "matched": true,
+          "topology_matched": true,
+          "comparison_mode": "all_objects_world",
+          "expected_object_count": 14,
+          "actual_object_count": 14,
+          "translation_tolerance_m": 1e-06,
+          "rotation_tolerance_rad": 1e-06,
+          "joint_tolerance": 1e-06,
+          "quaternion_rotation_metric": "sign_invariant_normalized_chord_4asin_half_chord",
+          "all_parents_matched": true,
+          "all_subtree_memberships_matched": true,
+          "max_translation_error_m": 0.0,
+          "max_rotation_error_rad": 0.0,
+          "max_joint_position_error": 0.0
+        },
+        "task_descriptions_matched": true,
+        "robot_external_collision_pairs_matched": true,
+        "selected_source_fingerprint": "0f523aed6bfd413bb6980d99764aa2cf2f146548c6e95e4e9fd52a3bcea42135",
+        "formal_source_fingerprint": "0f523aed6bfd413bb6980d99764aa2cf2f146548c6e95e4e9fd52a3bcea42135",
+        "motion_plan_fingerprint": "8ee0e2dd67d707629752d9a153bc0868a21bb96fb76dba5f5f951f0c88e1eefe",
+        "formal_observation_refreshed_after_binding": true
+      },
+      "fresh_task_generation": {
+        "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+        "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "generation_index": 3,
+        "episode_seed": 2608000002,
+        "variation": 0,
+        "task_name": "stack_wine",
+        "physics_running_before_stop": true,
+        "physics_stopped_before_task_reload": true,
+        "previous_task_present": true,
+        "previous_task_unloaded_before_stop": true,
+        "previous_task_unloaded_while_physics_running": true,
+        "scene_task_absent_before_stop": true,
+        "task_model_loaded_fresh": true,
+        "fresh_task_python_instance_created": true,
+        "task_model_only_reloaded": true,
+        "base_scene_reloaded": false,
+        "physics_started_by_task_environment": true,
+        "rng_seeded_after_reload_immediately_before_reset": true,
+        "variation_set_after_seed_before_reset": true,
+        "task_environment_reset_calls": 1,
+        "reset_verify_instance": false,
+        "reset_random_placement_expected": true,
+        "reset_robot_collision_check_count": 1,
+        "reset_robot_collision_check_results": [
+          false
+        ],
+        "fingerprint": "c60c516306e9252f2add818c97cf71dfc319b1fa0bae7040cd2c340df6467a4e"
+      },
+      "motion_plan_fingerprint": "8ee0e2dd67d707629752d9a153bc0868a21bb96fb76dba5f5f951f0c88e1eefe",
+      "motion_plan_protocol_id": "rlbench-deterministic-source-staging-waypoint-validated-boundary-root-v3.4",
+      "motion_plan_evidence": {
+        "plan_fingerprint": "8ee0e2dd67d707629752d9a153bc0868a21bb96fb76dba5f5f951f0c88e1eefe",
+        "source_waypoint_validated": true,
+        "goal_waypoint_validated": true,
+        "formal_rollout_sample_or_restore": false,
+        "formal_source_bound": true,
+        "formal_task_name_bound": "stack_wine",
+        "formal_task_semantics_matched": true,
+        "formal_task_tree_matched": true,
+        "formal_deterministic_source_reconstruction_passed": true,
+        "formal_task_validate_calls": 0,
+        "formal_observation_refreshed_after_binding": true,
+        "formal_robot_external_collision_pairs_matched": true,
+        "selected_source_fingerprint": "0f523aed6bfd413bb6980d99764aa2cf2f146548c6e95e4e9fd52a3bcea42135",
+        "formal_source_fingerprint": "0f523aed6bfd413bb6980d99764aa2cf2f146548c6e95e4e9fd52a3bcea42135"
+      },
+      "trigger_step": null,
+      "intervention_eligible": false,
+      "intervention_reached": false,
+      "pre_intervention_terminal": false,
+      "pre_intervention_terminal_outcome": null,
+      "dynamic_condition_exercised": false,
+      "dynamic_condition_unexercised": null,
+      "intervention_effective": null,
+      "intervention_complete": null,
+      "physical_fault": {
+        "schema": "essay2608.rlbench.physical_fault.v1",
+        "spec": {
+          "kind": "grasp_failure",
+          "arm": "single",
+          "earliest_step": 0,
+          "duration_cycles": 8,
+          "motion_trigger_distance": 0.005,
+          "close_occurrence": 1,
+          "minimum_grasped_cycles": 3,
+          "mismatch_translation": [
+            0.04,
+            0.0,
+            0.0
+          ]
+        },
+        "triggered": true,
+        "events": [
+          {
+            "kind": "grasp_failure",
+            "policy_step": 85,
+            "protocol_effective": true,
+            "arm": "single",
+            "close_occurrence": 1,
+            "end_condition": "explicit_open_then_new_close_occurrence"
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 85,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 86,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 87,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 88,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 89,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 90,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 91,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 92,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 93,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 94,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 95,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 96,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 97,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 98,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 99,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 100,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 101,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 102,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 103,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 104,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 105,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 106,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 107,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 108,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 109,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 110,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 111,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 112,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 113,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 114,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 115,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 116,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 117,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 118,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 119,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 120,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 121,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 122,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 123,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 124,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 125,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 126,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 127,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 128,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 129,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 130,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 131,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 132,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 133,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 134,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 135,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 136,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 137,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 138,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 139,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 140,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 141,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 142,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 143,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 144,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 145,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 146,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 147,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 148,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 149,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 150,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 151,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 152,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 153,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 154,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 155,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 156,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 157,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 158,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 159,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 160,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 161,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 162,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 163,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 164,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 165,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 166,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 167,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 168,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 169,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 170,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 171,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 172,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 173,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 174,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 175,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 176,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 177,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 178,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 179,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 180,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_close_suppressed_cycle",
+            "policy_step": 181,
+            "arm": "single",
+            "protocol_effective": true
+          },
+          {
+            "kind": "grasp_failure_occurrence_ended",
+            "policy_step": 182,
+            "arm": "single",
+            "protocol_effective": true
+          }
+        ],
+        "policy_steps_observed": 183,
+        "policy_state_mutated": false,
+        "observation_hidden": false
+      }
+    }
+  ],
+  "fresh_task_generation": {
+    "required_per_formal_episode": true,
+    "all_episodes_recorded": true,
+    "evidence": [
+      {
+        "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+        "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "generation_index": 1,
+        "episode_seed": 2608000000,
+        "variation": 0,
+        "task_name": "stack_wine",
+        "physics_running_before_stop": false,
+        "physics_stopped_before_task_reload": true,
+        "previous_task_present": false,
+        "previous_task_unloaded_before_stop": false,
+        "previous_task_unloaded_while_physics_running": false,
+        "scene_task_absent_before_stop": true,
+        "task_model_loaded_fresh": true,
+        "fresh_task_python_instance_created": true,
+        "task_model_only_reloaded": true,
+        "base_scene_reloaded": false,
+        "physics_started_by_task_environment": true,
+        "rng_seeded_after_reload_immediately_before_reset": true,
+        "variation_set_after_seed_before_reset": true,
+        "task_environment_reset_calls": 1,
+        "reset_verify_instance": false,
+        "reset_random_placement_expected": true,
+        "reset_robot_collision_check_count": 1,
+        "reset_robot_collision_check_results": [
+          false
+        ],
+        "fingerprint": "71287af83aedd5942a993e5c94cc1d6997036126009b6945e320a66bd540203e"
+      },
+      {
+        "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+        "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "generation_index": 2,
+        "episode_seed": 2608000001,
+        "variation": 0,
+        "task_name": "stack_wine",
+        "physics_running_before_stop": true,
+        "physics_stopped_before_task_reload": true,
+        "previous_task_present": true,
+        "previous_task_unloaded_before_stop": true,
+        "previous_task_unloaded_while_physics_running": true,
+        "scene_task_absent_before_stop": true,
+        "task_model_loaded_fresh": true,
+        "fresh_task_python_instance_created": true,
+        "task_model_only_reloaded": true,
+        "base_scene_reloaded": false,
+        "physics_started_by_task_environment": true,
+        "rng_seeded_after_reload_immediately_before_reset": true,
+        "variation_set_after_seed_before_reset": true,
+        "task_environment_reset_calls": 1,
+        "reset_verify_instance": false,
+        "reset_random_placement_expected": true,
+        "reset_robot_collision_check_count": 1,
+        "reset_robot_collision_check_results": [
+          false
+        ],
+        "fingerprint": "0a30e01f375eef3a0cbc07cd03f6adccd3c88d2e2db62489ac14a7b4a53d2a84"
+      },
+      {
+        "schema": "dynamac-rlbench-deterministic-source-reset-evidence-v1",
+        "protocol_id": "rlbench-prestop-unload-if-present-stop-reload-start-source-seed-variation-single-reset-verify-false-v1",
+        "generation_index": 3,
+        "episode_seed": 2608000002,
+        "variation": 0,
+        "task_name": "stack_wine",
+        "physics_running_before_stop": true,
+        "physics_stopped_before_task_reload": true,
+        "previous_task_present": true,
+        "previous_task_unloaded_before_stop": true,
+        "previous_task_unloaded_while_physics_running": true,
+        "scene_task_absent_before_stop": true,
+        "task_model_loaded_fresh": true,
+        "fresh_task_python_instance_created": true,
+        "task_model_only_reloaded": true,
+        "base_scene_reloaded": false,
+        "physics_started_by_task_environment": true,
+        "rng_seeded_after_reload_immediately_before_reset": true,
+        "variation_set_after_seed_before_reset": true,
+        "task_environment_reset_calls": 1,
+        "reset_verify_instance": false,
+        "reset_random_placement_expected": true,
+        "reset_robot_collision_check_count": 1,
+        "reset_robot_collision_check_results": [
+          false
+        ],
+        "fingerprint": "c60c516306e9252f2add818c97cf71dfc319b1fa0bae7040cd2c340df6467a4e"
+      }
+    ]
+  },
+  "final_settling_protocol": {
+    "protocol_id": "rlbench-hold-final-command-up-to-10-raw-physics-steps-v3",
+    "physics_steps": 10,
+    "maximum_physics_steps": 10,
+    "entry_condition": "normal_policy_complete_without_terminal_outcome",
+    "command_semantics": "hold_existing_joint_targets_and_gripper_state",
+    "step_api": "Scene.step",
+    "success_and_failure_check": "Task.success_after_each_raw_physics_step",
+    "early_stop": "first_success_or_explicit_terminate",
+    "policy_clock_advanced": false,
+    "dynamic_clock_advanced": false,
+    "task_specific_adaptation": false
+  },
+  "motion_plan_batch_fingerprint": "473e1d00b0142c4e0ae4675252a0109d2433d832bd1d8f9c92704c80e447619b",
+  "fault_evaluation": {
+    "schema": "essay2608.phase6_fault_result.v1",
+    "cell": "stack_wine_grasp_failure",
+    "method": "progress_only",
+    "task": "stack_wine",
+    "episode_indices": [
+      0,
+      1,
+      2
+    ],
+    "protocol_path": "/home/zhengyushuang/workspace/essay2608/evaluations/phase6_rlbench_integration/fault_protocol.json",
+    "protocol_sha256": "d2766bfc6be4a5e17774a3154ed86443569c1719ae8bd90aa241eeffa215ed56",
+    "fault_spec": {
+      "kind": "grasp_failure",
+      "arm": "single",
+      "earliest_step": 0,
+      "close_occurrence": 1
+    },
+    "executor_control": "shared_stage6_executor_for_all_methods",
+    "episodes_completed": 3,
+    "episodes_fault_triggered": 3,
+    "all_completed_episodes_fault_triggered": true,
+    "policy_internal_state_mutated_by_injector": false,
+    "formal_result": false,
+    "paper_comparable": false
+  }
+}

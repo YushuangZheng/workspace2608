@@ -29,6 +29,8 @@ from essay2608.policy.closed_loop import (
     LinkPendingCandidate,
     LocalCompletionModel,
     MismatchCounters,
+    MismatchEvent,
+    MismatchKind,
     MismatchUpdate,
     MultiArmBoundaryController,
     ProgressEstimate,
@@ -44,8 +46,14 @@ from essay2608.policy.closed_loop import (
     RuntimeObservation,
     StateId,
 )
-from essay2608.policy.dynamac import pose_compose, relative_pose
+from essay2608.policy.dynamac import (
+    pose_compose,
+    product_of_experts,
+    relative_pose,
+    transform_marginal,
+)
 from essay2608.policy.closed_loop.entry_guard import _factor_observation
+from essay2608.policy.closed_loop.state_evaluator import joint_poe_pose_support
 from evaluations.phase4_boundary_calibration.run import (
     _acceptance_rows,
     _calibrate,
@@ -54,6 +62,30 @@ from evaluations.phase4_boundary_calibration.run import (
 
 def pose(x: float, y: float = 0.0, z: float = 0.0) -> np.ndarray:
     return np.asarray([x, y, z, 1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+
+
+def test_local_goal_support_uses_the_joint_poe_target_distribution() -> None:
+    frame = pose(0.0)
+    first_mean = pose(0.0)
+    second_mean = pose(0.04)
+    first_covariance = np.eye(6) * 0.01
+    second_covariance = np.eye(6) * 0.04
+    marginals = [
+        transform_marginal("first", frame, first_mean, first_covariance),
+        transform_marginal("second", frame, second_mean, second_covariance),
+    ]
+    joint_mean, _, _ = product_of_experts(marginals, precision_weights=[1.0, 1.0])
+    compatibility, normalized_log_support, mahalanobis = joint_poe_pose_support(
+        [
+            ("first", frame, first_mean, first_covariance, 1.0),
+            ("second", frame, second_mean, second_covariance, 1.0),
+        ],
+        joint_mean,
+        diagonalize=False,
+    )
+    assert compatibility == pytest.approx(1.0)
+    assert normalized_log_support == pytest.approx(0.0, abs=1.0e-12)
+    assert mahalanobis == pytest.approx(0.0, abs=1.0e-12)
 
 
 def test_cross_arm_scene_factor_resolves_each_arm_dedicated_ee_pose() -> None:
@@ -137,7 +169,6 @@ def test_local_calibration_is_independent_of_directional_guard_wait() -> None:
             )
     config = {
         "control_period_seconds": 0.05,
-        "minimum_confirmation_seconds": 0.10,
         "terminal_settling_seconds": 0.0,
         "positive_floor_fraction": 0.8,
         "demonstration_indices": [0, 1],
@@ -149,6 +180,7 @@ def test_local_calibration_is_independent_of_directional_guard_wait() -> None:
     summaries, _, runtime = _calibrate(rows, config)
     assert summaries[0]["status"] == "calibrated"
     assert summaries[0]["normal_terminal_score_floor"] == pytest.approx(0.8)
+    assert summaries[0]["confirmation_cycles"] == 1
     assert runtime["synthetic"]["calibrations"]["left:0->1"]
 
     acceptance = _acceptance_rows(
@@ -164,6 +196,62 @@ def test_local_calibration_is_independent_of_directional_guard_wait() -> None:
     )
     assert acceptance[0]["expected_directional_wait"] == 1
     assert acceptance[0]["accepted"] == 1
+
+
+def test_local_calibration_uses_one_more_cycle_than_longest_false_run() -> None:
+    rows = []
+    for demonstration in (0, 1):
+        for tick, score in enumerate((0.1, 0.95, 0.95, 0.1)):
+            rows.append(
+                {
+                    "task": "synthetic",
+                    "arm": "left",
+                    "boundary": "left:0->1",
+                    "transaction_group": "",
+                    "demonstration": demonstration,
+                    "tick": tick,
+                    "phase": "recorded",
+                    "hold_cycle": -1,
+                    "truth_in_terminal_window": 0,
+                    "local_score": score,
+                    "local_evidence_available": 1,
+                    "guard_raw_satisfied": 1,
+                }
+            )
+        for hold_cycle in range(5):
+            rows.append(
+                {
+                    "task": "synthetic",
+                    "arm": "left",
+                    "boundary": "left:0->1",
+                    "transaction_group": "",
+                    "demonstration": demonstration,
+                    "tick": 4 + hold_cycle,
+                    "phase": "terminal_hold",
+                    "hold_cycle": hold_cycle,
+                    "truth_in_terminal_window": 1,
+                    "local_score": 0.9,
+                    "local_evidence_available": 1,
+                    "guard_raw_satisfied": 1,
+                }
+            )
+    config = {
+        "control_period_seconds": 0.05,
+        "terminal_settling_seconds": 0.0,
+        "positive_floor_fraction": 0.8,
+        "demonstration_indices": [0, 1],
+        "default_relation_probability": 0.7,
+        "minimum_tracking_reliability": 0.25,
+        "minimum_scene_reliability": 0.25,
+        "minimum_information_weight": 0.1,
+    }
+
+    summaries, _, runtime = _calibrate(rows, config)
+
+    assert summaries[0]["maximum_preterminal_ready_run"] == 2
+    assert summaries[0]["confirmation_cycles"] == 3
+    assert summaries[0]["status"] == "calibrated"
+    assert runtime["synthetic"]["calibrations"]["left:0->1"]["confirmation_cycles"] == 3
 
 
 def _make_model(
@@ -617,6 +705,40 @@ def test_cross_arm_relation_guard_uses_other_arm_current_belief() -> None:
     )
     assert not trigger.triggered
     assert trigger.intents == ()
+
+    # A pure progress-explanation miss while an entry request is waiting gets
+    # one local state-realignment attempt.  Repeating the same unresolved
+    # boundary event must then preserve the source terminal reference instead
+    # of starting a broad terminal/interior reentry loop.  The same event away
+    # from a boundary remains a normal recovery trigger.
+    no_plausible = MismatchUpdate(
+        counters=MismatchCounters(no_plausible_state=20),
+        events=(
+            MismatchEvent(
+                MismatchKind.NO_PLAUSIBLE_STATE,
+                tick=20,
+                state_id=waiting.source_state,
+                consecutive_cycles=20,
+            ),
+        ),
+    )
+    first_attempt = tracker.update(
+        {"left": no_plausible},
+        transition_requests={"left": waiting},
+        beliefs=beliefs,
+    )
+    assert first_attempt.triggered
+    assert first_attempt.reasons == ("left:no_plausible_state",)
+    held = tracker.update(
+        {"left": no_plausible},
+        transition_requests={"left": waiting},
+        beliefs=beliefs,
+    )
+    assert not held.triggered
+    assert held.reasons == ()
+    ordinary = tracker.update({"left": no_plausible})
+    assert ordinary.triggered
+    assert ordinary.reasons == ("left:no_plausible_state",)
 
     # Once the relation-owning arm has reached an all-demonstration Pending
     # occurrence, the same stable external observation is no longer merely

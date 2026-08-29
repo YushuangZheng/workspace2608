@@ -61,6 +61,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     Stage6IKControllerConfig,
     PrimaryActionRetryBudget,
     ScenarioController,
+    apply_gripper_after_completed_policy_target,
     commit_joint_hold_after_primary_failure,
     execute_global_ik_ee_control,
     execute_stage6_ik_ee_control,
@@ -71,6 +72,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     initialize_global_ik_controller_diagnostics,
     initialize_ik_solver_diagnostics,
     run_final_settling,
+    policy_action_execution_status,
     solve_absolute_ee_ik_with_sampling_fallback,
     step_current_joint_hold_noop,
     stage_scenario_motion_plan,
@@ -422,6 +424,7 @@ def _make_action_mode(
             self._controller_config = controller_config
             self._external_solver_factory = external_solver_factory
             self._external_solvers = {}
+            self._last_policy_action_status = "reached"
             if controller_profile in {
                 GLOBAL_IK_CONTROLLER_PROFILE,
                 STAGE6_IK_CONTROLLER_PROFILE,
@@ -452,6 +455,16 @@ def _make_action_mode(
 
         def diagnostics(self):
             return dict(self._execution_diagnostics)
+
+        def policy_action_status(self):
+            # Frozen/global executors retain their historical atomic action
+            # contract.  Only Stage 6 exposes bounded incomplete progress to
+            # the surrounding closed-loop transaction.
+            return (
+                self._last_policy_action_status
+                if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
+                else "reached"
+            )
 
         def _external_solver_for_arm(self, arm):
             key = id(arm)
@@ -542,7 +555,8 @@ def _make_action_mode(
                     ] += 1
                     raise
                 self._execution_diagnostics[f"joint_target_{status}"] += 1
-                return
+                self._last_policy_action_status = status
+                return status
             joints = self._solve(scene.robot.arm, target)
             scene.robot.arm.set_joint_target_positions(joints)
             try:
@@ -559,12 +573,34 @@ def _make_action_mode(
                 self._execution_diagnostics["joint_target_timeouts"] += 1
                 raise
             self._execution_diagnostics[f"joint_target_{status}"] += 1
+            self._last_policy_action_status = "reached"
+            return "reached"
 
         def action_shape(self, scene):
             del scene
             return (7,)
 
     class PoseGripperIgnore(MoveArmThenGripper):
+        def action(self, scene, action):
+            arm_size = int(np.prod(self.arm_action_mode.action_shape(scene)))
+            arm_action = np.asarray(action[:arm_size])
+            gripper_action = np.asarray(action[arm_size : arm_size + 1])
+            ignore_collisions = bool(action[arm_size + 1 : arm_size + 2])
+            status = self.arm_action_mode.action(
+                scene,
+                arm_action,
+                ignore_collisions,
+            )
+            # A bounded Cartesian prefix is not the policy waypoint.  Defer
+            # its gripper command until the same absolute pose target has been
+            # physically reached on a later observation cycle.
+            apply_gripper_after_completed_policy_target(
+                self.gripper_action_mode,
+                scene,
+                gripper_action,
+                arm_status=status,
+            )
+
         def action_shape(self, scene):
             return super().action_shape(scene) + 1
 
@@ -748,6 +784,7 @@ class PolicyProcess:
         policy_type="dynamac",
         closed_loop_models_dir=CLOSED_LOOP_MODELS_DIR,
         diagnostics_dir=None,
+        closed_loop_feature_profile="full",
     ):
         self.timeout = float(timeout)
         if policy_type not in {"dynamac", "closed_loop_multistream"}:
@@ -776,6 +813,8 @@ class PolicyProcess:
                 str(Path(closed_loop_models_dir).resolve()),
                 "--base-models-dir",
                 str(Path(models_dir).resolve()),
+                "--feature-profile",
+                str(closed_loop_feature_profile),
             ]
             if diagnostics_dir is not None:
                 command.extend(
@@ -1140,7 +1179,11 @@ def _run_episode(
             worker.request("abort", transaction_id=transaction_id)
             raise
         if primary_action_succeeded:
-            commit = worker.request("commit", transaction_id=transaction_id)
+            commit = worker.request(
+                "commit",
+                transaction_id=transaction_id,
+                primary_action_status=policy_action_execution_status(task_environment),
+            )
             policy_complete = bool(commit.get("complete"))
             committed_policy_steps += 1
         settling = None
@@ -1367,6 +1410,9 @@ def _evaluate_reserved(args):
                 args, "closed_loop_models_dir", CLOSED_LOOP_MODELS_DIR
             ),
             diagnostics_dir=getattr(args, "policy_diagnostics_dir", None),
+            closed_loop_feature_profile=getattr(
+                args, "closed_loop_feature_profile", "full"
+            ),
         )
         intervention_registry, trigger_authentication = (
             _authenticated_v3_dynamic_trigger(args, worker)
@@ -1489,6 +1535,11 @@ def _evaluate_reserved(args):
         ),
         **({"release": "v4"} if release == "v4" else {}),
         "policy_type": getattr(args, "policy_type", "dynamac"),
+        "closed_loop_feature_profile": (
+            getattr(args, "closed_loop_feature_profile", "full")
+            if getattr(args, "policy_type", "dynamac") == "closed_loop_multistream"
+            else None
+        ),
         "protocol_label": PROTOCOL_LABEL,
         "paper_comparable": False,
         "task": args.task,
@@ -1741,6 +1792,11 @@ def build_parser():
         "--closed-loop-models-dir",
         type=Path,
         default=CLOSED_LOOP_MODELS_DIR,
+    )
+    parser.add_argument(
+        "--closed-loop-feature-profile",
+        choices=("progress_only", "progress_dynamic_roles", "full"),
+        default="full",
     )
     parser.add_argument("--policy-diagnostics-dir", type=Path, default=None)
     parser.add_argument(

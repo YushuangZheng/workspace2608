@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -66,6 +67,7 @@ class RecoveryConfig:
     maximum_attempts_per_goal: int = 2
     maximum_total_cycles: int = 400
     maximum_reentry_cycles: int = 40
+    minimum_relation_confirmation_cycles: int = 2
     minimum_information_weight: float = 0.10
     unlink_open_cycles: int = 2
     open_gripper_command: float = 1.0
@@ -73,6 +75,11 @@ class RecoveryConfig:
     action_position_variance: float = 2.0e-4
     action_rotation_variance: float = 5.0e-4
     boundary_relation_mismatch_cycles: int = 3
+    link_frame_stability_confirmation_cycles: int = 3
+    link_frame_stability_translation_tolerance: float = 0.001
+    link_frame_stability_rotation_tolerance: float = math.radians(1.0)
+    link_frame_restart_translation: float = 0.01
+    link_frame_restart_rotation: float = math.radians(10.0)
 
     def __post_init__(self) -> None:
         nonnegative = (self.covariance_inflation,)
@@ -83,6 +90,10 @@ class RecoveryConfig:
             self.unlink_fallback_distance,
             self.action_position_variance,
             self.action_rotation_variance,
+            self.link_frame_stability_translation_tolerance,
+            self.link_frame_stability_rotation_tolerance,
+            self.link_frame_restart_translation,
+            self.link_frame_restart_rotation,
         )
         if any(value <= 0.0 or not np.isfinite(value) for value in positive):
             raise ValueError("恢复运动尺度参数必须为有限正数")
@@ -92,8 +103,10 @@ class RecoveryConfig:
             self.maximum_attempts_per_goal,
             self.maximum_total_cycles,
             self.maximum_reentry_cycles,
+            self.minimum_relation_confirmation_cycles,
             self.unlink_open_cycles,
             self.boundary_relation_mismatch_cycles,
+            self.link_frame_stability_confirmation_cycles,
         )
         if any(value < 1 for value in counts):
             raise ValueError("恢复周期与尝试上限必须为正整数")
@@ -199,6 +212,7 @@ class RecoveryTriggerTracker:
         self.task_models = dict(task_models)
         self.config = config
         self._boundary_counts: dict[tuple[str, str, str], int] = {}
+        self._boundary_progress_reentry_attempted: set[tuple[str, str]] = set()
 
     @staticmethod
     def _required_decision(value: str) -> RelationDecision:
@@ -221,6 +235,20 @@ class RecoveryTriggerTracker:
         for arm, update in mismatch_updates.items():
             for event in update.events:
                 if event.kind == MismatchKind.NO_PLAUSIBLE_STATE:
+                    request = transition_requests.get(arm)
+                    if request is not None:
+                        # Permit one local state-realignment attempt for a
+                        # genuinely displaced terminal pose, then preserve the
+                        # source terminal target for the rest of this boundary
+                        # context.  Repeated broad reentry can otherwise replay
+                        # the manipulation backwards in a terminal->interior
+                        # loop and disturb the peer condition being awaited.
+                        # A new skill boundary (or episode reset) has a new
+                        # context key and may make its own attempt.
+                        key = (arm, request.boundary_id.token)
+                        if key in self._boundary_progress_reentry_attempted:
+                            continue
+                        self._boundary_progress_reentry_attempted.add(key)
                     reasons.append(f"{arm}:no_plausible_state")
                 elif event.kind == MismatchKind.RELATION_MISMATCH:
                     reasons.append(f"{arm}:relation_mismatch")
@@ -361,6 +389,7 @@ class RelationRecoveryController:
         self._attempts = 0
         self._total_cycles = 0
         self._goal_had_expected_information = False
+        self._goal_confirmation_cycles = 0
         self._link_probe_phase: str | None = None
         self._link_probe_entry_pose: Array | None = None
         self._link_probe_direction: Array | None = None
@@ -371,11 +400,16 @@ class RelationRecoveryController:
         self._link_probe_motion = 0.0
         self._link_probe_exit_reason: ProbeExitReason | None = None
         self._link_probe_decision = RelationDecision.UNKNOWN
+        self._link_probe_candidate = RelationDecision.UNKNOWN
+        self._link_probe_candidate_cycles = 0
         self._completed: list[RelationGoal] = []
         self._reentry_states: list[StateId] = []
         self._reentry_cycles = 0
         self._failure: RecoveryFailure | None = None
         self._unlink_target: Array | None = None
+        self._link_frame_previous_pose: Array | None = None
+        self._link_frame_stability_cycles = 0
+        self._link_anchor_frame_pose: Array | None = None
 
     def start(
         self,
@@ -438,6 +472,7 @@ class RelationRecoveryController:
         self._open_cycles = 0
         self._attempts = max(1, self._attempts + 1)
         self._goal_had_expected_information = False
+        self._goal_confirmation_cycles = 0
         self._link_probe_phase = None
         self._link_probe_entry_pose = None
         self._link_probe_direction = None
@@ -448,7 +483,12 @@ class RelationRecoveryController:
         self._link_probe_motion = 0.0
         self._link_probe_exit_reason = None
         self._link_probe_decision = RelationDecision.UNKNOWN
+        self._link_probe_candidate = RelationDecision.UNKNOWN
+        self._link_probe_candidate_cycles = 0
         self._unlink_target = None
+        self._link_frame_previous_pose = None
+        self._link_frame_stability_cycles = 0
+        self._link_anchor_frame_pose = None
 
     def _action(
         self,
@@ -465,6 +505,57 @@ class RelationRecoveryController:
             gripper_command=gripper,
             source=source,
         )
+
+    @staticmethod
+    def _frame_pose_distance(left: Array, right: Array) -> tuple[float, float]:
+        translation = float(np.linalg.norm(left[:3] - right[:3]))
+        left_quaternion = left[3:] / np.linalg.norm(left[3:])
+        right_quaternion = right[3:] / np.linalg.norm(right[3:])
+        dot = float(np.clip(abs(np.dot(left_quaternion, right_quaternion)), 0.0, 1.0))
+        return translation, float(2.0 * math.acos(dot))
+
+    def _wait_for_stable_link_frame(
+        self,
+        *,
+        frame_pose: Array,
+        current_pose: Array,
+        current_gripper: Array,
+    ) -> AuxiliaryAction | None:
+        """Lock one stationary object pose before replaying a LINK anchor."""
+
+        if self._link_frame_previous_pose is None:
+            self._link_frame_stability_cycles = 1
+        else:
+            translation, rotation = self._frame_pose_distance(
+                self._link_frame_previous_pose,
+                frame_pose,
+            )
+            if (
+                translation <= self.config.link_frame_stability_translation_tolerance
+                and rotation <= self.config.link_frame_stability_rotation_tolerance
+            ):
+                self._link_frame_stability_cycles += 1
+            else:
+                self._link_frame_stability_cycles = 1
+        self._link_frame_previous_pose = frame_pose.copy()
+        if (
+            self._link_frame_stability_cycles
+            >= self.config.link_frame_stability_confirmation_cycles
+        ):
+            self._link_anchor_frame_pose = frame_pose.copy()
+            return None
+        return self._action(
+            current_pose,
+            np.full_like(current_gripper, self.config.open_gripper_command),
+            "recovery_link_settle",
+        )
+
+    def _restart_link_frame_settling(self, frame_pose: Array) -> None:
+        self._link_anchor_frame_pose = None
+        self._link_frame_previous_pose = frame_pose.copy()
+        self._link_frame_stability_cycles = 1
+        self._waypoint_index = 0
+        self._waypoint_cycles = 0
 
     def _fail(self, reason: str) -> None:
         self._failure = RecoveryFailure(
@@ -544,6 +635,7 @@ class RelationRecoveryController:
         self._link_probe_path = [current.copy()]
 
     def _link_probe_stable(self, estimate: RelationEstimate) -> RelationDecision:
+        candidate = RelationDecision.UNKNOWN
         if (
             self._link_probe_motion >= self.verification_config.minimum_probe_motion
             and estimate.decision_state != RelationDecision.UNKNOWN
@@ -551,8 +643,22 @@ class RelationRecoveryController:
             and estimate.information_weight
             >= self.verification_config.minimum_information_weight
         ):
-            return estimate.decision_state
-        return RelationDecision.UNKNOWN
+            candidate = estimate.decision_state
+        if candidate == RelationDecision.UNKNOWN:
+            self._link_probe_candidate = RelationDecision.UNKNOWN
+            self._link_probe_candidate_cycles = 0
+            return RelationDecision.UNKNOWN
+        if candidate == self._link_probe_candidate:
+            self._link_probe_candidate_cycles += 1
+        else:
+            self._link_probe_candidate = candidate
+            self._link_probe_candidate_cycles = 1
+        return (
+            candidate
+            if self._link_probe_candidate_cycles
+            >= self.config.minimum_relation_confirmation_cycles
+            else RelationDecision.UNKNOWN
+        )
 
     def _begin_link_probe_return(self, reason: ProbeExitReason) -> None:
         assert self._link_probe_entry_pose is not None
@@ -634,6 +740,7 @@ class RelationRecoveryController:
             if (
                 self._link_probe_decision == RelationDecision.LINKED
                 and self._goal_had_expected_information
+                and estimate.decision_state == RelationDecision.LINKED
             ):
                 self._complete_goal()
             else:
@@ -673,21 +780,83 @@ class RelationRecoveryController:
         if gripper.ndim == 0:
             gripper = gripper.reshape(1)
         estimate = relation_estimates[goal.frame_id]
-        if (
+        goal_relation_satisfied = bool(
             estimate.decision_state == goal.expected_relation
             and estimate.informative
             and estimate.information_weight >= self.config.minimum_information_weight
-        ):
+        )
+        if goal_relation_satisfied:
             self._goal_had_expected_information = True
+            self._goal_confirmation_cycles += 1
+        else:
+            self._goal_confirmation_cycles = 0
+
+        # A relation goal is complete when the requested physical relation is
+        # already stably observed.  LINK anchors and UNLINK detachment paths
+        # are means of restoring that relation, not additional task goals that
+        # must be followed after recovery has succeeded.  The sole exception
+        # is an active LINK probe: it deliberately displaced the arm and must
+        # still execute its recorded return path before leaving recovery.
+        if (
+            self._goal_confirmation_cycles
+            >= self.config.minimum_relation_confirmation_cycles
+            and not (
+                goal.kind == RelationGoalKind.LINK
+                and self._link_probe_phase is not None
+            )
+        ):
+            self._complete_goal()
+            return self._snapshot(None)
 
         if goal.kind == RelationGoalKind.LINK:
             assert goal.link_anchor is not None
+            frame_pose = self._pose(
+                frame_poses[goal.frame_id],
+                "LINK 恢复参考实体位姿",
+            )
+            if self._link_anchor_frame_pose is None:
+                settling_action = self._wait_for_stable_link_frame(
+                    frame_pose=frame_pose,
+                    current_pose=current,
+                    current_gripper=gripper,
+                )
+                if settling_action is not None:
+                    return self._snapshot(settling_action)
+            assert self._link_anchor_frame_pose is not None
             waypoints = self.anchor_registry.instantiate(
                 goal.link_anchor,
-                frame_poses[goal.frame_id],
+                self._link_anchor_frame_pose,
                 self.config.covariance_inflation,
             )
             if self._goal_phase == RelationGoalPhase.TRACK:
+                first_closing_waypoint = next(
+                    (
+                        index
+                        for index, waypoint in enumerate(waypoints)
+                        if np.any(waypoint.gripper_command <= 0.5)
+                    ),
+                    len(waypoints),
+                )
+                if self._waypoint_index < first_closing_waypoint:
+                    translation, rotation = self._frame_pose_distance(
+                        self._link_anchor_frame_pose,
+                        frame_pose,
+                    )
+                    if (
+                        translation > self.config.link_frame_restart_translation
+                        or rotation > self.config.link_frame_restart_rotation
+                    ):
+                        self._restart_link_frame_settling(frame_pose)
+                        return self._snapshot(
+                            self._action(
+                                current,
+                                np.full_like(
+                                    gripper,
+                                    self.config.open_gripper_command,
+                                ),
+                                "recovery_link_settle",
+                            )
+                        )
                 waypoint = waypoints[self._waypoint_index]
                 if (
                     np.linalg.norm(current[:3] - waypoint.pose[:3])
@@ -718,7 +887,8 @@ class RelationRecoveryController:
                 if (
                     self._link_probe_phase is None
                     and estimate.decision_state == RelationDecision.LINKED
-                    and self._goal_had_expected_information
+                    and self._goal_confirmation_cycles
+                    >= self.config.minimum_relation_confirmation_cycles
                 ):
                     self._complete_goal()
                     return self._snapshot(None)
@@ -777,7 +947,8 @@ class RelationRecoveryController:
             if self._goal_phase == RelationGoalPhase.VERIFY:
                 if (
                     estimate.decision_state == RelationDecision.EXTERNAL
-                    and self._goal_had_expected_information
+                    and self._goal_confirmation_cycles
+                    >= self.config.minimum_relation_confirmation_cycles
                 ):
                     self._complete_goal()
                     return self._snapshot(None)
@@ -812,6 +983,7 @@ class RecoveryManagerResult:
     verification: RelationVerificationStep | None = None
     recovery: RecoveryCycleResult | None = None
     reentry: ReentryDecision | None = None
+    reentry_evaluation: ReentryEvaluation | None = None
 
 
 class ClosedLoopRecoveryManager:
@@ -1096,6 +1268,7 @@ class ClosedLoopRecoveryManager:
             mode=self.mode,
             recovery=result,
             reentry=decision,
+            reentry_evaluation=evaluation,
         )
 
 

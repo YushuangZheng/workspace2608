@@ -69,6 +69,8 @@ class RelationVerificationConfig:
     probe_speed: float = 0.02
     maximum_probe_seconds: float = 1.0
     minimum_probe_motion: float = 0.002
+    minimum_response_samples: int = 3
+    maximum_response_residual_ratio: float = 0.85
     minimum_information_weight: float = 0.10
     minimum_tracking_reliability: float = 0.25
     minimum_approach_displacement: float = 1.0e-4
@@ -101,6 +103,10 @@ class RelationVerificationConfig:
             raise ValueError("主动关系验证信息与跟踪阈值必须位于 [0,1]")
         if self.task_history_length < 2 or self.maximum_return_cycles < 1:
             raise ValueError("主动关系验证轨迹历史和返回周期上限无效")
+        if self.minimum_response_samples < 2:
+            raise ValueError("主动关系验证至少需要两个动作响应样本")
+        if not 0.0 < self.maximum_response_residual_ratio < 1.0:
+            raise ValueError("主动关系验证共动残差比必须位于 (0,1)")
 
     @property
     def maximum_probe_cycles(self) -> int:
@@ -158,6 +164,9 @@ class RelationVerificationStep:
     probe_cycles: int
     return_cycles: int
     accumulated_probe_motion: float
+    response_samples: int
+    response_residual_ratio: float | None
+    response_decision: RelationDecision
     failure_reason: str | None = None
 
     @property
@@ -189,6 +198,11 @@ class RelationVerificationController:
         self._probe_cycles = 0
         self._return_cycles = 0
         self._accumulated_probe_motion = 0.0
+        self._response_pending = False
+        self._response_samples = 0
+        self._response_translation_motion = 0.0
+        self._response_ee_squared = 0.0
+        self._response_residual_squared = 0.0
         self._probe_exit_reason: ProbeExitReason | None = None
         self._verified_decision = RelationDecision.UNKNOWN
         self._failure_reason: str | None = None
@@ -290,6 +304,11 @@ class RelationVerificationController:
 
     def _action(self, pose: Array, source: str) -> AuxiliaryAction:
         assert self._gripper_command is not None
+        # The observation received on the *next* update is the response to
+        # this auxiliary action.  The update that enters VERIFY_LINK still
+        # contains the preceding TASK motion and must never be counted as
+        # probe evidence.
+        self._response_pending = True
         return AuxiliaryAction(
             pose=pose,
             covariance=self.config.action_covariance,
@@ -297,15 +316,65 @@ class RelationVerificationController:
             source=source,
         )
 
+    @property
+    def _response_residual_ratio(self) -> float | None:
+        if self._response_ee_squared <= np.finfo(np.float64).eps:
+            return None
+        return float(
+            np.sqrt(self._response_residual_squared / self._response_ee_squared)
+        )
+
+    def _record_action_response(self, features: RuntimeFeatures) -> None:
+        if not self._response_pending:
+            return
+        self._response_pending = False
+        assert self.request is not None
+        frame = self.request.frame_id
+        if (
+            not features.frame_pair_available.get(frame, False)
+            or features.paired_tracking_reliability.get(frame, 0.0)
+            < self.config.minimum_tracking_reliability
+        ):
+            return
+        ee_translation = np.asarray(features.actual_ee_motion[:3], dtype=np.float64)
+        frame_motion = features.frame_world_motion.get(frame)
+        if frame_motion is None:
+            return
+        frame_translation = np.asarray(frame_motion[:3], dtype=np.float64)
+        ee_norm = float(np.linalg.norm(ee_translation))
+        if ee_norm <= np.finfo(np.float64).eps:
+            return
+        residual = frame_translation - ee_translation
+        self._response_samples += 1
+        self._response_translation_motion += ee_norm
+        self._response_ee_squared += float(ee_translation @ ee_translation)
+        self._response_residual_squared += float(residual @ residual)
+
+    def _response_decision(self) -> RelationDecision:
+        ratio = self._response_residual_ratio
+        if (
+            ratio is None
+            or self._response_samples < self.config.minimum_response_samples
+            or self._response_translation_motion < self.config.minimum_probe_motion
+        ):
+            return RelationDecision.UNKNOWN
+        return (
+            RelationDecision.LINKED
+            if ratio <= self.config.maximum_response_residual_ratio
+            else RelationDecision.EXTERNAL
+        )
+
     def _stable_decision(
         self,
         estimate: RelationEstimate,
     ) -> RelationDecision:
+        response = self._response_decision()
         if (
             estimate.decision_state != RelationDecision.UNKNOWN
             and estimate.informative
             and estimate.information_weight >= self.config.minimum_information_weight
             and self._accumulated_probe_motion >= self.config.minimum_probe_motion
+            and estimate.decision_state == response
         ):
             return estimate.decision_state
         return RelationDecision.UNKNOWN
@@ -328,6 +397,9 @@ class RelationVerificationController:
             probe_cycles=self._probe_cycles,
             return_cycles=self._return_cycles,
             accumulated_probe_motion=self._accumulated_probe_motion,
+            response_samples=self._response_samples,
+            response_residual_ratio=self._response_residual_ratio,
+            response_decision=self._response_decision(),
             failure_reason=self._failure_reason,
         )
 
@@ -344,9 +416,14 @@ class RelationVerificationController:
         if self.request is None or estimate.frame_id != self.request.frame_id:
             raise ValueError("VERIFY_LINK 关系估计与当前请求不一致")
         current = self._pose(current_pose, "VERIFY_LINK 当前位姿")
+        self._record_action_response(features)
 
         if self.phase == VerificationPhase.PROBE:
-            self._accumulated_probe_motion += features.actual_motion_magnitude
+            # Count motion only after a VERIFY_LINK command has actually been
+            # issued.  Entry-cycle TASK motion is deliberately excluded by
+            # ``_record_action_response`` and ``_response_pending``.
+            if self._response_samples:
+                self._accumulated_probe_motion = self._response_translation_motion
             if not np.allclose(current, self._probe_path[-1]):
                 self._probe_path.append(current.copy())
             stable = self._stable_decision(estimate)

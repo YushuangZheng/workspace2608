@@ -1,0 +1,64 @@
+{
+  "schema": "essay2608.phase6_fault_protocol.v1",
+  "description": "Stage-six controlled physical faults on sealed normal RLBench samples. Trigger predicates depend only on actions or simulator attachment state, never policy-internal StateId or task outcome.",
+  "cells": {
+    "stack_wine_time_stall": {
+      "task": "stack_wine",
+      "episode_indices": [0, 1, 2],
+      "fault": {
+        "kind": "time_stall",
+        "arm": "single",
+        "earliest_step": 40,
+        "duration_cycles": 12,
+        "motion_trigger_distance": 0.01
+      }
+    },
+    "stack_wine_grasp_failure": {
+      "task": "stack_wine",
+      "episode_indices": [0, 1, 2],
+      "fault": {
+        "kind": "grasp_failure",
+        "arm": "single",
+        "earliest_step": 0,
+        "close_occurrence": 1
+      }
+    },
+    "stack_wine_relation_mismatch": {
+      "task": "stack_wine",
+      "episode_indices": [0, 1, 2],
+      "fault": {
+        "kind": "relation_mismatch",
+        "arm": "single",
+        "earliest_step": 0,
+        "minimum_grasped_cycles": 5,
+        "mismatch_translation": [0.04, 0.0, 0.0]
+      }
+    },
+    "stack_wine_unexpected_drop": {
+      "task": "stack_wine",
+      "episode_indices": [0, 1, 2],
+      "fault": {
+        "kind": "unexpected_drop",
+        "arm": "single",
+        "earliest_step": 0,
+        "minimum_grasped_cycles": 8
+      }
+    }
+  },
+  "comparison_methods": [
+    "dynamac_v4",
+    "progress_only",
+    "progress_dynamic_roles",
+    "full"
+  ],
+  "executor_control": "shared_stage6_executor_for_all_methods",
+  "provenance": {
+    "sealed_evaluation_set": "rlbench_eval_v2",
+    "fault_data_used_for_core_parameter_tuning": false,
+    "policy_state_mutated_by_injector": false,
+    "paper_comparable": false,
+    "status": "preregistered_component_pilot",
+    "time_stall_trigger_selection": "Selected from the current no-fault StackWine normal trace before cross-method fault comparison: after tick 40, first requested translation >= 1 cm, where local states are not control-equivalent. The earlier smoke-only trigger at tick 6 was rejected as a weakly moving control-equivalent segment and is not an experiment result.",
+    "grasp_failure_semantics": "The selected close occurrence remains physically ineffective for its entire contiguous closed-command interval. A later grasp is allowed only after the policy explicitly commands open and starts a new close occurrence. Earlier 0.4 s and 1.0 s delay-only smoke runs were rejected as actuator-delay tests and are not experiment results."
+  }
+}

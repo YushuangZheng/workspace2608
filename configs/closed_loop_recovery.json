@@ -4,6 +4,8 @@
     "probe_speed": 0.02,
     "maximum_probe_seconds": 1.0,
     "minimum_probe_motion": 0.002,
+    "minimum_response_samples": 3,
+    "maximum_response_residual_ratio": 0.85,
     "minimum_information_weight": 0.1,
     "minimum_tracking_reliability": 0.25,
     "minimum_approach_displacement": 0.0001,
@@ -27,7 +29,12 @@
     "unlink_fallback_distance": 0.05,
     "action_position_variance": 0.0002,
     "action_rotation_variance": 0.0005,
-    "boundary_relation_mismatch_cycles": 3
+    "boundary_relation_mismatch_cycles": 3,
+    "link_frame_stability_confirmation_cycles": 3,
+    "link_frame_stability_translation_tolerance": 0.001,
+    "link_frame_stability_rotation_tolerance": 0.017453292519943295,
+    "link_frame_restart_translation": 0.01,
+    "link_frame_restart_rotation": 0.17453292519943295
   },
   "reentry": {
     "minimum_explanation_score": 0.001,

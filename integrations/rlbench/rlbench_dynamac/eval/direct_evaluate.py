@@ -56,6 +56,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     Stage6IKControllerConfig,
     PrimaryActionRetryBudget,
     ScenarioController,
+    apply_gripper_after_completed_policy_target,
     commit_joint_hold_after_primary_failure,
     execute_global_ik_ee_control,
     execute_stage6_ik_ee_control,
@@ -65,6 +66,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     initialize_fresh_task_generation,
     initialize_global_ik_controller_diagnostics,
     initialize_ik_solver_diagnostics,
+    policy_action_execution_status,
     run_final_settling,
     solve_absolute_ee_ik_with_sampling_fallback,
     step_current_joint_hold_noop,
@@ -593,6 +595,7 @@ def _make_action_mode(
             self._controller_config = controller_config
             self._external_solver_factory = external_solver_factory
             self._external_solvers = {}
+            self._last_policy_action_status = "reached"
             if controller_profile in {
                 GLOBAL_IK_CONTROLLER_PROFILE,
                 STAGE6_IK_CONTROLLER_PROFILE,
@@ -623,6 +626,13 @@ def _make_action_mode(
 
         def diagnostics(self):
             return dict(self._execution_diagnostics)
+
+        def policy_action_status(self):
+            return (
+                self._last_policy_action_status
+                if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
+                else "reached"
+            )
 
         def _external_solver_for_arm(self, arm):
             key = id(arm)
@@ -727,7 +737,8 @@ def _make_action_mode(
                     ] += 1
                     raise
                 self._execution_diagnostics[f"joint_target_{status}"] += 1
-                return
+                self._last_policy_action_status = status
+                return status
             # Solve both sides before moving either side, so a target that is
             # invalid even after the far-target fallback cannot create a
             # half-applied bimanual command.
@@ -753,6 +764,8 @@ def _make_action_mode(
                 self._execution_diagnostics["joint_target_timeouts"] += 1
                 raise
             self._execution_diagnostics[f"joint_target_{status}"] += 1
+            self._last_policy_action_status = "reached"
+            return "reached"
 
         def action_shape(self, scene):
             del scene
@@ -762,7 +775,43 @@ def _make_action_mode(
             del scene
             return (7,)
 
-    return BimanualMoveArmThenGripper(
+    class BoundedBimanualMoveArmThenGripper(BimanualMoveArmThenGripper):
+        def action(self, scene, action):
+            if len(action) != 18:
+                raise ValueError("bimanual absolute EE action must contain 18 values")
+            arm_size = int(np.prod(self.arm_action_mode.unimanual_action_shape(scene)))
+            gripper_size = int(
+                np.prod(self.gripper_action_mode.unimanual_action_shape(scene))
+            )
+            lane_size = arm_size + gripper_size + 1
+            if lane_size != 9:
+                raise RuntimeError("unexpected bimanual absolute EE lane shape")
+            right = np.asarray(action[:lane_size])
+            left = np.asarray(action[lane_size:])
+            arm_action = np.concatenate((right[:arm_size], left[:arm_size]))
+            gripper_action = np.concatenate(
+                (
+                    right[arm_size : arm_size + gripper_size],
+                    left[arm_size : arm_size + gripper_size],
+                )
+            )
+            ignore_collisions = [bool(right[-1]), bool(left[-1])]
+            status = self.arm_action_mode.action(
+                scene,
+                arm_action,
+                ignore_collisions,
+            )
+            # Preserve the original bimanual action as one atomic waypoint:
+            # neither gripper lane commits while either arm is still executing
+            # a bounded prefix of the shared Cartesian target.
+            apply_gripper_after_completed_policy_target(
+                self.gripper_action_mode,
+                scene,
+                gripper_action,
+                arm_status=status,
+            )
+
+    return BoundedBimanualMoveArmThenGripper(
         BimanualAbsoluteEndEffectorIK(),
         GRIPPER_PROTOCOL.make_action_mode(),
     )
@@ -814,6 +863,7 @@ class PolicyProcess:
         policy_type="dynamac",
         closed_loop_models_dir=CLOSED_LOOP_MODELS_DIR,
         diagnostics_dir=None,
+        closed_loop_feature_profile="full",
     ):
         self.timeout = float(timeout)
         if self.timeout <= 0.0:
@@ -844,6 +894,8 @@ class PolicyProcess:
                 str(Path(closed_loop_models_dir).resolve()),
                 "--base-models-dir",
                 str(Path(models_dir).resolve()),
+                "--feature-profile",
+                str(closed_loop_feature_profile),
             ]
             if diagnostics_dir is not None:
                 command.extend(
@@ -1343,7 +1395,11 @@ def _run_v4_store_episode(
             worker.request("abort", transaction_id=transaction_id)
             raise
         if primary_action_succeeded:
-            commit = worker.request("commit", transaction_id=transaction_id)
+            commit = worker.request(
+                "commit",
+                transaction_id=transaction_id,
+                primary_action_status=policy_action_execution_status(task_environment),
+            )
             policy_complete = bool(commit.get("complete"))
             committed_policy_steps += 1
         settling = None
@@ -1409,6 +1465,8 @@ def _run_episode(
     descriptions=None,
     observation=None,
     fresh_task_generation=None,
+    episode_variation=None,
+    post_success_policy_steps=0,
 ):
     retry_exhaustion_mode = validate_primary_retry_exhaustion_mode(
         retry_exhaustion_mode
@@ -1417,7 +1475,19 @@ def _run_episode(
         raise ValueError("formal evaluation requires the global joint-hold clock")
     if max_primary_action_attempts != 1:
         raise ValueError("formal evaluation requests each policy tick exactly once")
+    if (
+        isinstance(post_success_policy_steps, bool)
+        or not isinstance(post_success_policy_steps, int)
+        or post_success_policy_steps < 0
+    ):
+        raise ValueError(
+            "post-success policy continuation must be a non-negative integer"
+        )
     if isinstance(motion_plan, StoreBottleMultiEntityPlan):
+        if post_success_policy_steps:
+            raise ValueError(
+                "post-success policy continuation is unavailable for StoreBottle"
+            )
         return _run_v4_store_episode(
             task_environment,
             worker,
@@ -1461,11 +1531,18 @@ def _run_episode(
     )
     trigger_reached = False
     committed_policy_steps = 0
+    success_latched_policy_step = None
+    post_success_policy_complete = False
     last_scenario_policy_step = None
+    resolved_variation = (
+        episode % task_environment.variation_count()
+        if episode_variation is None
+        else int(episode_variation)
+    )
     source_binding = controller.bind_staged_source(
         task_environment,
         episode_seed=seed + episode,
-        variation=episode % task_environment.variation_count(),
+        variation=resolved_variation,
         descriptions=descriptions,
     )
     if motion_plan is not None:
@@ -1496,6 +1573,21 @@ def _run_episode(
         )
         row.setdefault("committed_policy_steps", committed_policy_steps)
         row.setdefault("dynamic_clock_steps", committed_policy_steps)
+        executed_after_success = (
+            0
+            if success_latched_policy_step is None
+            else max(0, committed_policy_steps - success_latched_policy_step)
+        )
+        row.setdefault(
+            "post_success_policy_continuation",
+            {
+                "diagnostic_only": bool(post_success_policy_steps),
+                "requested_steps": int(post_success_policy_steps),
+                "success_latched_policy_step": success_latched_policy_step,
+                "executed_steps": executed_after_success,
+                "policy_complete": bool(post_success_policy_complete),
+            },
+        )
         row.setdefault("staged_source_binding", source_binding)
         row.setdefault("fresh_task_generation", fresh_task_generation)
         row.setdefault(
@@ -1614,16 +1706,33 @@ def _run_episode(
             return finish(
                 {
                     "episode": episode,
-                    "success": False,
+                    "success": success_latched_policy_step is not None,
                     "steps": control_attempts,
                     "control_attempts": control_attempts,
-                    "reason": "policy_structured_failure",
+                    "reason": (
+                        "success_latched_then_policy_structured_failure"
+                        if success_latched_policy_step is not None
+                        else "policy_structured_failure"
+                    ),
                     "policy_failure_reasons": response.get("failure_reasons", {}),
                     "invalid_actions": invalid_actions,
                     "scenario_events": scenario_events,
                 }
             )
         if action is None:
+            if success_latched_policy_step is not None:
+                post_success_policy_complete = True
+                return finish(
+                    {
+                        "episode": episode,
+                        "success": True,
+                        "steps": control_attempts,
+                        "control_attempts": control_attempts,
+                        "reason": "success_then_policy_complete",
+                        "invalid_actions": invalid_actions,
+                        "scenario_events": scenario_events,
+                    }
+                )
             settling = run_final_settling(
                 task_environment,
                 physics_steps=final_settling_steps,
@@ -1686,12 +1795,29 @@ def _run_episode(
             worker.request("abort", transaction_id=transaction_id)
             raise
         if primary_action_succeeded:
-            commit = worker.request("commit", transaction_id=transaction_id)
+            commit = worker.request(
+                "commit",
+                transaction_id=transaction_id,
+                primary_action_status=policy_action_execution_status(task_environment),
+            )
             policy_complete = bool(commit.get("complete"))
             committed_policy_steps += 1
         settling = None
-        if reward > 0.0:
-            reason = "success"
+        if reward > 0.0 and success_latched_policy_step is None:
+            success_latched_policy_step = committed_policy_steps
+        if success_latched_policy_step is not None:
+            post_success_policy_complete = bool(policy_complete)
+            continued_steps = committed_policy_steps - success_latched_policy_step
+            if policy_complete:
+                reason = "success_then_policy_complete"
+            elif continued_steps >= post_success_policy_steps:
+                reason = (
+                    "success"
+                    if post_success_policy_steps == 0
+                    else "success_after_post_success_policy_continuation"
+                )
+            else:
+                continue
         elif terminate:
             reason = "terminate"
         elif policy_complete:
@@ -1712,7 +1838,10 @@ def _run_episode(
         return finish(
             {
                 "episode": episode,
-                "success": bool(reward > 0.0 or (settling or {}).get("success")),
+                "success": bool(
+                    success_latched_policy_step is not None
+                    or (settling or {}).get("success")
+                ),
                 "steps": control_attempts,
                 "control_attempts": control_attempts,
                 "reason": reason,
@@ -1724,10 +1853,14 @@ def _run_episode(
     return finish(
         {
             "episode": episode,
-            "success": False,
+            "success": success_latched_policy_step is not None,
             "steps": control_attempts,
             "control_attempts": control_attempts,
-            "reason": "horizon",
+            "reason": (
+                "success_latched_post_success_horizon"
+                if success_latched_policy_step is not None
+                else "horizon"
+            ),
             "invalid_actions": invalid_actions,
             "scenario_events": scenario_events,
         }
@@ -1964,6 +2097,9 @@ def _evaluate_reserved(args):
             args, "closed_loop_models_dir", CLOSED_LOOP_MODELS_DIR
         ),
         diagnostics_dir=getattr(args, "policy_diagnostics_dir", None),
+        closed_loop_feature_profile=getattr(
+            args, "closed_loop_feature_profile", "full"
+        ),
     )
     results = []
     launched = False
@@ -2013,8 +2149,9 @@ def _evaluate_reserved(args):
             environment._pyrep,
             environment._robot,
         ).variation_count()
+        episode_variation_offset = int(getattr(args, "episode_variation_offset", 0))
         for episode in range(args.episodes):
-            variation = episode % variation_count
+            variation = (episode_variation_offset + episode) % variation_count
             episode_motion_plan = motion_plans[episode]
             reset_seed = (
                 episode_motion_plan.validation["source_seed"]
@@ -2053,6 +2190,7 @@ def _evaluate_reserved(args):
                     descriptions=descriptions,
                     observation=observation,
                     fresh_task_generation=fresh_task_generation,
+                    episode_variation=variation,
                 )
 
             result, episode_video = _run_episode_with_optional_v4_video(
@@ -2142,6 +2280,11 @@ def _evaluate_reserved(args):
     summary = {
         **({"release": "v4"} if getattr(args, "release", "v3") == "v4" else {}),
         "policy_type": getattr(args, "policy_type", "dynamac"),
+        "closed_loop_feature_profile": (
+            getattr(args, "closed_loop_feature_profile", "full")
+            if getattr(args, "policy_type", "dynamac") == "closed_loop_multistream"
+            else None
+        ),
         "task": args.task,
         "scenario": args.scenario,
         "scenario_protocol": {
@@ -2308,7 +2451,9 @@ def _evaluate_reserved(args):
         "horizon": args.horizon,
         "variation_count": variation_count,
         "variation_schedule": [
-            episode % variation_count for episode in range(args.episodes)
+            (int(getattr(args, "episode_variation_offset", 0)) + episode)
+            % variation_count
+            for episode in range(args.episodes)
         ],
         "evaluation_protocol_id": evaluation_protocol_id(
             args.max_primary_action_attempts,
@@ -2454,6 +2599,11 @@ def build_parser():
         type=Path,
         default=CLOSED_LOOP_MODELS_DIR,
     )
+    parser.add_argument(
+        "--closed-loop-feature-profile",
+        choices=("progress_only", "progress_dynamic_roles", "full"),
+        default="full",
+    )
     parser.add_argument("--policy-diagnostics-dir", type=Path, default=None)
     parser.add_argument(
         "--controller-profile",
@@ -2471,6 +2621,12 @@ def build_parser():
     parser.add_argument("--policy-python", type=Path, default=DEFAULT_POLICY_PYTHON)
     parser.add_argument("--episodes", type=int, default=200)
     parser.add_argument("--seed", type=int, default=GLOBAL_EVAL_SEED_START)
+    parser.add_argument(
+        "--episode-variation-offset",
+        type=int,
+        default=0,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--horizon", type=int, default=1000)
     parser.add_argument("--policy-timeout", type=float, default=120.0)
     parser.add_argument(
@@ -2576,6 +2732,10 @@ def main(argv=None):
     if _is_v4_store(args) and Path(args.models_dir) == DEFAULT_MODELS_DIR:
         args.models_dir = V4_MODELS_DIR
     if args.stage_motion_plans_output is not None:
+        if args.episode_variation_offset != 0:
+            raise ValueError(
+                "episode variation offset is only valid for read-only evaluation"
+            )
         if _is_v4_store(args):
             _validate_v4_store_protocol_args(args)
         elif _is_v4_lift(args):
@@ -2594,6 +2754,8 @@ def main(argv=None):
         return 0
     if args.episodes < 1 or args.horizon < 1:
         raise ValueError("episodes and horizon must be positive")
+    if args.episode_variation_offset < 0:
+        raise ValueError("episode variation offset must be non-negative")
     if args.motion_plan_wait_timeout <= 0.0:
         raise ValueError("motion-plan wait timeout must be positive")
     if not 0.0 <= args.scenario_trigger_fraction <= 1.0:

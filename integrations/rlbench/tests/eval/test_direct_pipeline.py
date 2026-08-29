@@ -49,7 +49,10 @@ from integrations.rlbench.rlbench_dynamac.data.direct_policy import (
 from integrations.rlbench.rlbench_dynamac.data.direct_policy import (
     DEFAULT_MODELS_DIR as DEFAULT_TRAINING_MODELS_DIR,
 )
-from integrations.rlbench.rlbench_dynamac.core.records import atomic_json, reserve_output
+from integrations.rlbench.rlbench_dynamac.core.records import (
+    atomic_json,
+    reserve_output,
+)
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
     FINAL_SETTLING_PROTOCOL_ID,
@@ -318,6 +321,13 @@ class _InvalidThenSuccessfulEnvironment:
         return self.observation, 0.0, False
 
 
+class _SuccessThenContinuingEnvironment(_InvalidThenSuccessfulEnvironment):
+    def step(self, action):
+        self.step_calls += 1
+        self.actions.append(np.asarray(action).copy())
+        return self.observation, float(self.step_calls == 1), self.step_calls == 1
+
+
 def _formal_episode_inputs(environment):
     descriptions, observation = environment.reset()
     return {
@@ -421,9 +431,7 @@ def test_wire_observation_converts_rlbench_xyzw_to_core_wxyz() -> None:
         }
     )
 
-    left, right = bimanual_observations_from_rlbench(
-        observation, "bimanual_lift_tray"
-    )
+    left, right = bimanual_observations_from_rlbench(observation, "bimanual_lift_tray")
 
     assert np.allclose(left.ee_pose, [0.1, 0.2, 0.3, 1.0, 0.0, 0.0, 0.0])
     assert np.allclose(right.ee_pose, left.ee_pose)
@@ -503,9 +511,7 @@ def test_joint_hold_noop_bypasses_action_mode_and_holds_all_joints(
     environment = Environment()
     attachments = {name: component.attachment for name, component in components.items()}
 
-    actual_observation, reward, terminate = step_current_joint_hold_noop(
-        environment
-    )
+    actual_observation, reward, terminate = step_current_joint_hold_noop(environment)
 
     assert actual_observation is observation
     assert reward == 0.0
@@ -567,9 +573,7 @@ def test_joint_hold_noop_propagates_shaped_reward_and_termination() -> None:
 
 
 def test_evaluation_defaults_to_200_episodes() -> None:
-    args = build_evaluation_parser().parse_args(
-        ["--task", "bimanual_handover_item"]
-    )
+    args = build_evaluation_parser().parse_args(["--task", "bimanual_handover_item"])
 
     assert args.episodes == 200
     assert args.headless is True
@@ -629,9 +633,7 @@ def test_motion_plan_cache_waits_for_concurrent_staging_writer(
             "goal_waypoint_validated": True,
             "sampling_attempts": 1,
             "staging_max_attempts": 20,
-            "fresh_task_generation_protocol_id": (
-                FRESH_TASK_GENERATION_PROTOCOL_ID
-            ),
+            "fresh_task_generation_protocol_id": (FRESH_TASK_GENERATION_PROTOCOL_ID),
             "selected_source_fresh_task_generation": generation_evidence,
         },
     )
@@ -735,7 +737,9 @@ def test_final_settling_holds_commands_for_up_to_ten_raw_steps(
 
 
 @pytest.mark.parametrize("invalid", (True, 3.0, 0, -1))
-def test_primary_action_retry_budget_rejects_non_positive_or_non_integer(invalid) -> None:
+def test_primary_action_retry_budget_rejects_non_positive_or_non_integer(
+    invalid,
+) -> None:
     error = TypeError if invalid is True or isinstance(invalid, float) else ValueError
     with pytest.raises(error):
         PrimaryActionRetryBudget(invalid)
@@ -1092,9 +1096,9 @@ def test_policy_ping_binds_results_to_the_loaded_checkpoint(tmp_path) -> None:
         "v3_trigger_anchor_evidence",
     }
     assert identity["model_schema_version"] == expected_summary["model_schema_version"]
-    assert identity["selection_semantics_id"] == expected_summary[
-        "selection_semantics_id"
-    ]
+    assert (
+        identity["selection_semantics_id"] == expected_summary["selection_semantics_id"]
+    )
     assert identity["config"] == asdict(config)
     assert identity["config"]["covariance_estimation_method"] == (
         "diagonal_empirical_ridge"
@@ -1134,6 +1138,41 @@ def test_unimanual_policy_action_is_only_complete_after_commit() -> None:
         "complete": True,
         "action": None,
     }
+
+
+def test_frozen_policy_clock_retries_same_state_after_bounded_executor_progress() -> (
+    None
+):
+    policy = _TransactionalUnimanualPolicy(duration=2)
+    server = _transaction_server("stack_wine", policy, bimanual=False)
+    observation = _unimanual_wire_observation()
+    server.handle({"command": "reset", "observation": observation})
+
+    first = server.handle({"command": "act", "observation": observation})
+    assert policy.clock == 1
+    partial = server.handle(
+        {
+            "command": "commit",
+            "transaction_id": first["transaction_id"],
+            "primary_action_status": "progressed",
+        }
+    )
+
+    assert partial["committed"] is True
+    assert partial["primary_action_status"] == "progressed"
+    assert partial["complete"] is False
+    assert policy.clock == 0
+
+    retry = server.handle({"command": "act", "observation": observation})
+    reached = server.handle(
+        {
+            "command": "commit",
+            "transaction_id": retry["transaction_id"],
+            "primary_action_status": "reached",
+        }
+    )
+    assert reached["primary_action_status"] == "reached"
+    assert policy.clock == 1
 
 
 def test_policy_server_applies_global_boundary_gripper_timing_transactionally() -> None:
@@ -1253,6 +1292,40 @@ def test_bimanual_evaluator_commits_joint_hold_for_failed_primary(monkeypatch) -
     ]
 
 
+def test_bimanual_diagnostic_can_continue_policy_after_latched_success(
+    monkeypatch,
+) -> None:
+    _install_invalid_action_module(monkeypatch)
+    pose = np.asarray(_wire_pose())
+    observation = SimpleNamespace(
+        right=SimpleNamespace(gripper_pose=pose, gripper_open=1.0),
+        left=SimpleNamespace(gripper_pose=pose, gripper_open=1.0),
+    )
+    environment = _SuccessThenContinuingEnvironment(observation)
+    worker = _TransactionalWorker(np.zeros(18), complete_after=3)
+
+    result = _run_bimanual_episode(
+        environment,
+        worker,
+        episode=0,
+        seed=0,
+        horizon=6,
+        post_success_policy_steps=5,
+        **_formal_episode_inputs(environment),
+    )
+
+    assert result["success"] is True
+    assert result["reason"] == "success_then_policy_complete"
+    assert result["steps"] == 3
+    assert result["post_success_policy_continuation"] == {
+        "diagnostic_only": True,
+        "requested_steps": 5,
+        "success_latched_policy_step": 1,
+        "executed_steps": 2,
+        "policy_complete": True,
+    }
+
+
 def test_bimanual_dynamic_motion_does_not_repeat_on_invalid_action_retry(
     monkeypatch,
 ) -> None:
@@ -1271,12 +1344,14 @@ def test_bimanual_dynamic_motion_does_not_repeat_on_invalid_action_retry(
 
         def __init__(self, *_args, **_kwargs):
             self.applied_steps = []
+            self.bind_kwargs = None
             self.__class__.instances.append(self)
 
         def resolved_trigger_step(self, _horizon):
             return 0
 
-        def bind_staged_source(self, *_args, **_kwargs):
+        def bind_staged_source(self, *_args, **kwargs):
+            self.bind_kwargs = dict(kwargs)
             return {"required": False, "matched": None}
 
         def apply(self, _task_environment, *, step, horizon):
@@ -1304,10 +1379,12 @@ def test_bimanual_dynamic_motion_does_not_repeat_on_invalid_action_retry(
         scenario="teleport",
         scenario_trigger_step=0,
         scenario_reference_steps=3,
+        episode_variation=2,
         **_formal_episode_inputs(environment),
     )
 
     assert Controller.instances[0].applied_steps == [0, 1]
+    assert Controller.instances[0].bind_kwargs["variation"] == 2
     assert len(result["scenario_events"]) == 1
     assert result["committed_policy_steps"] == 2
     assert result["dynamic_clock_steps"] == 2
@@ -1416,7 +1493,9 @@ def test_bimanual_manifest_rejects_mixed_checkpoint_identity(
         _validate_published_model("bimanual_handover_item", tmp_path, manifest)
 
 
-def test_joint_target_control_ignores_task_terminal_until_combined_action_finishes() -> None:
+def test_joint_target_control_ignores_task_terminal_until_combined_action_finishes() -> (
+    None
+):
     scene = _StepScene()
     # No task object is present: consulting scene.task.success() here would fail.
     arm = _JointArm(([0.0], [0.5], [1.0]))
@@ -1531,9 +1610,7 @@ def test_inherited_intervention_registry_rejects_missing_manual_semantics(
 ) -> None:
     payload = load_v3_intervention_protocol()
     payload.pop("fingerprint")
-    del payload["dynamic_environment"]["bimanual_handover_item"][
-        "interaction_event"
-    ]
+    del payload["dynamic_environment"]["bimanual_handover_item"]["interaction_event"]
     path = tmp_path / "invalid-interventions.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 

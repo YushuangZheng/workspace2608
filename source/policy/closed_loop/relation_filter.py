@@ -173,25 +173,52 @@ class RelationFilter:
         residual = features.relative_motion_residuals.get(frame)
         if residual is None:
             return np.ones(2, dtype=np.float64)
-        residual_magnitude = self.feature_builder.motion_magnitude(residual)
-        denominator = max(
-            features.actual_motion_magnitude,
-            self.config.residual_motion_floor,
+        action_components = self.feature_builder.motion_component_magnitudes(
+            features.actual_ee_motion
         )
-        ratio = residual_magnitude / denominator
-        linked_support = math.exp(
-            -0.5 * (ratio / self.config.residual_ratio_scale) ** 2
-        )
-        # A single relative-pose sample can be corrupted by tracking jitter or
-        # transient multi-body contact.  Mix the kinematic observation with a
-        # state-independent outlier component so one sample has finite evidence
-        # strength and the temporal relation prior remains meaningful.  Keep
-        # this physical robustness parameter separate from ``probability_floor``,
-        # which is only numerical underflow protection.
-        outlier = self.config.observation_outlier_probability
-        likelihood = (1.0 - outlier) * np.asarray(
-            [1.0 - linked_support, linked_support], dtype=np.float64
-        ) + outlier * np.asarray([0.5, 0.5], dtype=np.float64)
+        residual_components = self.feature_builder.motion_component_magnitudes(residual)
+
+        # Translation and rotation only identify the relation along components
+        # actually excited by this action.  Collapsing both into one scalar
+        # ratio lets uncommanded rotational contact wobble overwhelm clear
+        # translational co-motion (or the converse).  Build one finite
+        # likelihood per component and combine them geometrically in proportion
+        # to the observed action magnitude.  Conflicting components therefore
+        # become bounded, ambiguous evidence instead of an artificial decisive
+        # disconnect observation.
+        total_action = float(np.sum(action_components))
+        if total_action <= np.finfo(np.float64).eps:
+            likelihood = np.ones(2, dtype=np.float64)
+        else:
+            component_weights = action_components / total_action
+            component_log_likelihood = np.zeros(2, dtype=np.float64)
+            for action_magnitude, residual_magnitude, weight in zip(
+                action_components,
+                residual_components,
+                component_weights,
+            ):
+                if weight <= np.finfo(np.float64).eps:
+                    continue
+                denominator = max(
+                    float(action_magnitude),
+                    self.config.residual_motion_floor,
+                )
+                ratio = float(residual_magnitude) / denominator
+                linked_support = math.exp(
+                    -0.5 * (ratio / self.config.residual_ratio_scale) ** 2
+                )
+                # A single relative-pose component can be corrupted by
+                # tracking jitter or transient multi-body contact.  Mix it with
+                # a state-independent outlier component so its evidence remains
+                # finite and the temporal relation prior stays meaningful.
+                outlier = self.config.observation_outlier_probability
+                component_likelihood = (1.0 - outlier) * np.asarray(
+                    [1.0 - linked_support, linked_support], dtype=np.float64
+                ) + outlier * np.asarray([0.5, 0.5], dtype=np.float64)
+                component_log_likelihood += float(weight) * np.log(
+                    np.maximum(component_likelihood, self.config.probability_floor)
+                )
+            likelihood = np.exp(component_log_likelihood)
 
         # The gripper is weak context only.  It cannot create evidence without
         # motion because the whole likelihood is exponentiated by X below.
@@ -228,12 +255,24 @@ class RelationFilter:
             visibility = features.frame_visibility.get(frame, False)
             reliability = features.tracking_reliability.get(frame, 0.0)
             information = features.relation_information_weight.get(frame, 0.0)
+            # The state-conditioned demonstration prior is weak context for
+            # interpreting the *current action response*, not a new physical
+            # observation by itself.  Temper it by the same observation
+            # information X as the action-conditioned likelihood.  Otherwise
+            # repeatedly applying a linked demo prior while the controller is
+            # deliberately holding can erase a previously observed external
+            # relation even though no relinking evidence occurred.  At X=0
+            # the recursive posterior therefore reduces to the persistent
+            # prediction; visibility/reliability still control the separate
+            # Unknown decision below.
+            observation_log_update = information * (
+                self.config.demonstration_prior_strength
+                * np.log(np.maximum(demo_prior, self.config.probability_floor))
+                + np.log(np.maximum(likelihood, self.config.probability_floor))
+            )
             log_posterior = (
                 np.log(np.maximum(predicted, self.config.probability_floor))
-                + self.config.demonstration_prior_strength
-                * np.log(np.maximum(demo_prior, self.config.probability_floor))
-                + information
-                * np.log(np.maximum(likelihood, self.config.probability_floor))
+                + observation_log_update
             )
             log_posterior -= float(np.max(log_posterior))
             posterior = _normalize(np.exp(log_posterior), self.config.probability_floor)
@@ -282,17 +321,25 @@ class RelationFilter:
                     }
                     and posterior_decision == previous_decision
                 )
-                evidence_supported_confirmation = bool(
+                evidence_memory_available = bool(
                     visibility
                     and reliability >= self.config.minimum_tracking_reliability
                     and evidence_decision
                     in {RelationDecision.EXTERNAL, RelationDecision.LINKED}
-                    and posterior_decision == evidence_decision
                 )
                 if may_persist and previous_decision is not None:
                     decision = previous_decision
-                elif evidence_supported_confirmation:
-                    decision = posterior_decision
+                elif evidence_memory_available:
+                    # The Markov prediction deliberately makes the *soft*
+                    # posterior less certain during a long interval without
+                    # motion excitation.  That mathematical diffusion is not
+                    # physical evidence of a detach/attach event.  Preserve
+                    # the last relation actually confirmed by informative
+                    # motion while the frame remains visible and reliable;
+                    # the next informative observation still uses the soft
+                    # posterior and can confirm the opposite state normally.
+                    assert evidence_decision is not None
+                    decision = evidence_decision
                 else:
                     decision = RelationDecision.UNKNOWN
             estimates[frame] = RelationEstimate(

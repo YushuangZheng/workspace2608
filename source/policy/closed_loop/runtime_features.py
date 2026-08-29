@@ -57,16 +57,29 @@ class RuntimeFeatureBuilder:
     def __init__(self, config: RuntimeFeatureConfig = RuntimeFeatureConfig()) -> None:
         self.config = config
 
-    def motion_magnitude(self, tangent: Array) -> float:
+    def motion_component_magnitudes(self, tangent: Array) -> Array:
+        """Return translation and rotation-equivalent action magnitudes.
+
+        Keeping the two components available is important for the
+        action-conditioned relation likelihood: a translational action does
+        not, by itself, identify a relation through an uncommanded rotational
+        contact wobble (and vice versa).  ``motion_magnitude`` remains the
+        Euclidean norm of these two physically scaled components.
+        """
+
         value = np.asarray(tangent, dtype=np.float64)
         if value.shape != (6,):
             raise ValueError("运动切向量必须为 [6]")
         translation = float(np.linalg.norm(value[:3]))
         # The baseline S3 logarithm is half-angle; convert it to physical angle.
         rotation = 2.0 * float(np.linalg.norm(value[3:]))
-        return float(
-            np.hypot(translation, self.config.rotation_length_scale * rotation)
+        return np.asarray(
+            [translation, self.config.rotation_length_scale * rotation],
+            dtype=np.float64,
         )
+
+    def motion_magnitude(self, tangent: Array) -> float:
+        return float(np.linalg.norm(self.motion_component_magnitudes(tangent)))
 
     def build(
         self,

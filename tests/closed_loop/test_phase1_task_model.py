@@ -447,6 +447,11 @@ def test_relation_events_require_motion_and_follow_comotion_then_detachment() ->
     assert np.any(anchor.gripper_commands > 0.0)
     assert np.any(anchor.gripper_commands < 0.0)
     release = next(iter(model.unlink_events.values())).release_state
+    # Stable relative-motion evidence appears one aligned state after the
+    # all-demo opening command in this fixture.  The confirmed UNLINK is
+    # therefore anchored at the causal opening state, while kinematic evidence
+    # remains mandatory for accepting the event at all.
+    assert release == StateId(2, 0)
     release_gripper = aligned[release.skill_index].gripper[members, release.local_index]
     assert np.all(release_gripper > 0.0)
 

@@ -52,13 +52,13 @@
     "boundary": {
       "calibrations": {
         "single:0->1": {
-          "confirmation_cycles": 2,
-          "local_score_threshold": 0.008346527707807801,
+          "confirmation_cycles": 1,
+          "local_score_threshold": 0.004983837884977832,
           "relation_thresholds": {}
         },
         "single:1->2": {
-          "confirmation_cycles": 2,
-          "local_score_threshold": 0.006484173144814397,
+          "confirmation_cycles": 1,
+          "local_score_threshold": 0.0066166255065861265,
           "relation_thresholds": {}
         }
       },
@@ -87,12 +87,18 @@
         "action_rotation_variance": 0.0005,
         "boundary_relation_mismatch_cycles": 3,
         "covariance_inflation": 0.0001,
+        "link_frame_restart_rotation": 0.17453292519943295,
+        "link_frame_restart_translation": 0.01,
+        "link_frame_stability_confirmation_cycles": 3,
+        "link_frame_stability_rotation_tolerance": 0.017453292519943295,
+        "link_frame_stability_translation_tolerance": 0.001,
         "maximum_attempts_per_goal": 2,
         "maximum_reentry_cycles": 40,
         "maximum_relation_verify_cycles": 30,
         "maximum_total_cycles": 400,
         "maximum_waypoint_cycles": 40,
         "minimum_information_weight": 0.1,
+        "minimum_relation_confirmation_cycles": 2,
         "open_gripper_command": 1.0,
         "pose_position_tolerance": 0.004,
         "unlink_fallback_distance": 0.05,
@@ -110,10 +116,12 @@
         "action_rotation_variance": 0.0001,
         "control_period_seconds": 0.05,
         "maximum_probe_seconds": 1.0,
+        "maximum_response_residual_ratio": 0.85,
         "maximum_return_cycles": 80,
         "minimum_approach_displacement": 0.0001,
         "minimum_information_weight": 0.1,
         "minimum_probe_motion": 0.002,
+        "minimum_response_samples": 3,
         "minimum_tracking_reliability": 0.25,
         "probe_speed": 0.02,
         "return_position_tolerance": 0.002,
@@ -174,13 +182,13 @@
       "boundary": {
         "calibrations": {
           "single:0->1": {
-            "confirmation_cycles": 2,
-            "local_score_threshold": 0.008346527707807801,
+            "confirmation_cycles": 1,
+            "local_score_threshold": 0.004983837884977832,
             "relation_thresholds": {}
           },
           "single:1->2": {
-            "confirmation_cycles": 2,
-            "local_score_threshold": 0.006484173144814397,
+            "confirmation_cycles": 1,
+            "local_score_threshold": 0.0066166255065861265,
             "relation_thresholds": {}
           }
         },
@@ -209,12 +217,18 @@
           "action_rotation_variance": 0.0005,
           "boundary_relation_mismatch_cycles": 3,
           "covariance_inflation": 0.0001,
+          "link_frame_restart_rotation": 0.17453292519943295,
+          "link_frame_restart_translation": 0.01,
+          "link_frame_stability_confirmation_cycles": 3,
+          "link_frame_stability_rotation_tolerance": 0.017453292519943295,
+          "link_frame_stability_translation_tolerance": 0.001,
           "maximum_attempts_per_goal": 2,
           "maximum_reentry_cycles": 40,
           "maximum_relation_verify_cycles": 30,
           "maximum_total_cycles": 400,
           "maximum_waypoint_cycles": 40,
           "minimum_information_weight": 0.1,
+          "minimum_relation_confirmation_cycles": 2,
           "open_gripper_command": 1.0,
           "pose_position_tolerance": 0.004,
           "unlink_fallback_distance": 0.05,
@@ -232,10 +246,12 @@
           "action_rotation_variance": 0.0001,
           "control_period_seconds": 0.05,
           "maximum_probe_seconds": 1.0,
+          "maximum_response_residual_ratio": 0.85,
           "maximum_return_cycles": 80,
           "minimum_approach_displacement": 0.0001,
           "minimum_information_weight": 0.1,
           "minimum_probe_motion": 0.002,
+          "minimum_response_samples": 3,
           "minimum_tracking_reliability": 0.25,
           "probe_speed": 0.02,
           "return_position_tolerance": 0.002,
@@ -245,6 +261,12 @@
     },
     "diagnostic_ticks": 0,
     "failed": false,
+    "feature_profile": {
+      "auxiliary_verification_recovery": true,
+      "dynamic_frame_roles": true,
+      "name": "full",
+      "relation_scene_boundary_guards": true
+    },
     "initialized": false,
     "models": {
       "single": {
@@ -286,7 +308,7 @@
           "microwave_door"
         ],
         "scene_factor_count": 0,
-        "schema_version": 3,
+        "schema_version": 4,
         "skill_state_counts": {
           "0": 101,
           "1": 13,

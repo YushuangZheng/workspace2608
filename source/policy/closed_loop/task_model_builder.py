@@ -1062,14 +1062,14 @@ class ClosedLoopTaskModelBuilder:
         )
         return probabilities, event_observable
 
-    def _relation_event_gripper_is_consistent(
+    def _relation_event_gripper_transitions(
         self,
         gripper: Array,
         members: Array,
         global_index: int,
         transition: str,
-    ) -> bool:
-        """Check event/anchor completeness without creating relation evidence.
+    ) -> dict[int, int] | None:
+        """Return the latest causal gripper transition before relation evidence.
 
         A LINK anchor must contain a closing command for every corresponding
         normal demonstration. An UNLINK must follow an opening command and may
@@ -1083,24 +1083,45 @@ class ClosedLoopTaskModelBuilder:
             axis=2,
         )
         if commands.ndim != 2 or global_index <= 0 or global_index >= commands.shape[1]:
-            return False
+            return None
         tolerance = 1.0e-9
-        for demonstration in commands:
+        positions: dict[int, int] = {}
+        for demonstration_id, demonstration in zip(members, commands):
             delta = np.diff(demonstration[: global_index + 1])
             changed = np.flatnonzero(np.abs(delta) > tolerance) + 1
             if not len(changed):
-                return False
+                return None
             latest = int(changed[-1])
             if transition == "link":
                 start = max(1, global_index - self.config.link_anchor_horizon + 1)
                 if latest < start or delta[latest - 1] >= -tolerance:
-                    return False
+                    return None
             elif transition == "unlink":
                 if delta[latest - 1] <= tolerance:
-                    return False
+                    return None
             else:
                 raise ValueError(f"未知关系事件类型：{transition}")
-        return True
+            positions[int(demonstration_id)] = latest
+        return positions
+
+    def _relation_event_gripper_is_consistent(
+        self,
+        gripper: Array,
+        members: Array,
+        global_index: int,
+        transition: str,
+    ) -> bool:
+        """Check event/anchor completeness without creating relation evidence."""
+
+        return (
+            self._relation_event_gripper_transitions(
+                gripper,
+                members,
+                global_index,
+                transition,
+            )
+            is not None
+        )
 
     def _build_relation_events(
         self,
@@ -1358,7 +1379,13 @@ class ClosedLoopTaskModelBuilder:
                             ]
 
                     consensus_events: list[
-                        tuple[str, int, list[tuple[int, int]], RelationEventId]
+                        tuple[
+                            str,
+                            int,
+                            int,
+                            list[tuple[int, int]],
+                            RelationEventId,
+                        ]
                     ] = []
                     occurrence = {"link": 0, "unlink": 0}
                     required = max(
@@ -1404,13 +1431,46 @@ class ClosedLoopTaskModelBuilder:
                             matched_fold_events.append((demonstration, event_index))
                         if len(supported) < required:
                             continue
-                        if not self._relation_event_gripper_is_consistent(
+                        evidence_local_index = local_index
+                        gripper_transitions = self._relation_event_gripper_transitions(
                             joint_gripper,
                             members,
                             global_start + local_index,
                             transition,
-                        ):
+                        )
+                        if gripper_transitions is None:
                             continue
+                        event_local_index = local_index
+                        event_support = supported
+                        if transition == "unlink":
+                            # Relative-motion evidence confirms that detachment
+                            # really occurred, but it commonly becomes
+                            # observable only after the already-open gripper
+                            # starts to withdraw.  When every normal
+                            # demonstration has the same aligned opening
+                            # transition in this skill, use that causal command
+                            # as the relation-state transition.  The later
+                            # kinematic evidence is still used below for the
+                            # detachment target and legal recovery reentry.
+                            opening_positions = tuple(gripper_transitions.values())
+                            causal_global_index = max(opening_positions)
+                            aligned_opening = bool(
+                                max(opening_positions) - min(opening_positions)
+                                <= self.config.relation_event_alignment_tolerance
+                                and global_start <= causal_global_index < global_stop
+                                and causal_global_index
+                                <= global_start + evidence_local_index
+                            )
+                            if aligned_opening:
+                                event_local_index = causal_global_index - global_start
+                                event_support = [
+                                    (
+                                        demonstration,
+                                        gripper_transitions[demonstration]
+                                        - global_start,
+                                    )
+                                    for demonstration, _ in supported
+                                ]
                         for demonstration, event_index in matched_fold_events:
                             used_fold_events[demonstration].add(event_index)
                         event_id = RelationEventId(
@@ -1423,7 +1483,13 @@ class ClosedLoopTaskModelBuilder:
                         )
                         occurrence[transition] += 1
                         consensus_events.append(
-                            (transition, local_index, supported, event_id)
+                            (
+                                transition,
+                                event_local_index,
+                                evidence_local_index,
+                                event_support,
+                                event_id,
+                            )
                         )
 
                     # Preserve a repeatable external->linked hypothesis when
@@ -1456,7 +1522,7 @@ class ClosedLoopTaskModelBuilder:
                             transition == "link"
                             and abs(position - candidate[1])
                             <= self.config.link_anchor_horizon
-                            for transition, position, _, _ in consensus_events
+                            for transition, position, _, _, _ in consensus_events
                         )
                     ]
                     fold_pending_events: dict[int, list[tuple[str, int]]] = {}
@@ -1564,7 +1630,13 @@ class ClosedLoopTaskModelBuilder:
                             ),
                         )
 
-                    for transition, local_index, supported, event_id in sorted(
+                    for (
+                        transition,
+                        local_index,
+                        evidence_local_index,
+                        supported,
+                        event_id,
+                    ) in sorted(
                         consensus_events,
                         key=lambda item: (item[1], item[0]),
                     ):
@@ -1612,7 +1684,7 @@ class ClosedLoopTaskModelBuilder:
                                 ),
                             )
                         else:
-                            global_event_index = global_start + local_index
+                            global_event_index = global_start + evidence_local_index
                             legal_stop = min(
                                 total_states,
                                 global_event_index + self.config.reentry_horizon,

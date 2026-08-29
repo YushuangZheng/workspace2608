@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -343,6 +343,37 @@ def test_dynamic_roles_execute_monitor_recover_and_defer(phase3_model) -> None:
     assert recover.recovery_intents[0].expected_relation == RelationDecision.LINKED
 
 
+def test_fresh_external_unknown_bootstraps_below_unreachable_soft_prior_peak(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    state = StateId(0, 1)
+    force_relation_prior(model, state, linked=False)
+    router = FrameRoleRouter(model)
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=state,
+        estimated=state,
+        relation=relation_estimate(
+            "object",
+            (0.692, 0.308),
+            RelationDecision.UNKNOWN,
+            information_weight=0.0,
+        ),
+        static=True,
+    )
+
+    routed = router.route(state, belief, mode_by_skill={0: 0})
+
+    decision = routed.decisions["object"]
+    assert decision.role == FrameRole.DEFER
+    assert decision.actual_relation == RelationDecision.UNKNOWN
+    assert decision.execution_weight == pytest.approx(0.692)
+    assert decision.blocks_advance is False
+
+
 def test_confirmed_unselected_link_is_monitored_without_reenabling_poe(
     phase3_model,
 ) -> None:
@@ -390,6 +421,71 @@ def test_confirmed_unselected_link_is_monitored_without_reenabling_poe(
     assert "object" not in recovered.execution_weights
     assert recovered.blocks_advance is True
     assert recovered.recovery_intents[0].frame_id == "object"
+
+
+@pytest.mark.parametrize(
+    "actual",
+    (RelationDecision.UNKNOWN, RelationDecision.EXTERNAL),
+)
+def test_confirmed_unlink_direct_successor_can_issue_causal_opening(
+    phase3_model,
+    actual: RelationDecision,
+) -> None:
+    model, demos = phase3_model
+    event_id, metadata = next(iter(sorted(model.unlink_events.items())))
+    predecessor = model.state(metadata.release_state).topology.predecessors[0]
+    assert metadata.release_state in model.state(predecessor).topology.successors
+    assert any(
+        key.frame_id == "object" and key.state_id == predecessor
+        for key in model.link_origins
+    )
+    force_relation_prior(model, predecessor, linked=True)
+    posterior = (0.5, 0.5) if actual == RelationDecision.UNKNOWN else (0.95, 0.05)
+    snapshot = FrameRoleRouter(model).route(
+        predecessor,
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=predecessor,
+            estimated=predecessor,
+            relation=relation_estimate(
+                "object",
+                posterior,
+                actual,
+                information_weight=(0.0 if actual == RelationDecision.UNKNOWN else 0.4),
+            ),
+            static=actual == RelationDecision.UNKNOWN,
+        ),
+        mode_by_skill={predecessor.skill_index: event_id.mode},
+    )
+    decision = snapshot.decisions["object"]
+    assert decision.role == FrameRole.DEFER
+    assert decision.blocks_advance is False
+    assert snapshot.recovery_intents == ()
+
+    # The allowance is causal and local.  A reliable early disconnect that is
+    # not immediately followed by this learned UNLINK remains a recovery.
+    earlier = model.state(predecessor).topology.predecessors[0]
+    force_relation_prior(model, earlier, linked=True)
+    early = FrameRoleRouter(model).route(
+        earlier,
+        belief_for(
+            model,
+            demos,
+            tick=2,
+            nominal=earlier,
+            estimated=earlier,
+            relation=relation_estimate(
+                "object",
+                (0.95, 0.05),
+                RelationDecision.EXTERNAL,
+            ),
+        ),
+        mode_by_skill={earlier.skill_index: event_id.mode},
+    )
+    assert early.decisions["object"].role == FrameRole.RECOVER
+    assert early.blocks_advance is True
 
 
 def test_formal_link_uses_learned_interval_motion_to_confirm_posterior_lag(
@@ -490,6 +586,61 @@ def test_formal_link_confirmation_never_masks_fresh_external_evidence_or_drop(
     assert dropped.decisions["object"].formal_link_confirmation_pending is False
     assert dropped.decisions["object"].role == FrameRole.RECOVER
     assert dropped.blocks_advance is True
+
+
+def test_formal_link_rejection_persists_across_later_low_excitation_cycle(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    state_id = anchor.linked_entry_states[0]
+    modes = {state_id.skill_index: event_id.mode}
+    router = FrameRoleRouter(model)
+
+    contradicted = router.route(
+        state_id,
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=state_id,
+            estimated=state_id,
+            relation=relation_estimate(
+                "object",
+                (0.90, 0.10),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(1.0, 0.01),
+            ),
+        ),
+        mode_by_skill=modes,
+    )
+    assert event_id in contradicted.rejected_link_events
+    assert contradicted.decisions["object"].role == FrameRole.RECOVER
+
+    unexcited = router.route(
+        state_id,
+        belief_for(
+            model,
+            demos,
+            tick=2,
+            nominal=state_id,
+            estimated=state_id,
+            relation=relation_estimate(
+                "object",
+                (0.90, 0.10),
+                RelationDecision.EXTERNAL,
+                information_weight=0.0,
+                observation_likelihood=(0.5, 0.5),
+            ),
+            static=True,
+        ),
+        mode_by_skill=modes,
+    )
+    decision = unexcited.decisions["object"]
+    assert decision.formal_link_confirmation_pending is False
+    assert decision.role == FrameRole.RECOVER
+    assert unexcited.blocks_advance is True
 
 
 def test_formal_link_natural_confirmation_uses_full_learned_interval(
@@ -1286,11 +1437,22 @@ def test_blocked_proposed_state_contributes_persistent_relation_mismatch(
 ) -> None:
     model, demos = phase3_model
     event_id, anchor = next(iter(sorted(model.link_anchors.items())))
-    # The current state is the final state of the learned LINK interval, so it
-    # may still execute natural confirmation motion.  Its successor is outside
-    # that interval and must expose the persistent external contradiction.
-    current = anchor.linked_entry_states[-1]
+    # Isolate the role-routing behavior inside one skill.  A real skill-terminal
+    # successor is correctly owned by the entry guard and would test a different
+    # mechanism before the proposed state's role is consulted.
+    assert len(anchor.linked_entry_states) >= 2
+    current = anchor.linked_entry_states[-2]
     successor = model.state(current).topology.successors[0]
+    assert successor.skill_index == current.skill_index
+    assert successor == anchor.linked_entry_states[-1]
+    model.link_anchors[event_id] = replace(
+        anchor,
+        linked_entry_states=anchor.linked_entry_states[:-1],
+    )
+    # The synthetic skill's last state also precedes a learned UNLINK.  Remove
+    # that independent causal-release exception so this test exercises only
+    # the proposed-state LINK mismatch path.
+    model.unlink_events.clear()
     force_relation_prior(model, current, linked=True)
     force_relation_prior(model, successor, linked=True)
     controller = ClosedLoopExecutionController(

@@ -12,6 +12,7 @@ from essay2608.policy import DynaMAC, DynaMACObservation
 from essay2608.policy.closed_loop import (
     ArmCommand,
     ClosedLoopMultiStreamPolicy,
+    ClosedLoopFeatureProfile,
     ExecutionDecision,
     ExecutionMode,
     PolicyLifecycle,
@@ -28,6 +29,10 @@ from integrations.rlbench.rlbench_closed_loop.policy_server import (
     ClosedLoopPolicyServer,
 )
 from integrations.rlbench.rlbench_dynamac.core.task_specs import get_task_spec
+from integrations.rlbench.rlbench_dynamac.core.runtime import (
+    apply_gripper_after_completed_policy_target,
+    policy_action_execution_status,
+)
 from integrations.rlbench.rlbench_dynamac.data.demo_adapter import (
     load_low_dim_obs_pickles,
     make_bimanual_demonstrations,
@@ -40,6 +45,48 @@ ROOT = Path(__file__).resolve().parents[2]
 BASE_ROOT = ROOT / "integrations/rlbench/models/v4"
 BUNDLE_ROOT = ROOT / "integrations/rlbench/models/closed_loop_v1"
 DATA_ROOT = ROOT / "integrations/rlbench/data/training/main"
+
+
+def test_closed_loop_ablation_profiles_add_mechanisms_monotonically() -> None:
+    progress = ClosedLoopFeatureProfile.named("progress_only")
+    roles = ClosedLoopFeatureProfile.named("progress_dynamic_roles")
+    full = ClosedLoopFeatureProfile.named("full")
+
+    assert progress.to_dict() == {
+        "name": "progress_only",
+        "dynamic_frame_roles": False,
+        "relation_scene_boundary_guards": False,
+        "auxiliary_verification_recovery": False,
+    }
+    assert roles.dynamic_frame_roles is True
+    assert roles.relation_scene_boundary_guards is False
+    assert roles.auxiliary_verification_recovery is False
+    assert full.dynamic_frame_roles is True
+    assert full.relation_scene_boundary_guards is True
+    assert full.auxiliary_verification_recovery is True
+    with pytest.raises(ValueError, match="unknown closed-loop feature profile"):
+        ClosedLoopFeatureProfile.named("task_specific_shortcut")
+
+
+def test_progress_only_bundle_load_disables_later_layers_without_changing_model() -> (
+    None
+):
+    bundle = BUNDLE_ROOT / "stack_wine"
+    checkpoint = BASE_ROOT / "stack_wine/model.npz"
+    if not bundle.is_dir() or not checkpoint.is_file():
+        pytest.skip("本地未安装 Stage6 StackWine bundle 或 V4 checkpoint")
+
+    base = DynaMAC.load(checkpoint)
+    policy = ClosedLoopMultiStreamPolicy.load(
+        bundle,
+        base_policies={"single": base},
+        feature_profile="progress_only",
+    )
+
+    assert policy.feature_profile.name == "progress_only"
+    assert policy.execution_controllers["single"].dynamic_frame_roles is False
+    assert policy.boundary_controller.guards["single"].relation_scene_guards is False
+    assert policy.summary()["feature_profile"] == policy.feature_profile.to_dict()
 
 
 def _pose_xyzw(x: float) -> np.ndarray:
@@ -84,6 +131,103 @@ def test_rlbench_worker_reports_structured_policy_failure_before_next_tick() -> 
     assert response["failure_reasons"] == {"single": "no_legal_reentry_state"}
     assert response["transaction_id"] == 7
     assert response["action"] is not None
+
+
+def test_rlbench_worker_commits_bounded_progress_without_completing_target() -> None:
+    class Diagnostics:
+        def __init__(self) -> None:
+            self.annotation = None
+
+        def annotate_last(self, name, value) -> None:
+            self.annotation = (name, value)
+
+    class Policy:
+        def __init__(self) -> None:
+            self.complete = False
+            self.commits = []
+            self.diagnostics = Diagnostics()
+
+        def commit(self, *, action_executed) -> None:
+            self.commits.append(action_executed)
+
+    server = object.__new__(ClosedLoopPolicyServer)
+    server.arms = ("single",)
+    server.policy = Policy()
+    server._tick = 4
+    server._previous_ee = {"single": None}
+    server._previous_command = {"single": None}
+    server._previous_command_covariance = {"single": None}
+    pre_action = _pose_xyzw(0.0)
+    target = _pose_xyzw(0.2)
+    covariance = np.eye(6)
+    server._pending = {
+        "transaction_id": 9,
+        "pre_action_ee": {"single": pre_action},
+        "commands": {"single": target},
+        "command_covariances": {"single": covariance},
+    }
+
+    response = server._resolve(
+        {"transaction_id": 9, "primary_action_status": "progressed"},
+        commit=True,
+    )
+
+    assert server.policy.commits == [False]
+    assert server._tick == 5
+    assert np.array_equal(server._previous_ee["single"], pre_action)
+    assert np.array_equal(server._previous_command["single"], target)
+    assert np.array_equal(server._previous_command_covariance["single"], covariance)
+    assert response["primary_action_status"] == "progressed"
+    assert response["complete"] is False
+    assert server.policy.diagnostics.annotation == (
+        "rlbench_action_resolution",
+        {
+            "status": "progressed",
+            "command_issued": True,
+            "absolute_target_completed": False,
+        },
+    )
+
+
+def test_rlbench_action_status_reads_stage6_arm_mode_only_when_available() -> None:
+    assert policy_action_execution_status(SimpleNamespace()) == "reached"
+    environment = SimpleNamespace(
+        _action_mode=SimpleNamespace(
+            arm_action_mode=SimpleNamespace(policy_action_status=lambda: "progressed")
+        )
+    )
+    assert policy_action_execution_status(environment) == "progressed"
+    environment._action_mode.arm_action_mode.policy_action_status = lambda: "invalid"
+    with pytest.raises(RuntimeError, match="unsupported policy action"):
+        policy_action_execution_status(environment)
+
+
+def test_stage6_gripper_command_waits_for_absolute_pose_completion() -> None:
+    calls = []
+    gripper = SimpleNamespace(
+        action=lambda scene, action: calls.append((scene, action.copy()))
+    )
+    scene = object()
+    command = np.asarray([1.0])
+
+    for status in ("progressed", "stopped"):
+        assert not apply_gripper_after_completed_policy_target(
+            gripper,
+            scene,
+            command,
+            arm_status=status,
+        )
+    assert calls == []
+
+    assert apply_gripper_after_completed_policy_target(
+        gripper,
+        scene,
+        command,
+        arm_status="reached",
+    )
+    assert len(calls) == 1
+    assert calls[0][0] is scene
+    assert np.array_equal(calls[0][1], command)
 
 
 def test_directional_boundary_verification_request_routes_to_receiver_arm() -> None:

@@ -10,13 +10,13 @@
     "episode4"
   ],
   "base_model_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/v4",
-  "closed_loop_output_root": "/tmp/closed_loop_peer_dependency_v1",
+  "closed_loop_output_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/closed_loop_v1_next",
   "files": {
     "configs/closed_loop_task_model.json": "158694feb75e7c2259af7c60092114885d5e9df29be97ebde32d688d3cbde765",
     "configs/closed_loop_belief.json": "59bb5d51e37b17500680e23374febf3574422d5c9d5c2f60eb55461b244bb128",
     "configs/closed_loop_execution.json": "960a3d8b19309dbb53cc9efe89479811b75e65885d3449c4ce5ff84dd55ff881",
-    "configs/closed_loop_recovery.json": "ff9c3d2d37b4be49d62517f45524a9caca03fac7b5d30d95879c13fe5de7713c",
-    "configs/closed_loop_boundary/bimanual_lift_tray.json": "40aeb014ffa8ac7e3ec728a0093137866cc216c57d4668106dd1d683d57b0938",
+    "configs/closed_loop_recovery.json": "3d9c8f56c873f95a717ff7721e0d4db2c800fa6464144caedf5fb4b408468618",
+    "configs/closed_loop_boundary/bimanual_lift_tray.json": "cafa9a9d4a9c7479de087e0474e83ac333c09b3cc10ff251c394e15978c20d96",
     "integrations/rlbench/models/v4/bimanual_lift_tray/left.npz": "44d70d35dd83bbd2407950b2eb95ac50fdc0f80e902622168651a4bf66ce458b",
     "integrations/rlbench/models/v4/bimanual_lift_tray/right.npz": "a2b4d9eddff92a353af1c257daa15cee3cfb85a25a407bdfdaee8365596f0d6c",
     "integrations/rlbench/data/training/main/bimanual_lift_tray/all_variations/episodes/episode0/low_dim_obs.pkl": "0a9efaa7b27aec5993c6826c9dc490b5a22ffa582f664a208854f7b7bbda85a8",
@@ -219,22 +219,22 @@
         "minimum_information_weight": 0.1,
         "calibrations": {
           "left:0->1": {
-            "local_score_threshold": 0.19405456777793406,
+            "local_score_threshold": 0.0002377604566535041,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           },
           "left:1->2": {
-            "local_score_threshold": 0.0015982529616273364,
+            "local_score_threshold": 0.001462342441443258,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           },
           "right:0->1": {
-            "local_score_threshold": 0.011400442960374046,
+            "local_score_threshold": 0.00035625731462852475,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           },
           "right:1->2": {
-            "local_score_threshold": 0.0011722447598466268,
+            "local_score_threshold": 0.0009539125026958109,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           }
@@ -246,6 +246,8 @@
           "probe_speed": 0.02,
           "maximum_probe_seconds": 1.0,
           "minimum_probe_motion": 0.002,
+          "minimum_response_samples": 3,
+          "maximum_response_residual_ratio": 0.85,
           "minimum_information_weight": 0.1,
           "minimum_tracking_reliability": 0.25,
           "minimum_approach_displacement": 0.0001,
@@ -263,13 +265,19 @@
           "maximum_attempts_per_goal": 2,
           "maximum_total_cycles": 400,
           "maximum_reentry_cycles": 40,
+          "minimum_relation_confirmation_cycles": 2,
           "minimum_information_weight": 0.1,
           "unlink_open_cycles": 2,
           "open_gripper_command": 1.0,
           "unlink_fallback_distance": 0.05,
           "action_position_variance": 0.0002,
           "action_rotation_variance": 0.0005,
-          "boundary_relation_mismatch_cycles": 3
+          "boundary_relation_mismatch_cycles": 3,
+          "link_frame_stability_confirmation_cycles": 3,
+          "link_frame_stability_translation_tolerance": 0.001,
+          "link_frame_stability_rotation_tolerance": 0.017453292519943295,
+          "link_frame_restart_translation": 0.01,
+          "link_frame_restart_rotation": 0.17453292519943295
         },
         "reentry": {
           "minimum_explanation_score": 0.001,
@@ -279,6 +287,12 @@
           "require_relation_evidence_when_available": true
         }
       }
+    },
+    "feature_profile": {
+      "name": "full",
+      "dynamic_frame_roles": true,
+      "relation_scene_boundary_guards": true,
+      "auxiliary_verification_recovery": true
     },
     "initialized": false,
     "pending": false,

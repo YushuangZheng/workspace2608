@@ -38,11 +38,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", choices=ALL_TASKS, required=True)
     parser.add_argument(
+        "--policy-type",
+        choices=("dynamac", "closed_loop_multistream"),
+        default="closed_loop_multistream",
+        help=(
+            "Policy under diagnostic comparison; auto controller selection "
+            "preserves the frozen V4 executor for dynamac and uses the stage-six "
+            "executor for closed_loop_multistream."
+        ),
+    )
+    parser.add_argument(
         "--episode-index",
         action="append",
         type=int,
         required=True,
-        help="Sealed episode index; repeat to run more than one episode.",
+        help=(
+            "Sealed episode index; repeat in consecutive ascending order to "
+            "run a batch."
+        ),
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--diagnostics-dir", type=Path, required=True)
@@ -53,6 +66,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("integrations/rlbench/models/closed_loop_v1"),
     )
     parser.add_argument("--horizon", type=int, default=1000)
+    parser.add_argument(
+        "--post-success-policy-steps",
+        type=int,
+        default=0,
+        help=(
+            "Diagnostic-only extra policy cycles after RLBench first reports "
+            "success; this never changes the latched benchmark outcome."
+        ),
+    )
     return parser
 
 
@@ -64,6 +86,12 @@ def _normalized_episode_indices(values: Iterable[int]) -> tuple[int, ...]:
         raise ValueError("episode indices must be unique")
     if any(not 0 <= index < FIXED_EVAL_EPISODES for index in indices):
         raise ValueError("episode index lies outside the sealed 200-episode set")
+    expected = tuple(range(indices[0], indices[0] + len(indices)))
+    if indices != expected:
+        raise ValueError(
+            "multiple episode indices must be consecutive and ascending because "
+            "the RLBench evaluator advances the formal episode seed by one"
+        )
     return indices
 
 
@@ -90,6 +118,17 @@ def _task_protocol_args(task: str) -> list[str]:
     ]
 
 
+def _episode_protocol_args(
+    evaluator: ModuleType,
+    episode_indices: tuple[int, ...],
+) -> list[str]:
+    """Keep a direct-evaluation subset on its sealed variation schedule."""
+
+    if evaluator is direct_evaluate:
+        return ["--episode-variation-offset", str(episode_indices[0])]
+    return []
+
+
 def _diagnostic_loader(evaluator: ModuleType, episode_indices: tuple[int, ...]):
     original = evaluator._load_fixed_motion_plans
 
@@ -111,6 +150,27 @@ def _diagnostic_loader(evaluator: ModuleType, episode_indices: tuple[int, ...]):
         return manifest, subset
 
     return load
+
+
+def _install_post_success_continuation(
+    evaluator: ModuleType,
+    requested_steps: int,
+) -> None:
+    if requested_steps == 0:
+        return
+    if requested_steps < 0:
+        raise ValueError("post-success policy steps must be non-negative")
+    if evaluator is not direct_evaluate:
+        raise ValueError(
+            "post-success policy continuation currently supports bimanual direct tasks"
+        )
+    original = evaluator._run_episode
+
+    def run(*args: Any, **kwargs: Any):
+        kwargs["post_success_policy_steps"] = requested_steps
+        return original(*args, **kwargs)
+
+    evaluator._run_episode = run
 
 
 def _mark_diagnostic(
@@ -152,6 +212,14 @@ def main() -> int:
     if args.horizon < 1:
         raise ValueError("horizon must be positive")
     evaluator = _evaluator_for_task(args.task)
+    if args.policy_type != "closed_loop_multistream" and args.post_success_policy_steps:
+        raise ValueError(
+            "post-success continuation is only defined for closed-loop policy"
+        )
+    _install_post_success_continuation(
+        evaluator,
+        int(args.post_success_policy_steps),
+    )
     evaluator._load_fixed_motion_plans = _diagnostic_loader(
         evaluator,
         episode_indices,
@@ -162,7 +230,7 @@ def main() -> int:
         "--models-dir",
         "integrations/rlbench/models/v4",
         "--policy-type",
-        "closed_loop_multistream",
+        args.policy_type,
         "--closed-loop-models-dir",
         str(args.closed_loop_models_dir),
         "--policy-diagnostics-dir",
@@ -188,6 +256,7 @@ def main() -> int:
         str(args.output),
     ]
     evaluator_args.extend(_task_protocol_args(args.task))
+    evaluator_args.extend(_episode_protocol_args(evaluator, episode_indices))
     result = evaluator.main(evaluator_args)
     if result == 0:
         _mark_diagnostic(

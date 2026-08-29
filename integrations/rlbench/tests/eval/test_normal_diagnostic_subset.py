@@ -51,6 +51,51 @@ def test_store_bottle_diagnostic_uses_frozen_v4_budgets():
     assert diagnostic._task_protocol_args("bimanual_sweep_to_dustpan") == []
 
 
+def test_diagnostic_parser_defaults_to_closed_loop_and_supports_frozen_baseline():
+    parser = diagnostic.build_parser()
+    common = [
+        "--task",
+        "wipe_desk",
+        "--episode-index",
+        "1",
+        "--output",
+        "result.json",
+        "--diagnostics-dir",
+        "diagnostics",
+        "--policy-python",
+        "/usr/bin/python",
+    ]
+
+    assert parser.parse_args(common).policy_type == "closed_loop_multistream"
+    assert parser.parse_args(common + ["--policy-type", "dynamac"]).policy_type == (
+        "dynamac"
+    )
+
+
+def test_bimanual_subset_preserves_the_sealed_variation_offset():
+    assert diagnostic._episode_protocol_args(direct_evaluate, (7, 8)) == [
+        "--episode-variation-offset",
+        "7",
+    ]
+    assert diagnostic._episode_protocol_args(unimanual_evaluate, (7, 8)) == []
+
+
+def test_post_success_continuation_is_diagnostic_only_for_direct_tasks(monkeypatch):
+    seen = {}
+
+    def fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        return {"success": True}
+
+    monkeypatch.setattr(direct_evaluate, "_run_episode", fake_run)
+    diagnostic._install_post_success_continuation(direct_evaluate, 7)
+
+    assert direct_evaluate._run_episode()["success"] is True
+    assert seen["post_success_policy_steps"] == 7
+    with pytest.raises(ValueError, match="bimanual direct"):
+        diagnostic._install_post_success_continuation(unimanual_evaluate, 7)
+
+
 def test_diagnostic_loader_slices_multiple_existing_sealed_plans(monkeypatch):
     seen = {}
     plans = [{"episode_index": index} for index in range(FIXED_EVAL_EPISODES)]
@@ -90,6 +135,11 @@ def test_episode_indices_reject_duplicates_and_out_of_range():
         diagnostic._normalized_episode_indices((1, 1))
     with pytest.raises(ValueError, match="outside"):
         diagnostic._normalized_episode_indices((FIXED_EVAL_EPISODES,))
+    with pytest.raises(ValueError, match="consecutive and ascending"):
+        diagnostic._normalized_episode_indices((0, 2))
+    with pytest.raises(ValueError, match="consecutive and ascending"):
+        diagnostic._normalized_episode_indices((2, 1))
+    assert diagnostic._normalized_episode_indices((2, 3, 4)) == (2, 3, 4)
 
 
 @pytest.mark.parametrize("protocol_key", ["scenario_protocol", "protocol"])

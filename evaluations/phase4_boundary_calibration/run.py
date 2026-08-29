@@ -41,7 +41,7 @@ from evaluations.phase23_component_ab.run import (
     _runtime_observation,
 )
 
-SCHEMA = "essay2608-phase4-boundary-calibration-config-v1"
+SCHEMA = "essay2608-phase4-boundary-calibration-config-v2"
 
 
 def _read_config(path: Path) -> dict[str, Any]:
@@ -53,7 +53,6 @@ def _read_config(path: Path) -> dict[str, Any]:
         "demonstration_indices",
         "control_period_seconds",
         "control_period_source",
-        "minimum_confirmation_seconds",
         "terminal_hold_seconds",
         "terminal_settling_seconds",
         "positive_floor_fraction",
@@ -69,11 +68,10 @@ def _read_config(path: Path) -> dict[str, Any]:
     if not value["tasks"] or not value["demonstration_indices"]:
         raise ValueError("阶段四标定任务和示范索引不能为空")
     period = float(value["control_period_seconds"])
-    confirmation = float(value["minimum_confirmation_seconds"])
     hold = float(value["terminal_hold_seconds"])
     settling = float(value["terminal_settling_seconds"])
-    if period <= 0.0 or confirmation < period or hold < confirmation:
-        raise ValueError("控制周期、最短确认时间或末端保持时间无效")
+    if period <= 0.0 or hold < period:
+        raise ValueError("控制周期或末端保持时间无效")
     if settling < 0.0 or settling >= hold:
         raise ValueError("末端稳定等待时间必须位于 [0, terminal_hold_seconds)")
     if not 0.0 < float(value["positive_floor_fraction"]) < 1.0:
@@ -492,7 +490,6 @@ def _calibrate(
     for row in rows:
         grouped[(str(row["task"]), str(row["arm"]), str(row["boundary"]))].append(row)
     period = float(config["control_period_seconds"])
-    minimum_cycles = math.ceil(float(config["minimum_confirmation_seconds"]) / period)
     settling_cycles = math.ceil(float(config["terminal_settling_seconds"]) / period)
     fraction = float(config["positive_floor_fraction"])
     demonstration_indices = tuple(int(v) for v in config["demonstration_indices"])
@@ -586,7 +583,12 @@ def _calibrate(
                     }
                 )
             maximum_false_run = max(false_runs)
-            confirmation_cycles = max(minimum_cycles, maximum_false_run + 1)
+            # H is a per-boundary discriminator, not a global wall-clock
+            # delay.  One cycle more than the longest normal pre-terminal
+            # ready pulse is the smallest value that rejects every observed
+            # false pulse.  The terminal-hold check below independently
+            # verifies that normal completion can sustain this H.
+            confirmation_cycles = maximum_false_run + 1
             minimum_hold_run = min(hold_runs)
             status = (
                 "calibrated"

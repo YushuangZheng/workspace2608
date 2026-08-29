@@ -11,7 +11,10 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from essay2608.policy import DynaMAC
-from essay2608.policy.closed_loop import ClosedLoopMultiStreamPolicy
+from essay2608.policy.closed_loop import (
+    ClosedLoopFeatureProfile,
+    ClosedLoopMultiStreamPolicy,
+)
 from integrations.rlbench.rlbench_closed_loop.observation_adapter import (
     ClosedLoopObservationAdapter,
     commands_to_rlbench,
@@ -42,6 +45,7 @@ class ClosedLoopPolicyServer:
         base_models_dir: Path,
         *,
         diagnostics_dir: Path | None = None,
+        feature_profile: str = "full",
     ) -> None:
         baseline = BaselinePolicyServer(task, base_models_dir)
         self.task = task
@@ -57,6 +61,7 @@ class ClosedLoopPolicyServer:
         self.policy = ClosedLoopMultiStreamPolicy.load(
             models_dir / task,
             base_policies=base_policies,
+            feature_profile=feature_profile,
         )
         self.adapter = ClosedLoopObservationAdapter(self.task_spec)
         self.arms = self.policy.arms
@@ -64,6 +69,7 @@ class ClosedLoopPolicyServer:
             **baseline.model_identity,
             "policy_type": self.policy.name,
             "closed_loop_bundle": self.policy.summary(),
+            "closed_loop_feature_profile": self.policy.feature_profile.to_dict(),
         }
         self.diagnostics_dir = diagnostics_dir
         self._episode_index = -1
@@ -155,23 +161,48 @@ class ClosedLoopPolicyServer:
             raise RuntimeError("闭环动作事务编号不匹配")
         if not commit:
             self.policy.abort()
+            action_status = "aborted"
         else:
-            succeeded = request.get("primary_action_succeeded", True)
-            if not isinstance(succeeded, bool):
-                raise TypeError("primary_action_succeeded 必须为布尔值")
-            self.policy.commit(action_executed=succeeded)
+            explicit_status = request.get("primary_action_status")
+            legacy_succeeded = request.get("primary_action_succeeded")
+            if explicit_status is not None and legacy_succeeded is not None:
+                raise ValueError(
+                    "primary_action_status 与 primary_action_succeeded 不能同时提供"
+                )
+            if explicit_status is None:
+                succeeded = True if legacy_succeeded is None else legacy_succeeded
+                if not isinstance(succeeded, bool):
+                    raise TypeError("primary_action_succeeded 必须为布尔值")
+                action_status = "reached" if succeeded else "failed"
+            else:
+                if not isinstance(explicit_status, str):
+                    raise TypeError("primary_action_status 必须为字符串")
+                action_status = explicit_status
+                if action_status not in {"reached", "progressed", "stopped"}:
+                    raise ValueError("primary_action_status 取值不受支持")
+            action_completed = action_status == "reached"
+            command_issued = action_status != "failed"
+            self.policy.commit(action_executed=action_completed)
             self._previous_ee = self._pending["pre_action_ee"]
             self._previous_command = (
                 self._pending["commands"]
-                if succeeded
+                if command_issued
                 else {
                     arm: self._pending["pre_action_ee"][arm].copy() for arm in self.arms
                 }
             )
             self._previous_command_covariance = (
                 self._pending["command_covariances"]
-                if succeeded
+                if command_issued
                 else {arm: None for arm in self.arms}
+            )
+            self.policy.diagnostics.annotate_last(
+                "rlbench_action_resolution",
+                {
+                    "status": action_status,
+                    "command_issued": command_issued,
+                    "absolute_target_completed": action_completed,
+                },
             )
             self._tick += 1
         self._pending = None
@@ -180,6 +211,7 @@ class ClosedLoopPolicyServer:
             "transaction_id": transaction_id,
             "committed": commit,
             "aborted": not commit,
+            "primary_action_status": action_status,
             "complete": self.policy.complete,
         }
 
@@ -223,12 +255,14 @@ def serve(
     base_models_dir: Path,
     *,
     diagnostics_dir: Path | None = None,
+    feature_profile: str = "full",
 ) -> int:
     server = ClosedLoopPolicyServer(
         task,
         models_dir,
         base_models_dir,
         diagnostics_dir=diagnostics_dir,
+        feature_profile=feature_profile,
     )
     for line in sys.stdin:
         if not line.strip():
@@ -251,6 +285,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--models-dir", type=Path, required=True)
     parser.add_argument("--base-models-dir", type=Path, required=True)
     parser.add_argument("--diagnostics-dir", type=Path)
+    parser.add_argument(
+        "--feature-profile",
+        choices=ClosedLoopFeatureProfile.names(),
+        default="full",
+    )
     return parser
 
 
@@ -261,6 +300,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.models_dir,
         args.base_models_dir,
         diagnostics_dir=args.diagnostics_dir,
+        feature_profile=args.feature_profile,
     )
 
 

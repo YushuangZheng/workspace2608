@@ -37,14 +37,21 @@ from integrations.rlbench.rlbench_dynamac.core.gripper_timing import (
     global_gripper_timing_metadata,
     native_gripper_to_wire,
 )
-from integrations.rlbench.rlbench_dynamac.core.records import atomic_json, reserve_output
+from integrations.rlbench.rlbench_dynamac.core.records import (
+    atomic_json,
+    reserve_output,
+)
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     bimanual_action_to_rlbench,
     bimanual_observations_from_rlbench,
     unimanual_action_to_rlbench,
     unimanual_observation_from_rlbench,
 )
-from integrations.rlbench.rlbench_dynamac.core.task_specs import TaskSpec, get_task_spec, load_task_specs
+from integrations.rlbench.rlbench_dynamac.core.task_specs import (
+    TaskSpec,
+    get_task_spec,
+    load_task_specs,
+)
 from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
     bimanual_checkpoint_trigger_audit,
     build_v3_trigger_anchor_evidence,
@@ -52,12 +59,8 @@ from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
 )
 
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
-DEFAULT_DATA_ROOT = (
-    INTEGRATION_ROOT
-    / "data"
-    / "training"
-    / "main"
-)
+
+DEFAULT_DATA_ROOT = INTEGRATION_ROOT / "data" / "training" / "main"
 # The current models and training manifest authenticate this immutable
 # configuration by its release path and SHA-256.
 DEFAULT_CONFIG = INTEGRATION_ROOT / "configs" / "dynamac_rlbench_v3.json"
@@ -183,7 +186,9 @@ def _resolve_manifest_task_spec(
     if policy_identity != expected_identity:
         raise RuntimeError("V4 StoreBottle policy spec identity mismatch")
     if task_spec is not None and task_spec != current:
-        raise RuntimeError("injected V4 task spec differs from its authenticated manifest")
+        raise RuntimeError(
+            "injected V4 task spec differs from its authenticated manifest"
+        )
     return current
 
 
@@ -210,7 +215,9 @@ def train_task(
 ) -> dict[str, Any]:
     """Fit, validate, and atomically publish one complete task model."""
 
-    from integrations.rlbench.rlbench_dynamac.eval.evaluation_split import validate_training_entry_paths
+    from integrations.rlbench.rlbench_dynamac.eval.evaluation_split import (
+        validate_training_entry_paths,
+    )
 
     validate_training_entry_paths(data_root, models_dir, config_path)
     if task_data_dir is not None:
@@ -390,9 +397,13 @@ def _validate_published_model(
             raise RuntimeError("staged V4 manifest is missing its training identity")
         gauge_identity = v4_quaternion_batch_gauge_identity()
         if summary.get("quaternion_batch_gauge") != gauge_identity:
-            raise RuntimeError("staged V4 manifest has the wrong quaternion batch gauge")
+            raise RuntimeError(
+                "staged V4 manifest has the wrong quaternion batch gauge"
+            )
         if identity.get("quaternion_batch_gauge") != gauge_identity:
-            raise RuntimeError("staged V4 training identity has the wrong quaternion batch gauge")
+            raise RuntimeError(
+                "staged V4 training identity has the wrong quaternion batch gauge"
+            )
         _resolve_manifest_task_spec(task, summary, None)
         if expected_training_identity is not None and identity != dict(
             expected_training_identity
@@ -405,7 +416,9 @@ def _validate_published_model(
         try:
             base_config = DynaMACConfig(**base_record)
         except (TypeError, ValueError) as exc:
-            raise RuntimeError("staged bimanual manifest has an invalid base config") from exc
+            raise RuntimeError(
+                "staged bimanual manifest has an invalid base config"
+            ) from exc
         if base_record != asdict(base_config):
             raise RuntimeError("staged bimanual manifest base config is not canonical")
         expected = BimanualDynaMAC(config=base_config)
@@ -433,8 +446,12 @@ def _validate_published_model(
         )
         left_identity = left.summary()
         right_identity = right.summary()
-        if any(left_identity[field] != right_identity[field] for field in identity_fields):
-            raise RuntimeError("staged bimanual checkpoints have mismatched model identity")
+        if any(
+            left_identity[field] != right_identity[field] for field in identity_fields
+        ):
+            raise RuntimeError(
+                "staged bimanual checkpoints have mismatched model identity"
+            )
         if manifest_schema == TRAINING_MANIFEST_SCHEMA_V3:
             _validate_v3_trigger_protocol(
                 task,
@@ -461,7 +478,9 @@ class _WireObservation:
     """Attribute-compatible low-dimensional observation from one JSON request."""
 
     def __init__(self, payload: dict[str, Any]) -> None:
-        self.task_low_dim_state = np.asarray(payload["task_low_dim_state"], dtype=np.float64)
+        self.task_low_dim_state = np.asarray(
+            payload["task_low_dim_state"], dtype=np.float64
+        )
         if "gripper_pose" in payload:
             self.gripper_pose = np.asarray(payload["gripper_pose"], dtype=np.float64)
         else:
@@ -492,17 +511,20 @@ class PolicyServer:
         manifest_path = task_dir / "training.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(manifest, dict):
-            raise ValueError(f"training manifest must be a JSON object: {manifest_path}")
+            raise ValueError(
+                f"training manifest must be a JSON object: {manifest_path}"
+            )
         if manifest.get("task") not in {None, task}:
-            raise ValueError("training manifest task does not match the requested policy")
+            raise ValueError(
+                "training manifest task does not match the requested policy"
+            )
         spec = _resolve_manifest_task_spec(task, manifest, task_spec)
         self.task_spec = spec
         self.bimanual = spec.bimanual
         if manifest.get("bimanual") not in {None, self.bimanual}:
             raise ValueError("training manifest arm count does not match the task")
         manifest_authenticated = (
-            manifest.get("manifest_schema")
-            in AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS
+            manifest.get("manifest_schema") in AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS
         )
         if manifest_authenticated:
             _validate_published_model(
@@ -536,7 +558,9 @@ class PolicyServer:
                 "right_fingerprint": self.policy.right.fingerprint(),
                 "training_manifest_schema": manifest.get("manifest_schema"),
                 "manifest_authenticated": manifest_authenticated,
-                "training_config": manifest.get("config") if manifest_authenticated else None,
+                "training_config": (
+                    manifest.get("config") if manifest_authenticated else None
+                ),
                 "training_adapter_protocol": (
                     _adapter_protocol_identity(manifest)
                     if manifest_authenticated
@@ -567,7 +591,9 @@ class PolicyServer:
                 "fingerprint": self.policy.fingerprint(),
                 "training_manifest_schema": manifest.get("manifest_schema"),
                 "manifest_authenticated": manifest_authenticated,
-                "training_config": manifest.get("config") if manifest_authenticated else None,
+                "training_config": (
+                    manifest.get("config") if manifest_authenticated else None
+                ),
                 "training_adapter_protocol": (
                     _adapter_protocol_identity(manifest)
                     if manifest_authenticated
@@ -614,7 +640,9 @@ class PolicyServer:
         self.policy._last_left_action = deepcopy(state["last_left_action"])
         self.policy._last_right_action = deepcopy(state["last_right_action"])
 
-    def _resolve_transaction(self, request: dict[str, Any], *, commit: bool) -> dict[str, Any]:
+    def _resolve_transaction(
+        self, request: dict[str, Any], *, commit: bool
+    ) -> dict[str, Any]:
         pending = self._pending_transaction
         if pending is None:
             raise RuntimeError("no policy action is awaiting commit or abort")
@@ -622,8 +650,21 @@ class PolicyServer:
         if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
             raise RuntimeError("policy transaction id must be an integer")
         if transaction_id != pending["transaction_id"]:
-            raise RuntimeError("policy transaction id does not match the pending action")
-        if not commit:
+            raise RuntimeError(
+                "policy transaction id does not match the pending action"
+            )
+        explicit_status = request.get("primary_action_status")
+        if explicit_status is not None:
+            if not isinstance(explicit_status, str):
+                raise TypeError("primary_action_status must be a string")
+            if explicit_status not in {"reached", "progressed", "stopped"}:
+                raise ValueError("unsupported primary_action_status")
+        target_completed = explicit_status in {None, "reached"}
+        if not commit or not target_completed:
+            # Stage 6 may commit a bounded physical prefix without completing
+            # the absolute policy waypoint.  Restore the frozen DynaMAC clock
+            # so the next observation retries the same state; only a reached
+            # target consumes the baseline's fixed-clock action.
             self._restore_runtime(pending["runtime"])
         self._pending_transaction = None
         return {
@@ -631,6 +672,11 @@ class PolicyServer:
             "transaction_id": transaction_id,
             "committed": bool(commit),
             "aborted": bool(not commit),
+            "primary_action_status": (
+                "aborted"
+                if not commit
+                else ("reached" if explicit_status is None else explicit_status)
+            ),
             "complete": self.policy.complete,
         }
 
@@ -647,8 +693,7 @@ class PolicyServer:
             for index, item in by_index.items()
         }
         boundaries = {
-            index: bool(item.crosses_skill_boundary)
-            for index, item in by_index.items()
+            index: bool(item.crosses_skill_boundary) for index, item in by_index.items()
         }
         emitted = apply_global_gripper_timing(
             original,
@@ -696,7 +741,9 @@ class PolicyServer:
         if command == "abort":
             return self._resolve_transaction(request, commit=False)
         if command not in {"reset", "act"}:
-            raise ValueError("command must be ping, reset, act, commit, abort, or close")
+            raise ValueError(
+                "command must be ping, reset, act, commit, abort, or close"
+            )
         observation = _WireObservation(request["observation"])
         if self.bimanual:
             left, right = bimanual_observations_from_rlbench(
@@ -710,7 +757,9 @@ class PolicyServer:
                 self.policy.reset(left, right, mode_strategy="map")
                 return {"ok": True, "complete": self.policy.complete}
             if self._pending_transaction is not None:
-                raise RuntimeError("the previous policy action still awaits commit or abort")
+                raise RuntimeError(
+                    "the previous policy action still awaits commit or abort"
+                )
             if self.policy.complete:
                 return {"ok": True, "complete": True, "action": None}
             runtime = self._capture_runtime()
@@ -732,7 +781,9 @@ class PolicyServer:
                 self.policy.reset(current, mode_strategy="map")
                 return {"ok": True, "complete": self.policy.complete}
             if self._pending_transaction is not None:
-                raise RuntimeError("the previous policy action still awaits commit or abort")
+                raise RuntimeError(
+                    "the previous policy action still awaits commit or abort"
+                )
             if self.policy.complete:
                 return {"ok": True, "complete": True, "action": None}
             runtime = self._capture_runtime()
@@ -838,7 +889,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         else:
             detail = f"durations={summary['durations']}"
-        print(f"{task}: trained {len(summary['demonstrations'])} demonstrations; {detail}")
+        print(
+            f"{task}: trained {len(summary['demonstrations'])} demonstrations; {detail}"
+        )
     return 0
 
 

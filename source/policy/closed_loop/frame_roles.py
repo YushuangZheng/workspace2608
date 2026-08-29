@@ -116,6 +116,7 @@ class FrameRoleSnapshot:
     recovery_intents: tuple[RelationRecoveryIntent, ...] = ()
     verification_requests: tuple[RelationVerificationRequest, ...] = ()
     confirmed_link_events: tuple[RelationEventId, ...] = ()
+    rejected_link_events: tuple[RelationEventId, ...] = ()
 
     @property
     def execution_weights(self) -> dict[str, float]:
@@ -167,10 +168,15 @@ class FrameRoleRouter:
         # occurrence has actually been confirmed by the online filter so a
         # later drop can never reuse the short post-LINK confirmation window.
         self._confirmed_link_events: set[RelationEventId] = set()
+        # Once informative relative motion contradicts a formal LINK
+        # occurrence, later low-excitation cycles must not repeatedly restore
+        # that occurrence's confirmation grace.
+        self._rejected_link_events: set[RelationEventId] = set()
 
     def reset(self) -> None:
         self._last_trusted_weights.clear()
         self._confirmed_link_events.clear()
+        self._rejected_link_events.clear()
 
     def commit(
         self,
@@ -180,6 +186,7 @@ class FrameRoleRouter:
         """Commit only stable role weights after the controller validates a cycle."""
 
         self._confirmed_link_events.update(snapshot.confirmed_link_events)
+        self._rejected_link_events.update(snapshot.rejected_link_events)
 
         # Relation filtering observes every modeled physical frame even when
         # that frame is not selected by the current skill.  Cache its latest
@@ -342,6 +349,8 @@ class FrameRoleRouter:
         ):
             if event_id in self._confirmed_link_events:
                 continue
+            if event_id in self._rejected_link_events:
+                continue
             anchor = self.task_model.link_anchors[event_id]
             if state_id in anchor.linked_entry_states:
                 events.append(event_id)
@@ -389,6 +398,39 @@ class FrameRoleRouter:
             estimate.informative and likelihood[0] >= likelihood[1]
         )
         return () if informative_external_evidence else events
+
+    def _planned_unlink_is_direct_successor(
+        self,
+        frame: str,
+        state_id: StateId,
+        mode_by_skill: Mapping[int, int] | None,
+    ) -> bool:
+        """Return whether the next normal command causes a learned UNLINK.
+
+        Relation uncertainty must not block the gripper-opening command that
+        is itself required to make a demonstrated detachment observable.  The
+        exception is deliberately narrow: a cross-demonstration confirmed
+        UNLINK must be the direct successor in every active trajectory mode.
+        It cannot skip progress or admit an arbitrary future release.
+        """
+
+        successors = set(self.task_model.state(state_id).topology.successors)
+        mode = self._mode_for_state(state_id, mode_by_skill)
+        modes = (
+            range(len(self.task_model.state(state_id).mode_priors))
+            if mode is None
+            else (mode,)
+        )
+        for candidate_mode in modes:
+            if not any(
+                event_id.arm_id == self.task_model.arm_id
+                and event_id.frame_id == frame
+                and event_id.mode == candidate_mode
+                and metadata.release_state in successors
+                for event_id, metadata in self.task_model.unlink_events.items()
+            ):
+                return False
+        return True
 
     def _pending_relation_needed(
         self,
@@ -505,6 +547,7 @@ class FrameRoleRouter:
         decisions: dict[str, FrameRoleDecision] = {}
         recovery_intents = []
         confirmed_link_events: set[RelationEventId] = set()
+        rejected_link_events: set[RelationEventId] = set()
         features = belief.runtime_features
 
         for frame in (*selected_frames, *confirmed_monitors):
@@ -560,12 +603,26 @@ class FrameRoleRouter:
             )
             if actual == RelationDecision.LINKED:
                 confirmed_link_events.update(current_link_events)
+            if (
+                expected == RelationDecision.LINKED
+                and actual == RelationDecision.EXTERNAL
+                and estimate is not None
+                and estimate.informative
+                and estimate.observation_likelihood[0]
+                >= estimate.observation_likelihood[1]
+            ):
+                rejected_link_events.update(current_link_events)
             confirmation_events = self._formal_link_confirmation_pending(
                 frame,
                 state_id,
                 estimate,
                 belief,
                 expected,
+                mode_by_skill,
+            )
+            planned_unlink = self._planned_unlink_is_direct_successor(
+                frame,
+                state_id,
                 mode_by_skill,
             )
             if (
@@ -596,6 +653,21 @@ class FrameRoleRouter:
                 monitor = True
                 blocks = False
                 intent = None
+            elif (
+                planned_unlink
+                and expected == RelationDecision.LINKED
+                and actual in {RelationDecision.UNKNOWN, RelationDecision.EXTERNAL}
+            ):
+                # The current relation may already be ambiguous or detached
+                # after a coordinated transfer.  Do not request a spurious
+                # LINK repair and thereby suppress the learned opening action.
+                # The direct successor remains the ordinary task state; this
+                # branch only removes the causal deadlock at its predecessor.
+                role = FrameRole.DEFER
+                weight = 0.0
+                monitor = False
+                blocks = False
+                intent = None
             elif actual == RelationDecision.UNKNOWN:
                 role = FrameRole.DEFER
                 safe_weight = (
@@ -610,18 +682,23 @@ class FrameRoleRouter:
                 monitor = False
                 # At startup there may be no previously confirmed relation.
                 # If both the demonstrated expectation and the binary
-                # posterior strongly support a visible/reliable external
-                # relation, a conservatively weighted action is needed to
-                # create the motion evidence that can resolve Unknown.  This
-                # is not a relation decision.  Once a trusted relation exists,
-                # any later Unknown is blocking because persistence already
-                # failed its continuity checks.
+                # posterior point in the external direction for a
+                # visible/reliable relation, a conservatively weighted action
+                # is needed to create the motion evidence that can resolve
+                # Unknown.  Do not require the normal stable-decision
+                # probability here: one persistence transition turns a soft
+                # [0.7, 0.3] demonstration prior into [0.692, 0.308], making a
+                # 0.7 bootstrap gate unreachable without the very motion it
+                # blocks.  This remains an Unknown decision, not external.
+                # Once a trusted relation exists, any later Unknown is
+                # blocking because persistence already failed its continuity
+                # checks.
                 safe_external_bootstrap = bool(
                     selected_offline
                     and not trusted
                     and expected == RelationDecision.EXTERNAL
                     and estimate is not None
-                    and estimate.external >= self.config.expected_relation_probability
+                    and estimate.external > estimate.linked
                     and reliability >= self.config.minimum_tracking_reliability
                     and weight > 0.0
                 )
@@ -698,7 +775,72 @@ class FrameRoleRouter:
             recovery_intents=tuple(recovery_intents),
             verification_requests=requests,
             confirmed_link_events=tuple(sorted(confirmed_link_events)),
+            rejected_link_events=tuple(sorted(rejected_link_events)),
         )
+        if commit:
+            self.commit(snapshot, belief)
+        return snapshot
+
+    def route_fixed(
+        self,
+        state_id: StateId,
+        belief: ClosedLoopBelief,
+        *,
+        mode_by_skill: Mapping[int, int] | None = None,
+        captured_virtual_frames: frozenset[str] = frozenset(),
+        commit: bool = True,
+    ) -> FrameRoleSnapshot:
+        """Use the frozen offline stream mask for the progress-only ablation.
+
+        Relation posteriors remain available to the phase-two progress model
+        and diagnostics, but they cannot change stream participation, block a
+        cursor commit, or create verification/recovery intents here.
+        """
+
+        if state_id not in self.task_model.states:
+            raise KeyError(f"流角色引用未知状态 {state_id}")
+        selected_frames = self._selected_frames(state_id, mode_by_skill)
+        decisions = {}
+        for frame in selected_frames:
+            virtual = frame.startswith("virtual_skill_")
+            distribution = (
+                None
+                if virtual
+                else self._expected_distribution(
+                    frame, belief.progress.posterior, mode_by_skill
+                )
+            )
+            estimate = belief.relation_estimates.get(frame)
+            actual = None if estimate is None else estimate.decision_state
+            expected = (
+                None if distribution is None else self._expected_decision(distribution)
+            )
+            compatibility = (
+                1.0
+                if distribution is None
+                else (
+                    0.5
+                    if estimate is None
+                    else float(np.dot(estimate.posterior, distribution))
+                )
+            )
+            # A virtual frame captured by a boundary transaction is always an
+            # internally available execution reference.  Ordinary selected
+            # frames preserve the original fixed DynaMAC participation mask.
+            weight = 1.0
+            decisions[frame] = FrameRoleDecision(
+                frame_id=frame,
+                role=FrameRole.EXECUTE,
+                selected_offline=True,
+                expected_distribution=distribution,
+                expected_relation=expected,
+                actual_relation=actual,
+                relation_compatibility=compatibility,
+                execution_weight=weight,
+                monitor=False,
+                blocks_advance=False,
+            )
+        snapshot = FrameRoleSnapshot(state_id=state_id, decisions=decisions)
         if commit:
             self.commit(snapshot, belief)
         return snapshot

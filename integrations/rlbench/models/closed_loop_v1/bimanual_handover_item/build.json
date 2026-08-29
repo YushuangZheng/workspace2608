@@ -10,13 +10,13 @@
     "episode4"
   ],
   "base_model_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/v4",
-  "closed_loop_output_root": "/tmp/closed_loop_peer_dependency_v1",
+  "closed_loop_output_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/closed_loop_v1_next",
   "files": {
     "configs/closed_loop_task_model.json": "158694feb75e7c2259af7c60092114885d5e9df29be97ebde32d688d3cbde765",
     "configs/closed_loop_belief.json": "59bb5d51e37b17500680e23374febf3574422d5c9d5c2f60eb55461b244bb128",
     "configs/closed_loop_execution.json": "960a3d8b19309dbb53cc9efe89479811b75e65885d3449c4ce5ff84dd55ff881",
-    "configs/closed_loop_recovery.json": "ff9c3d2d37b4be49d62517f45524a9caca03fac7b5d30d95879c13fe5de7713c",
-    "configs/closed_loop_boundary/bimanual_handover_item.json": "e8bd6a64780fcf7c76e5e52e24fa0598f5c484b90732b6f131d5f08d4a369c17",
+    "configs/closed_loop_recovery.json": "3d9c8f56c873f95a717ff7721e0d4db2c800fa6464144caedf5fb4b408468618",
+    "configs/closed_loop_boundary/bimanual_handover_item.json": "b74fd4991ed374c37a22b4719f97a631078365344536451524df1e86dbdf7a88",
     "integrations/rlbench/models/v4/bimanual_handover_item/left.npz": "6db90d9f8c94fc2e183ae04253fd54d69bbfb39b9576425f15c0f4edbc53e892",
     "integrations/rlbench/models/v4/bimanual_handover_item/right.npz": "809a1dd07769bb4c5f7830fbf33011b62473f152061741e5a267d1061ba751bb",
     "integrations/rlbench/data/training/main/bimanual_handover_item/all_variations/episodes/episode0/low_dim_obs.pkl": "599d08f0d507c1d7ffe52ef95d7f70af242335e941797441cd957e22fde3054d",
@@ -51,7 +51,7 @@
         "link_anchor_count": 1,
         "link_pending_count": 0,
         "unlink_event_count": 1,
-        "link_origin_count": 140,
+        "link_origin_count": 132,
         "relation_frames": [
           "item0",
           "item1",
@@ -251,63 +251,63 @@
         "minimum_information_weight": 0.1,
         "calibrations": {
           "left:0->1": {
-            "local_score_threshold": 0.6997901716604288,
+            "local_score_threshold": 9.616500875896948e-08,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           },
           "left:1->2": {
-            "local_score_threshold": 0.007981804575222582,
+            "local_score_threshold": 0.008392581960228261,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           },
           "left:2->3": {
-            "local_score_threshold": 0.0011900809954459605,
+            "local_score_threshold": 0.0014284280631434287,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           },
           "left:3->4": {
-            "local_score_threshold": 0.16927451442837285,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.00757814317060856,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "left:4->5": {
-            "local_score_threshold": 0.041094147483057314,
+            "local_score_threshold": 9.699680468816062e-05,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           },
           "left:5->6": {
-            "local_score_threshold": 0.4588143460761205,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.49754345258545957,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "right:0->1": {
-            "local_score_threshold": 0.002747132514543951,
+            "local_score_threshold": 0.0011594764045207606,
             "confirmation_cycles": 2,
             "relation_thresholds": {}
           },
           "right:1->2": {
-            "local_score_threshold": 0.323253036907337,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.34212370136155135,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "right:2->3": {
-            "local_score_threshold": 0.5761798736859908,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.5761799818392523,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "right:3->4": {
-            "local_score_threshold": 0.5766344920616601,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.5766343387948434,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "right:4->5": {
-            "local_score_threshold": 0.5763581312236673,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.5763581331877624,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "right:5->6": {
-            "local_score_threshold": 0.1698191619798493,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.16994300728015907,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           }
         }
@@ -318,6 +318,8 @@
           "probe_speed": 0.02,
           "maximum_probe_seconds": 1.0,
           "minimum_probe_motion": 0.002,
+          "minimum_response_samples": 3,
+          "maximum_response_residual_ratio": 0.85,
           "minimum_information_weight": 0.1,
           "minimum_tracking_reliability": 0.25,
           "minimum_approach_displacement": 0.0001,
@@ -335,13 +337,19 @@
           "maximum_attempts_per_goal": 2,
           "maximum_total_cycles": 400,
           "maximum_reentry_cycles": 40,
+          "minimum_relation_confirmation_cycles": 2,
           "minimum_information_weight": 0.1,
           "unlink_open_cycles": 2,
           "open_gripper_command": 1.0,
           "unlink_fallback_distance": 0.05,
           "action_position_variance": 0.0002,
           "action_rotation_variance": 0.0005,
-          "boundary_relation_mismatch_cycles": 3
+          "boundary_relation_mismatch_cycles": 3,
+          "link_frame_stability_confirmation_cycles": 3,
+          "link_frame_stability_translation_tolerance": 0.001,
+          "link_frame_stability_rotation_tolerance": 0.017453292519943295,
+          "link_frame_restart_translation": 0.01,
+          "link_frame_restart_rotation": 0.17453292519943295
         },
         "reentry": {
           "minimum_explanation_score": 0.001,
@@ -351,6 +359,12 @@
           "require_relation_evidence_when_available": true
         }
       }
+    },
+    "feature_profile": {
+      "name": "full",
+      "dynamic_frame_roles": true,
+      "relation_scene_boundary_guards": true,
+      "auxiliary_verification_recovery": true
     },
     "initialized": false,
     "pending": false,

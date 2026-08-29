@@ -51,6 +51,7 @@ class ReentryEvaluation:
     decision: ReentryDecision | None
     scores: dict[StateId, CandidateScore]
     rejection_reasons: dict[StateId, tuple[str, ...]]
+    alignment_state: StateId | None = None
 
 
 class ReentrySelector:
@@ -117,6 +118,7 @@ class ReentrySelector:
         )
         rejections: dict[StateId, tuple[str, ...]] = {}
         accepted = []
+        alignment_candidates = []
         relation_observable = any(
             estimate.decision_state != RelationDecision.UNKNOWN
             for estimate in belief.relation_estimates.values()
@@ -162,8 +164,43 @@ class ReentrySelector:
             else:
                 accepted.append((state, score, boundary))
 
+            # A relation repair can finish at a geometrically displaced grasp
+            # pose.  Such a state is not yet legal for reentry, but it can be a
+            # safe recovery-alignment target when every non-robot condition is
+            # already satisfied.  Robot compatibility and the joint score are
+            # deliberately omitted only for choosing the next recovery action;
+            # the ordinary full-state thresholds above remain mandatory before
+            # the task posterior and cursor are reset.
+            non_robot_reasons = tuple(
+                reason
+                for reason in reasons
+                if reason
+                not in {
+                    "robot_incompatible",
+                    "insufficient_joint_explanation",
+                }
+            )
+            if score.robot_evidence_available and not non_robot_reasons:
+                alignment_candidates.append((state, score))
+
         if not accepted:
-            return ReentryEvaluation(None, scores, rejections)
+            alignment_state = (
+                None
+                if not alignment_candidates
+                else max(
+                    alignment_candidates,
+                    key=lambda item: (
+                        item[1].robot_compatibility,
+                        -self._global_index[item[0]],
+                    ),
+                )[0]
+            )
+            return ReentryEvaluation(
+                None,
+                scores,
+                rejections,
+                alignment_state=alignment_state,
+            )
         state, score, boundary = max(
             accepted,
             key=lambda item: (
@@ -175,6 +212,7 @@ class ReentrySelector:
             ReentryDecision(state, score, boundary),
             scores,
             rejections,
+            alignment_state=None,
         )
 
     @staticmethod

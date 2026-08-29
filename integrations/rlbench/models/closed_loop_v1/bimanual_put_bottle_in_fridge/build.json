@@ -10,13 +10,13 @@
     "episode4"
   ],
   "base_model_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/v4",
-  "closed_loop_output_root": "/tmp/closed_loop_peer_dependency_v1",
+  "closed_loop_output_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/closed_loop_v1_next",
   "files": {
     "configs/closed_loop_task_model.json": "158694feb75e7c2259af7c60092114885d5e9df29be97ebde32d688d3cbde765",
     "configs/closed_loop_belief.json": "59bb5d51e37b17500680e23374febf3574422d5c9d5c2f60eb55461b244bb128",
     "configs/closed_loop_execution.json": "960a3d8b19309dbb53cc9efe89479811b75e65885d3449c4ce5ff84dd55ff881",
-    "configs/closed_loop_recovery.json": "ff9c3d2d37b4be49d62517f45524a9caca03fac7b5d30d95879c13fe5de7713c",
-    "configs/closed_loop_boundary/bimanual_put_bottle_in_fridge.json": "72f8a8ff7f1d795ea2c0732c63eb9b6d296eeb4615f978d0987f49b5605bf739",
+    "configs/closed_loop_recovery.json": "3d9c8f56c873f95a717ff7721e0d4db2c800fa6464144caedf5fb4b408468618",
+    "configs/closed_loop_boundary/bimanual_put_bottle_in_fridge.json": "1725ba2decac0fc8ce6eb85519fa4c577accfba9792dd0946fb9af96430c0fc8",
     "integrations/rlbench/models/v4/bimanual_put_bottle_in_fridge/left.npz": "0f5a1934c23f8b4f6d14950d03dcdc0d896d698ea4e62f81d0a1417cb1f49d35",
     "integrations/rlbench/models/v4/bimanual_put_bottle_in_fridge/right.npz": "277e0b62c6b370b46486da161022feffd5379194a58cdcc5bf2b378a276a61e8",
     "integrations/rlbench/data/training/main/bimanual_put_bottle_in_fridge/all_variations/episodes/episode0/low_dim_obs.pkl": "28d2c3098d78683c4227df3f579ac49ecfb0849f77bb9705146b76219bcb8e9f",
@@ -219,23 +219,23 @@
         "minimum_information_weight": 0.1,
         "calibrations": {
           "left:0->1": {
-            "local_score_threshold": 0.4112847699148902,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.34904651008504833,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "left:1->2": {
-            "local_score_threshold": 0.21140177707969074,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.11447811791252577,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "right:0->1": {
-            "local_score_threshold": 0.4955568590463175,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.49115070738753264,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           },
           "right:1->2": {
-            "local_score_threshold": 0.45507858677807655,
-            "confirmation_cycles": 2,
+            "local_score_threshold": 0.41312596988548994,
+            "confirmation_cycles": 1,
             "relation_thresholds": {}
           }
         }
@@ -246,6 +246,8 @@
           "probe_speed": 0.02,
           "maximum_probe_seconds": 1.0,
           "minimum_probe_motion": 0.002,
+          "minimum_response_samples": 3,
+          "maximum_response_residual_ratio": 0.85,
           "minimum_information_weight": 0.1,
           "minimum_tracking_reliability": 0.25,
           "minimum_approach_displacement": 0.0001,
@@ -263,13 +265,19 @@
           "maximum_attempts_per_goal": 2,
           "maximum_total_cycles": 400,
           "maximum_reentry_cycles": 40,
+          "minimum_relation_confirmation_cycles": 2,
           "minimum_information_weight": 0.1,
           "unlink_open_cycles": 2,
           "open_gripper_command": 1.0,
           "unlink_fallback_distance": 0.05,
           "action_position_variance": 0.0002,
           "action_rotation_variance": 0.0005,
-          "boundary_relation_mismatch_cycles": 3
+          "boundary_relation_mismatch_cycles": 3,
+          "link_frame_stability_confirmation_cycles": 3,
+          "link_frame_stability_translation_tolerance": 0.001,
+          "link_frame_stability_rotation_tolerance": 0.017453292519943295,
+          "link_frame_restart_translation": 0.01,
+          "link_frame_restart_rotation": 0.17453292519943295
         },
         "reentry": {
           "minimum_explanation_score": 0.001,
@@ -279,6 +287,12 @@
           "require_relation_evidence_when_available": true
         }
       }
+    },
+    "feature_profile": {
+      "name": "full",
+      "dynamic_frame_roles": true,
+      "relation_scene_boundary_guards": true,
+      "auxiliary_verification_recovery": true
     },
     "initialized": false,
     "pending": false,

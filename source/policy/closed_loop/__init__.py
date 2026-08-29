@@ -27,6 +27,7 @@ from .belief_updater import (
     CandidateExpansionConfig,
     ClosedLoopBelief,
 )
+from .ablation import ClosedLoopFeatureProfile
 from .config import ClosedLoopPolicyConfig
 from .diagnostics import DiagnosticRecorder, json_ready
 from .execution_controller import (
@@ -159,6 +160,7 @@ __all__ = [
     "CandidateScore",
     "ClosedLoopCursor",
     "ClosedLoopExecutionConfig",
+    "ClosedLoopFeatureProfile",
     "ClosedLoopExecutionController",
     "ControlEquivalenceAssessment",
     "ClosedLoopRecoveryConfig",

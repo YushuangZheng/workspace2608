@@ -72,6 +72,56 @@ def joint_peak_normalized_pose_support(
     return compatibility, float(current_log_sum), float(peak_log_sum)
 
 
+def joint_poe_pose_support(
+    entries: list[tuple[str, Array, Array, Array, float]],
+    observed_pose: Array,
+    *,
+    diagonalize: bool,
+) -> tuple[float, float, float]:
+    """Score one world EE pose against the joint PoE target distribution.
+
+    Each entry is ``(frame, frame_pose, local_mean, local_covariance, weight)``.
+    Unlike :func:`joint_peak_normalized_pose_support`, which removes the
+    attainable-peak offset from a sum of per-stream local scores for progress
+    inference, this function first constructs the actual joint world target
+    used by DynaMAC's PoE and then evaluates the observed end effector against
+    that single Gaussian.  This is the phase-four ``L_goal`` quantity.
+    """
+
+    if not entries:
+        return 1.0, 0.0, 0.0
+    marginals = []
+    weights = []
+    for frame, frame_pose, mean, covariance, weight in entries:
+        numeric_weight = float(weight)
+        if not math.isfinite(numeric_weight) or numeric_weight <= 0.0:
+            raise ValueError("联合目标支持权重必须为有限正数")
+        marginals.append(
+            transform_marginal(
+                frame,
+                frame_pose,
+                mean,
+                covariance,
+                diagonalize=diagonalize,
+            )
+        )
+        weights.append(numeric_weight)
+    joint_mean, joint_covariance, _ = product_of_experts(
+        marginals,
+        precision_weights=weights,
+    )
+    normalized_log_support, _, mahalanobis, _ = _gaussian_pose_terms(
+        joint_mean,
+        joint_covariance,
+        observed_pose,
+    )
+    return (
+        float(math.exp(max(-750.0, normalized_log_support))),
+        float(normalized_log_support),
+        float(mahalanobis),
+    )
+
+
 def _logsumexp(values: Array, weights: Array) -> float:
     active = weights > 0.0
     if not np.any(active):
@@ -737,4 +787,5 @@ __all__ = [
     "StateEvaluator",
     "StateEvaluatorConfig",
     "joint_peak_normalized_pose_support",
+    "joint_poe_pose_support",
 ]

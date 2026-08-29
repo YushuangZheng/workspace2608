@@ -39,6 +39,7 @@ class MultiArmBoundaryController:
         config: BoundaryRuntimeConfig,
         *,
         belief_updaters: Mapping[str, BeliefUpdater],
+        relation_scene_guards: bool = True,
     ) -> None:
         if not task_models:
             raise ValueError("阶段四至少需要一只机械臂")
@@ -47,7 +48,13 @@ class MultiArmBoundaryController:
         self.belief_updaters = dict(belief_updaters)
         self.config = config
         self.guards = {
-            arm: EntryGuard(self.task_models, arm, config) for arm in self.task_models
+            arm: EntryGuard(
+                self.task_models,
+                arm,
+                config,
+                relation_scene_guards=relation_scene_guards,
+            )
+            for arm in self.task_models
         }
         self.transactions = TransitionTransactionCoordinator(
             self.task_models,

@@ -12,6 +12,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     STAGE6_IK_CONTROLLER_PROFILE,
     GlobalIKControllerConfig,
     Stage6IKControllerConfig,
+    _prepare_collision_aware_path_command,
     execute_global_ik_ee_control,
     execute_stage6_ik_ee_control,
     global_ik_controller_metadata,
@@ -302,12 +303,12 @@ def _execute(scene, arm_targets, factory, *, config=None):
     return status, diagnostics
 
 
-def _execute_stage6(scene, arm_targets, factory):
+def _execute_stage6(scene, arm_targets, factory, *, config=None):
     diagnostics = initialize_global_ik_controller_diagnostics()
     status = execute_stage6_ik_ee_control(
         scene,
         tuple(arm_targets),
-        config=Stage6IKControllerConfig(),
+        config=config or Stage6IKControllerConfig(),
         diagnostics=diagnostics,
         external_solver_factory=factory,
         ik_error=_IKError,
@@ -393,8 +394,12 @@ def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
         "collision_aware_then_collision_relaxed"
     )
     assert controller["path_fallback"]["order"] == (
-        "collision_aware_linear_then_collision_relaxed_linear_"
-        "then_far_only_collision_aware_rrt_connect"
+        "collision_aware_linear_then_collision_aware_rrt_connect_"
+        "after_measured_stall_or_for_far_targets_then_"
+        "collision_relaxed_linear"
+    )
+    assert controller["path_fallback"]["near_nonlinear_entry_condition"] == (
+        "same_target_measured_stall_exhausted_local_solver_tiers"
     )
     assert controller["post_execution_cartesian_verification"] is True
     assert controller["cartesian_translation_tolerance_m"] == pytest.approx(0.0005)
@@ -402,26 +407,36 @@ def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
         np.deg2rad(0.05)
     )
     assert controller["control_acceptance_translation_tolerance_m"] == (
-        pytest.approx(0.0005)
+        pytest.approx(0.001)
     )
     assert controller["control_acceptance_rotation_tolerance_rad"] == (
-        pytest.approx(np.deg2rad(0.05))
+        pytest.approx(np.deg2rad(0.1))
     )
-    assert controller["same_target_alternate_solver_after_primary_stall"] is False
+    assert controller["same_target_alternate_solver_after_primary_stall"] is True
+    assert controller["physical_stall_resolution"] == (
+        "same_target_bounded_solver_escalation_then_report_stall"
+    )
     assert controller["unreported_hidden_motion_after_physical_stall"] is False
     assert controller["joint_target_execution"] == (
         "shared_clock_joint_target_until_reached_or_stopped"
     )
-    assert controller["same_target_ik_solution_cache"] is False
+    assert controller["same_target_ik_solution_cache"] is True
+    assert controller["same_target_ik_solution_cache_semantics"] == (
+        "reuse_only_after_measured_cartesian_progress_and_"
+        "invalidate_before_bounded_stall_escalation"
+    )
     assert metadata["cartesian_continuation"] == {
         "entry_condition": "full_target_local_ik_exhausted",
         "translation_step_m": pytest.approx(0.005),
         "rotation_step_rad": pytest.approx(np.deg2rad(2.0)),
         "backoff_factors": [1.0, 0.5, 0.25, 0.125],
-        "max_segments_per_policy_action": 96,
+        "max_segments_per_policy_action": 8,
+        "max_raw_physics_steps_per_policy_action": 8,
         "interpolation": "linear_translation_shortest_xyzw_slerp",
         "progress_feedback": "physical_pose_reobserved_between_segments",
-        "commit_semantics": ("finish_original_policy_target_or_report_measured_stall"),
+        "commit_semantics": (
+            "reach_or_report_bounded_progress_for_closed_loop_reobservation"
+        ),
         "task_specific": False,
     }
     assert metadata["sampling_collision_policy"] == (
@@ -429,20 +444,49 @@ def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
     )
 
 
+def test_stage6_accepts_an_already_reached_target_before_reissuing_ik():
+    arm = _CartesianArm(jacobian_result=_IKError("must not solve"))
+    arm.current = np.asarray([0.0008, 0.0])
+    arm.target = arm.current.copy()
+    scene = _Scene(arm)
+    factory = _Factory(RuntimeError("must not solve"))
+
+    status, diagnostics = _execute_stage6(
+        scene,
+        ((arm, _target(0.0)),),
+        factory,
+    )
+
+    assert status == "reached"
+    assert scene.steps == 0
+    assert arm.solver_events == []
+    assert factory.calls == []
+    assert diagnostics["cartesian_pre_execution_control_accepts"] == 1
+
+
 def test_stage6_continues_toward_a_target_outside_local_ik_basin():
     arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
     factory = _LocalStepFactory(maximum_cartesian_step=0.005)
+    scene = _Scene(arm)
 
-    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+    first_status, first_diagnostics = _execute_stage6(
+        scene, ((arm, _target(0.05)),), factory
+    )
+    second_status, second_diagnostics = _execute_stage6(
+        scene, ((arm, _target(0.05)),), factory
+    )
 
-    assert status == "reached"
+    assert first_status == "progressed"
+    assert second_status == "reached"
     assert arm.current[0] == pytest.approx(0.05)
-    assert diagnostics["cartesian_continuation_attempts"] == 9
-    assert diagnostics["cartesian_continuation_successes"] == 9
-    assert diagnostics["cartesian_continuation_failures"] == 0
-    assert diagnostics["selected_via_cartesian_continuation"] == 9
-    assert diagnostics["cartesian_multi_pass_goals_completed"] == 1
-    assert diagnostics["cartesian_continuation_fraction_min"] == pytest.approx(0.1)
+    assert first_diagnostics["cartesian_continuation_attempts"] == 8
+    assert first_diagnostics["cartesian_continuation_successes"] == 8
+    assert first_diagnostics["cartesian_policy_action_physics_budget_exhaustions"] == 1
+    assert second_diagnostics["cartesian_continuation_attempts"] == 1
+    assert second_diagnostics["cartesian_multi_pass_goals_completed"] == 1
+    assert second_diagnostics["cartesian_continuation_fraction_min"] == pytest.approx(
+        0.5
+    )
     assert arm.sampling_calls == []
 
 
@@ -450,14 +494,33 @@ def test_stage6_continuation_backs_off_before_global_sampling():
     arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
     factory = _LocalStepFactory(maximum_cartesian_step=0.00125)
 
-    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+    scene = _Scene(arm)
+    runs = []
+    for _ in range(5):
+        runs.append(_execute_stage6(scene, ((arm, _target(0.05)),), factory))
 
-    assert status == "reached"
+    assert [status for status, _ in runs] == [
+        "progressed",
+        "progressed",
+        "progressed",
+        "progressed",
+        "reached",
+    ]
     assert arm.current[0] == pytest.approx(0.05)
-    assert diagnostics["cartesian_continuation_attempts"] == 113
-    assert diagnostics["cartesian_continuation_successes"] == 39
-    assert diagnostics["cartesian_continuation_failures"] == 0
-    assert diagnostics["cartesian_continuation_fraction_min"] == pytest.approx(0.025)
+    assert (
+        sum(diagnostics["cartesian_continuation_attempts"] for _, diagnostics in runs)
+        == 113
+    )
+    assert (
+        sum(diagnostics["cartesian_continuation_successes"] for _, diagnostics in runs)
+        == 39
+    )
+    assert all(
+        diagnostics["cartesian_continuation_failures"] == 0 for _, diagnostics in runs
+    )
+    assert min(
+        diagnostics["cartesian_continuation_fraction_min"] for _, diagnostics in runs
+    ) == pytest.approx(0.025)
     assert arm.sampling_calls == []
 
 
@@ -466,12 +529,18 @@ def test_stage6_reobserves_between_bounded_cartesian_continuation_steps():
     scene = _Scene(arm)
     factory = _LocalStepFactory(maximum_cartesian_step=0.005)
 
-    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+    first_status, _first_diagnostics = _execute_stage6(
+        scene, ((arm, _target(0.05)),), factory
+    )
+    second_status, second_diagnostics = _execute_stage6(
+        scene, ((arm, _target(0.05)),), factory
+    )
 
-    assert status == "reached"
+    assert first_status == "progressed"
+    assert second_status == "reached"
     assert arm.current[0] == pytest.approx(0.05)
     assert len(factory.calls) == 19
-    assert diagnostics["cartesian_multi_pass_goals_completed"] == 1
+    assert second_diagnostics["cartesian_multi_pass_goals_completed"] == 1
 
 
 def test_stage6_direct_feedback_reaches_a_dense_target():
@@ -490,30 +559,53 @@ def test_stage6_direct_feedback_reaches_a_dense_target():
     np.testing.assert_allclose(arm.current, [0.018, 0.0])
 
 
-def test_stage6_converged_execution_is_not_limited_to_four_raw_steps():
+def test_stage6_converged_execution_continues_across_bounded_policy_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     factory = _Factory(lambda _target: [0.2, 0.0])
     scene = _SlowScene(arm)
 
-    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.2)),), factory)
+    runs = []
+    for _ in range(10):
+        runs.append(_execute_stage6(scene, ((arm, _target(0.2)),), factory))
+        if runs[-1][0] == "reached":
+            break
 
-    assert status == "reached"
+    assert runs[0][0] == "progressed"
+    assert runs[-1][0] == "reached"
     assert scene.steps > 4
     assert arm.current[0] == pytest.approx(0.2)
-    assert diagnostics["trac_ik_distance_controller_raw_physics_steps"] == (scene.steps)
+    assert (
+        sum(
+            diagnostics["trac_ik_distance_controller_raw_physics_steps"]
+            for _, diagnostics in runs
+        )
+        == scene.steps
+    )
+    assert all(
+        diagnostics["trac_ik_distance_controller_raw_physics_steps"] <= 8
+        for _, diagnostics in runs
+    )
 
 
-def test_stage6_resolves_the_same_cartesian_target_from_each_new_observation():
+def test_stage6_reuses_a_progress_verified_solution_for_the_same_target():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _Scene(arm)
     factory = _Factory(lambda _target: [0.2, 0.0])
 
-    statuses = [
-        _execute_stage6(scene, ((arm, _target(0.2)),), factory)[0] for _ in range(2)
-    ]
+    first_status, _first_diagnostics = _execute_stage6(
+        scene, ((arm, _target(0.2)),), factory
+    )
+    # Move outside the pre-execution acceptance envelope while preserving the
+    # same absolute target, so this test continues to exercise the verified
+    # joint-solution cache rather than the no-op completion path.
+    arm.current = np.asarray([0.198, 0.0])
+    second_status, second_diagnostics = _execute_stage6(
+        scene, ((arm, _target(0.2)),), factory
+    )
 
-    assert statuses == ["reached", "reached"]
-    assert arm.solver_events == ["pseudo_inverse", "pseudo_inverse"]
+    assert [first_status, second_status] == ["reached", "reached"]
+    assert arm.solver_events == ["pseudo_inverse"]
+    assert second_diagnostics["same_target_joint_cache_hits"] == 1
     np.testing.assert_allclose(arm.current, [0.2, 0.0])
 
 
@@ -529,33 +621,71 @@ def test_stage6_direct_feedback_reports_real_progress_for_a_farther_target():
     assert diagnostics["cartesian_goal_directed_progress_accepts"] == 1
 
 
-def test_stage6_slow_motion_converges_within_one_policy_action():
+def test_stage6_slow_motion_converges_across_bounded_policy_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _SlowScene(arm)
     factory = _Factory(lambda target: [target[0], 0.0])
 
-    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+    first_status, first_diagnostics = _execute_stage6(
+        scene, ((arm, _target(0.05)),), factory
+    )
+    second_status, second_diagnostics = _execute_stage6(
+        scene, ((arm, _target(0.05)),), factory
+    )
 
-    assert status == "reached"
+    assert first_status == "progressed"
+    assert second_status == "reached"
     assert scene.steps > 4
     assert arm.current[0] == pytest.approx(0.05)
-    assert diagnostics.get("controller_raw_physics_budget_exhaustions", 0) == 0
+    assert first_diagnostics["cartesian_policy_action_physics_budget_exhaustions"] == 1
+    assert second_diagnostics.get("controller_raw_physics_budget_exhaustions", 0) == 0
 
 
-def test_stage6_small_observed_motion_is_not_limited_to_four_raw_steps():
+def test_stage6_small_observed_motion_is_reobserved_between_bounded_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _SlowScene(arm, step=0.0015)
     factory = _Factory(lambda target: [target[0], 0.0])
     config = Stage6IKControllerConfig()
 
-    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+    runs = []
+    for _ in range(10):
+        runs.append(_execute_stage6(scene, ((arm, _target(0.05)),), factory))
+        if runs[-1][0] == "reached":
+            break
 
-    assert status == "reached"
+    assert runs[0][0] == "progressed"
+    assert runs[-1][0] == "reached"
     assert scene.steps > 4
     assert abs(arm.current[0] - 0.05) <= (
         config.physical_completion_translation_tolerance_m
     )
-    assert diagnostics.get("controller_raw_physics_budget_exhaustions", 0) == 0
+    assert all(
+        diagnostics["trac_ik_distance_controller_raw_physics_steps"] <= 8
+        for _, diagnostics in runs
+    )
+
+
+def test_stage6_bounds_total_raw_physics_before_closed_loop_reobservation():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    scene = _SlowScene(arm, step=5.0e-5)
+    factory = _Factory(lambda target: [target[0], 0.0])
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_segments=1000,
+        cartesian_continuation_max_raw_physics_steps=64,
+    )
+
+    status, diagnostics = _execute_stage6(
+        scene,
+        ((arm, _target(0.05)),),
+        factory,
+        config=config,
+    )
+
+    assert status == "progressed"
+    assert scene.steps == 64
+    assert 0.0 < arm.current[0] < 0.05
+    assert diagnostics["cartesian_policy_action_physics_budget_exhaustions"] == 1
+    assert diagnostics["cartesian_policy_action_raw_physics_steps_max"] == 64
 
 
 def test_stage6_native_primary_avoids_a_coarse_external_model_solution():
@@ -584,6 +714,21 @@ def test_stage6_uses_external_solver_when_native_primary_has_no_solution():
     assert arm.current[0] == pytest.approx(0.05)
     assert arm.solver_events == ["pseudo_inverse", "trac_ik_distance"]
     assert diagnostics["pseudo_inverse_ik_failures"] == 1
+    assert diagnostics["selected_via_trac_ik_distance"] == 1
+
+
+def test_stage6_escalates_same_target_after_primary_physically_stalls():
+    arm = _CartesianArm(jacobian_result=lambda _position: [0.0, 0.0])
+    scene = _Scene(arm)
+    factory = _Factory(lambda target: [target[0], 0.0])
+
+    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert arm.solver_events == ["pseudo_inverse", "trac_ik_distance"]
+    assert arm.current[0] == pytest.approx(0.05)
+    assert diagnostics["physical_stall_solver_escalations"] == 1
+    assert diagnostics["physical_stall_solver_tier_max"] == 1
     assert diagnostics["selected_via_trac_ik_distance"] == 1
 
 
@@ -683,6 +828,32 @@ def test_stage6_near_fallback_skips_unbounded_nonlinear_planning():
     assert diagnostics["far_target_planner_attempts"] == 0
 
 
+def test_stage6_near_fallback_uses_collision_aware_rrt_after_measured_stall():
+    arm = _LinearPathArm(collision_aware_fails=True)
+    diagnostics = initialize_global_ik_controller_diagnostics()
+
+    command = _prepare_collision_aware_path_command(
+        arm,
+        _target(0.05),
+        config=Stage6IKControllerConfig(),
+        diagnostics=diagnostics,
+        configuration_path_error=_ConfigurationPathError,
+        invalid_action_error=_InvalidActionError,
+        path_algorithm="RRTConnect",
+        error_message="stage6 IK failed",
+        allow_near_nonlinear=True,
+    )
+
+    assert command is not None
+    assert command.mode == "planned_path"
+    assert [call[1]["ignore_collisions"] for call in arm.linear_path_calls] == [False]
+    assert len(arm.path_calls) == 1
+    assert arm.path_calls[0][1]["ignore_collisions"] is False
+    assert diagnostics["near_target_nonlinear_planner_attempts"] == 1
+    assert diagnostics["nonlinear_path_successes"] == 1
+    assert diagnostics["linear_path_collision_relaxed_attempts"] == 0
+
+
 def test_stage6_keeps_all_bimanual_targets_active_on_the_shared_physics_clock():
     right = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     left = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
@@ -726,8 +897,34 @@ def test_stage6_reports_joint_motion_without_cartesian_progress_as_stopped():
     status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
 
     assert status == "stopped"
-    assert arm.current[0] < 0.0
-    assert diagnostics["reached_joint_target_with_cartesian_residual"] == 1
+    assert diagnostics["physical_stall_solver_escalations"] >= 1
+    assert diagnostics["reached_joint_target_with_cartesian_residual"] >= 1
+
+
+def test_stage6_rejects_discontinuous_sampling_branch_after_physical_stall():
+    class _StalledPrimaryWithLargeSampling(_LinearPathArm):
+        def __init__(self):
+            super().__init__()
+            self.jacobian_result = lambda _position: [0.0, 0.0]
+            self.sampling_result = [[0.8, 0.0]]
+
+    arm = _StalledPrimaryWithLargeSampling()
+    factory = _Factory(RuntimeError("no external solution"))
+
+    status, diagnostics = _execute_stage6(
+        _Scene(arm),
+        ((arm, _target(0.05)),),
+        factory,
+    )
+
+    assert status == "reached"
+    assert diagnostics["physical_stall_solver_escalations"] >= 1
+    assert diagnostics["candidate_rejections_joint_delta_abs"] >= 1
+    assert diagnostics["selected_via_sampling"] == 0
+    assert arm.linear_path_calls
+    assert diagnostics["linear_path_collision_aware_successes"] >= 1
+    assert diagnostics["selected_joint_delta_abs_max"] < 0.8
+    np.testing.assert_allclose(arm.current, [0.05, 0.0])
 
 
 def test_evaluators_reject_removed_development_profile_before_importing_pyrep():
