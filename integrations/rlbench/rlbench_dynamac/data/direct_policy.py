@@ -659,12 +659,12 @@ class PolicyServer:
                 raise TypeError("primary_action_status must be a string")
             if explicit_status not in {"reached", "progressed", "stopped"}:
                 raise ValueError("unsupported primary_action_status")
-        target_completed = explicit_status in {None, "reached"}
-        if not commit or not target_completed:
-            # Stage 6 may commit a bounded physical prefix without completing
-            # the absolute policy waypoint.  Restore the frozen DynaMAC clock
-            # so the next observation retries the same state; only a reached
-            # target consumes the baseline's fixed-clock action.
+        if not commit:
+            # Only an aborted/failed simulator action is rolled back.  The
+            # executor's reached/progressed/stopped label is physical feedback,
+            # not a second progress controller for frozen DynaMAC: every
+            # formally committed policy transaction consumes exactly one fixed
+            # clock tick, as in the published V4 baseline.
             self._restore_runtime(pending["runtime"])
         self._pending_transaction = None
         return {
@@ -809,6 +809,13 @@ class PolicyServer:
             "action": wire_action.tolist(),
             "transaction_id": transaction_id,
             "gripper_timing": gripper_timing,
+            # Frozen DynaMAC already decides the gripper value on its own
+            # fixed policy clock.  Apply that command with the corresponding
+            # primary action; do not gate it on the
+            # executor's Cartesian reached envelope.
+            "gripper_authorization": (
+                {"left": True, "right": True} if self.bimanual else {"single": True}
+            ),
         }
 
 

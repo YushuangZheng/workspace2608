@@ -1140,7 +1140,7 @@ def test_unimanual_policy_action_is_only_complete_after_commit() -> None:
     }
 
 
-def test_frozen_policy_clock_retries_same_state_after_bounded_executor_progress() -> (
+def test_frozen_policy_clock_consumes_applied_action_independent_of_executor_status() -> (
     None
 ):
     policy = _TransactionalUnimanualPolicy(duration=2)
@@ -1150,6 +1150,7 @@ def test_frozen_policy_clock_retries_same_state_after_bounded_executor_progress(
 
     first = server.handle({"command": "act", "observation": observation})
     assert policy.clock == 1
+    assert first["gripper_authorization"] == {"single": True}
     partial = server.handle(
         {
             "command": "commit",
@@ -1161,18 +1162,20 @@ def test_frozen_policy_clock_retries_same_state_after_bounded_executor_progress(
     assert partial["committed"] is True
     assert partial["primary_action_status"] == "progressed"
     assert partial["complete"] is False
-    assert policy.clock == 0
+    assert policy.clock == 1
 
-    retry = server.handle({"command": "act", "observation": observation})
-    reached = server.handle(
+    second = server.handle({"command": "act", "observation": observation})
+    assert second["gripper_authorization"] == {"single": True}
+    stopped = server.handle(
         {
             "command": "commit",
-            "transaction_id": retry["transaction_id"],
-            "primary_action_status": "reached",
+            "transaction_id": second["transaction_id"],
+            "primary_action_status": "stopped",
         }
     )
-    assert reached["primary_action_status"] == "reached"
-    assert policy.clock == 1
+    assert stopped["primary_action_status"] == "stopped"
+    assert stopped["complete"] is True
+    assert policy.clock == 2
 
 
 def test_policy_server_applies_global_boundary_gripper_timing_transactionally() -> None:
@@ -1228,6 +1231,7 @@ def test_bimanual_abort_restores_both_clocks_and_last_actions() -> None:
     server.handle({"command": "reset", "observation": observation})
 
     first = server.handle({"command": "act", "observation": observation})
+    assert first["gripper_authorization"] == {"left": True, "right": True}
     server.handle({"command": "commit", "transaction_id": first["transaction_id"]})
     committed_left_pose = policy._last_left_action.pose.copy()
     committed_right_pose = policy._last_right_action.pose.copy()

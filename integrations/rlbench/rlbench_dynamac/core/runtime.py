@@ -1266,8 +1266,10 @@ def apply_gripper_for_policy_target(
     """Apply a gripper command under task authorization or legacy sequencing.
 
     Closed-loop TASK commands pass an explicit authorization derived from the
-    task posterior and boundary transaction.  ``None`` retains the historical
-    pose-completion rule for baseline, frozen-peer and auxiliary commands.
+    task posterior and boundary transaction.  Frozen DynaMAC passes an
+    explicit authorization from its own fixed-clock gripper command.  ``None``
+    retains pose-completion sequencing only for auxiliary commands that have
+    no task-level authorization source.
     """
 
     if arm_status not in {"reached", "progressed", "stopped"}:
