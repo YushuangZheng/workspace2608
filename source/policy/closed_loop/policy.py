@@ -842,12 +842,14 @@ class ClosedLoopMultiStreamPolicy:
                 )
                 for request in boundary.transaction.committed:
                     arm = request.arm_id
-                    dynamac[arm], runtime[arm] = self._ensure_virtual_reference(
-                        arm,
-                        request.target_state,
-                        dynamac[arm],
-                        runtime[arm],
-                    )
+                    # Match the frozen DynaMAC hybrid boundary clock exactly:
+                    # this cycle still executes the source skill's terminal
+                    # continuous target.  The target skill's virtual frame is
+                    # therefore captured by ``_augment_observations`` from the
+                    # *next* post-action observation, not from this cycle's
+                    # pre-terminal pose.  The entry gripper command is stored
+                    # directly in StateNode and does not require an early
+                    # target-skill pose query.
                     refreshed = self.execution_controllers[
                         arm
                     ].query_after_boundary_transition(

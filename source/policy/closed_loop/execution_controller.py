@@ -849,15 +849,18 @@ class ClosedLoopExecutionController:
         if source_weighted.action is None:
             weighted_action = source_weighted
         else:
-            entry_action = self.task_model.query_state(
-                observation,
-                target,
-                mode_index=self._mode_index(target, mode_by_skill),
-            )
+            entry_mode = self._mode_index(target, mode_by_skill)
+            if entry_mode is None:
+                entry_mode = int(
+                    self.task_model.base_policy.selected_mode_path[target.skill_index]
+                )
+            entry_node = self.task_model.state(target)
+            if entry_mode < 0 or entry_mode >= len(entry_node.gripper_commands):
+                raise IndexError("边界入口模态超出 StateNode 夹爪命令范围")
             bridge_action = DynaMACAction(
                 pose=source_weighted.action.pose.copy(),
                 covariance=source_weighted.action.covariance.copy(),
-                gripper=entry_action.gripper.copy(),
+                gripper=entry_node.gripper_commands[entry_mode].copy(),
                 diagnostics={
                     **source_weighted.action.diagnostics,
                     "boundary_transition": {
@@ -869,6 +872,7 @@ class ClosedLoopExecutionController:
                         ),
                         "continuous_target_source": "source_terminal_state",
                         "gripper_target_source": "committed_entry_state",
+                        "virtual_frame_capture": "next_post_action_observation",
                     },
                 },
             )

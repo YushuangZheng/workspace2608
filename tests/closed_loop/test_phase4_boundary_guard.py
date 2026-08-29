@@ -947,10 +947,7 @@ def test_joint_transaction_commits_both_arms_in_the_same_tick() -> None:
         demo = demos[0]
         observation = DynaMACObservation(
             demo.ee_pose[3],
-            {
-                **{name: values[3] for name, values in demo.frames.items()},
-                "virtual_skill_1": demo.ee_pose[3],
-            },
+            {name: values[3] for name, values in demo.frames.items()},
         )
         refreshed = controllers[arm].query_after_boundary_transition(
             executions[arm],
@@ -969,20 +966,25 @@ def test_joint_transaction_commits_both_arms_in_the_same_tick() -> None:
             refreshed.weighted_action.stream_weights,
             mode_index=0,
         )
-        entry_action = model.query_state(observation, entry_state, mode_index=0)
         np.testing.assert_allclose(
             refreshed.weighted_action.action.pose,
             source_action.pose,
         )
         np.testing.assert_allclose(
             refreshed.weighted_action.action.gripper,
-            entry_action.gripper,
+            model.state(entry_state).gripper_commands[0],
         )
         assert (
             refreshed.weighted_action.action.diagnostics["boundary_transition"][
                 "continuous_target_source"
             ]
             == "source_terminal_state"
+        )
+        assert (
+            refreshed.weighted_action.action.diagnostics["boundary_transition"][
+                "virtual_frame_capture"
+            ]
+            == "next_post_action_observation"
         )
 
 

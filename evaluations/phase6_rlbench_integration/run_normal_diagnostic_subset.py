@@ -65,6 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("integrations/rlbench/models/closed_loop_v1"),
     )
+    parser.add_argument(
+        "--closed-loop-feature-profile",
+        choices=("progress_only", "progress_dynamic_roles", "full"),
+        default="full",
+        help="Closed-loop ablation profile used by this diagnostic subset.",
+    )
     parser.add_argument("--horizon", type=int, default=1000)
     parser.add_argument(
         "--post-success-policy-steps",
@@ -216,6 +222,13 @@ def main() -> int:
         raise ValueError(
             "post-success continuation is only defined for closed-loop policy"
         )
+    if (
+        args.policy_type != "closed_loop_multistream"
+        and args.closed_loop_feature_profile != "full"
+    ):
+        raise ValueError(
+            "closed-loop feature profiles are only defined for closed-loop policy"
+        )
     _install_post_success_continuation(
         evaluator,
         int(args.post_success_policy_steps),
@@ -233,6 +246,8 @@ def main() -> int:
         args.policy_type,
         "--closed-loop-models-dir",
         str(args.closed_loop_models_dir),
+        "--closed-loop-feature-profile",
+        str(args.closed_loop_feature_profile),
         "--policy-diagnostics-dir",
         str(args.diagnostics_dir),
         "--controller-profile",

@@ -66,9 +66,17 @@ def test_diagnostic_parser_defaults_to_closed_loop_and_supports_frozen_baseline(
         "/usr/bin/python",
     ]
 
-    assert parser.parse_args(common).policy_type == "closed_loop_multistream"
+    parsed = parser.parse_args(common)
+    assert parsed.policy_type == "closed_loop_multistream"
+    assert parsed.closed_loop_feature_profile == "full"
     assert parser.parse_args(common + ["--policy-type", "dynamac"]).policy_type == (
         "dynamac"
+    )
+    assert (
+        parser.parse_args(
+            common + ["--closed-loop-feature-profile", "progress_dynamic_roles"]
+        ).closed_loop_feature_profile
+        == "progress_dynamic_roles"
     )
 
 
