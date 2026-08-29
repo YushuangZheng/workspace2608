@@ -1,7 +1,7 @@
 {
   "schema": "essay2608.phase6_formal_protocol.v1",
   "status": "preregistered_before_results",
-  "implementation_parent_commit": "5906cc1fbbff3ab7b3b7a0d689dab8959ddd7781",
+  "implementation_parent_commit": "671c6be48ddced7263378ba55a99e8714461b256",
   "pre_result_amendment": {
     "date_utc": "2026-08-29",
     "before_any_validated_formal_cell": true,
@@ -14,6 +14,24 @@
       "repaired_steps": 186,
       "success": true,
       "invalid_actions": 0
+    }
+  },
+  "pre_result_amendment_2": {
+    "date_utc": "2026-08-29",
+    "before_any_retained_formal_cell": true,
+    "reason": "The closed-loop boundary transaction captured the target-skill virtual frame from the pre-action pose, one cycle earlier than the frozen DynaMAC terminal bridge semantics. This caused systematic OpenMicrowave degradation across all three closed-loop ablations.",
+    "resolution": "Execute the source terminal continuous target with the committed entry gripper, then capture the target-skill virtual frame from the next post-action observation. The relation, progress, boundary-guard, recovery, task set, sample set, fault protocol, and statistical plan are unchanged.",
+    "implementation_parent_commit": "671c6be48ddced7263378ba55a99e8714461b256",
+    "invalidated_attempt_disposition": "All partial results produced before this repair are excluded from statistics and removed from the formal result root before restart.",
+    "same_episode_validation": {
+      "task": "open_microwave",
+      "episode_index_range": [0, 9],
+      "shared_failure_episode_indices": [8],
+      "progress_only_successes": 9,
+      "progress_dynamic_roles_successes": 9,
+      "full_successes": 9,
+      "dynamac_v4_shared_executor_audit_successes": 9,
+      "episodes_per_method": 10
     }
   },
   "evaluation_set": {
