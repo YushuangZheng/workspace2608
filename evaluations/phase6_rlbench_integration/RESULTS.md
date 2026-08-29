@@ -65,3 +65,13 @@
 9009094a2903b447c1d4421e22ae27db1fea4ce5eaadfe53d8b284b753f3418c  integrations/rlbench/results/diagnostics/place_cups_v18_task_gripper_auth_ep0_h300.json
 1221a041815ff7cdb9381097ad09095a4e44f3cb1fb2b4f9b40fc3247b8d6676  integrations/rlbench/results/diagnostics/handover_v21_gripper_q_path_fallback_ep0_h500.json
 ```
+
+## 正式矩阵启动止损与基线语义恢复
+
+首轮正式矩阵尚未形成任何完整有效单元时，PlaceCups 封存索引0的 DynaMAC V4 对照跑满1000周期；冻结发布结果中同一回合应为186周期成功。检查确认共享适配器错误地使用执行器 `progressed/stopped` 回滚冻结基线时钟，并把基线夹爪延迟到笛卡尔 `reached`，从而改变了对照方法本身。该批未完成数据已从正式结果目录移除，不参与任何统计。
+
+修复后，冻结 DynaMAC 每个正式提交事务仍消费一个原固定时钟状态，主动作同时执行固定时钟产生的夹爪命令；执行器标签只作为物理反馈。相同 PlaceCups 索引0重新得到186周期成功、0 InvalidAction，与冻结 V4 发布结果一致。闭环三种方法的进度后验、边界和 TASK 夹爪授权没有改动。事务与适配定向测试为 `67 passed, 1 skipped`，机器可读证据见 `results/preformal_gate_v2/summary.json`。
+
+```text
+d167842f5b90533dc28495090526fe65f19e674e8202b411fbec1b70850b3f69  integrations/rlbench/results/diagnostics/place_cups_dynamac_clock_decoupling_ep0.json
+```
