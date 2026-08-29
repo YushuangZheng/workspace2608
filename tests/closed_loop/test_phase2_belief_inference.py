@@ -950,6 +950,7 @@ def test_absolute_explanation_removes_soft_relation_prior_peak_scale(
         assert matching.relation_peak_normalized_compatibility == pytest.approx(
             0.64 / 0.7
         )
+        assert matching.relation_state_compatibility == pytest.approx(0.64 / 0.7)
         assert matching.normalized_explanation_score == pytest.approx(
             matching.robot_compatibility * matching.state_compatibility * (0.64 / 0.7)
         )
@@ -963,6 +964,7 @@ def test_absolute_explanation_removes_soft_relation_prior_peak_scale(
         assert opposing.relation_peak_normalized_compatibility == pytest.approx(
             0.36 / 0.7
         )
+        assert opposing.relation_state_compatibility == 0.0
         assert (
             matching.relation_compatibility / opposing.relation_compatibility
         ) == pytest.approx(
@@ -976,6 +978,7 @@ def test_absolute_explanation_removes_soft_relation_prior_peak_scale(
         )
         assert ambiguous.relation_compatibility == pytest.approx(0.5)
         assert ambiguous.relation_peak_normalized_compatibility == pytest.approx(1.0)
+        assert ambiguous.relation_state_compatibility == pytest.approx(1.0)
         # The original overlap remains in the posterior score; only the
         # cross-family absolute explanation uses the attainable-peak scale.
         assert ambiguous.relation_log_compatibility == pytest.approx(math.log(0.5))

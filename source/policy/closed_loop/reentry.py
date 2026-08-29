@@ -150,7 +150,7 @@ class ReentrySelector:
             ):
                 reasons.append("relation_evidence_unavailable")
             elif (
-                score.relation_compatibility
+                score.relation_state_compatibility
                 < self.config.minimum_relation_compatibility
             ):
                 reasons.append("relation_incompatible")

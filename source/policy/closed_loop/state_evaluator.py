@@ -216,6 +216,10 @@ class CandidateScore:
     # PoE whose transformed expert means do not coincide exactly.
     robot_peak_normalized_compatibility: float = 1.0
     relation_peak_normalized_compatibility: float = 1.0
+    # Thresholded state-transition/reentry checks need both a unit-peak scale
+    # and the same external/linked physical direction.  The raw overlap above
+    # remains the quantity consumed by the progress posterior.
+    relation_state_compatibility: float = 1.0
     robot_attainable_peak_log_support: float = 0.0
     robot_frame_terms: dict[str, float] = field(default_factory=dict)
     robot_frame_weights: dict[str, float] = field(default_factory=dict)
@@ -310,6 +314,7 @@ class StateEvaluator:
         selected_mode: int | None,
         covariance_inflation: float,
     ) -> tuple[
+        float,
         float,
         float,
         float,
@@ -613,6 +618,7 @@ class StateEvaluator:
         terms: dict[str, float] = {}
         peak_normalized_terms: dict[str, float] = {}
         weights: dict[str, float] = {}
+        direction_compatible = True
         for frame, estimate in relations.items():
             if estimate.decision_state == RelationDecision.UNKNOWN:
                 continue
@@ -636,6 +642,14 @@ class StateEvaluator:
                 float(np.max(demo_prior)), self.config.probability_floor
             )
             peak_normalized = float(np.clip(compatibility / attainable_peak, 0.0, 1.0))
+            if not np.isclose(demo_prior[0], demo_prior[1]):
+                expected = (
+                    RelationDecision.LINKED
+                    if demo_prior[1] > demo_prior[0]
+                    else RelationDecision.EXTERNAL
+                )
+                if estimate.decision_state != expected:
+                    direction_compatible = False
             terms[frame] = reliability * math.log(compatibility)
             peak_normalized_terms[frame] = reliability * math.log(
                 max(peak_normalized, self.config.probability_floor)
@@ -654,10 +668,14 @@ class StateEvaluator:
             if total_weight <= 0.0
             else float(math.exp(max(-750.0, peak_normalized_total / total_weight)))
         )
+        state_compatibility = (
+            peak_normalized_compatibility if direction_compatible else 0.0
+        )
         return (
             total,
             compatibility,
             peak_normalized_compatibility,
+            state_compatibility,
             terms,
             peak_normalized_terms,
             weights,
@@ -713,6 +731,7 @@ class StateEvaluator:
             relation_log,
             relation_compat,
             relation_peak_normalized_compat,
+            relation_state_compat,
             relation_terms,
             relation_peak_normalized_terms,
             relation_weights,
@@ -743,6 +762,7 @@ class StateEvaluator:
             robot_covariance_inflation=covariance_inflation,
             robot_peak_normalized_compatibility=(robot_peak_normalized_compat),
             relation_peak_normalized_compatibility=(relation_peak_normalized_compat),
+            relation_state_compatibility=relation_state_compat,
             robot_attainable_peak_log_support=(robot_attainable_peak_log_support),
             robot_frame_terms=robot_terms,
             robot_frame_weights=robot_weights,

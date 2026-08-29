@@ -414,7 +414,7 @@ class BeliefUpdater:
             )
             compatible = (
                 bool(score.relation_frame_weights)
-                and score.relation_compatibility
+                and score.relation_state_compatibility
                 >= self.expansion_config.minimum_relation_compatibility
             )
             if compatible:
@@ -445,7 +445,7 @@ class BeliefUpdater:
             if score.robot_evidence_available
             and score.robot_compatibility
             >= self.expansion_config.minimum_robot_compatibility
-            and score.relation_compatibility
+            and score.relation_state_compatibility
             >= self.expansion_config.minimum_relation_compatibility
             and (
                 not score.scene_evidence_expected

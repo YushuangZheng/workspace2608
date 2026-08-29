@@ -1301,6 +1301,59 @@ def test_reentry_reuses_recovery_covariance_without_changing_normal_scores(
     assert manager.reentry.robot_covariance_inflation == recovery_inflation
 
 
+def test_reentry_relation_threshold_uses_soft_peak_scale_and_physical_direction(
+    phase5_case,
+) -> None:
+    model, demonstrations, _ = phase5_case
+    state = next(iter(model.link_anchors.values())).linked_entry_states[0]
+    prior = model.state(state).demo_relation_priors["object"][0]
+    assert prior[1] > prior[0]
+
+    matching_belief = belief_for(
+        model,
+        demonstrations,
+        state,
+        relation(RelationDecision.LINKED, posterior=(0.46, 0.54)),
+    )
+    selector = ReentrySelector(
+        model,
+        ReentryConfig(
+            minimum_explanation_score=0.0,
+            minimum_relation_compatibility=0.6,
+        ),
+        robot_covariance_inflation=1.0e-4,
+    )
+    matching = selector.select(
+        (state,),
+        matching_belief,
+        current_reference=state,
+        mode_by_skill={state.skill_index: 0},
+    )
+    assert matching.scores[state].relation_compatibility < 0.6
+    assert matching.scores[state].relation_state_compatibility > 0.6
+    assert matching.decision is not None
+
+    opposing_belief = replace(
+        matching_belief,
+        relation_estimates={
+            "object": relation(
+                RelationDecision.EXTERNAL,
+                posterior=(0.54, 0.46),
+            )
+        },
+    )
+    opposing = selector.select(
+        (state,),
+        opposing_belief,
+        current_reference=state,
+        mode_by_skill={state.skill_index: 0},
+    )
+    assert opposing.scores[state].relation_peak_normalized_compatibility > 0.6
+    assert opposing.scores[state].relation_state_compatibility == 0.0
+    assert opposing.decision is None
+    assert "relation_incompatible" in opposing.rejection_reasons[state]
+
+
 def test_manager_modes_pending_activation_and_persistent_recovery_trigger(
     phase5_case,
 ) -> None:

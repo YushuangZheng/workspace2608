@@ -1,0 +1,71 @@
+{
+  "schema": "essay2608.phase6_preformal_gate.v4",
+  "date_utc": "2026-08-29",
+  "status": "passed",
+  "paper_comparable": false,
+  "issue": {
+    "classification": "systematic_soft_relation_prior_absolute_threshold_mismatch",
+    "symptom": "Four full-method PlaceCups episodes uniquely failed through NO_PLAUSIBLE_STATE to no_legal_reentry_state during the early formal normal matrix.",
+    "root_cause": "Event expansion and recovery reentry compared the raw q dot demo-prior overlap, whose attainable peak is limited by the soft prior, directly with a fixed absolute threshold.",
+    "resolution": "Use one relation_state_compatibility for thresholded state eligibility: peak-normalized soft-prior support when the reliable online external/linked decision has the same physical direction as the non-tied demo prior, otherwise zero. The raw overlap remains unchanged in the progress posterior.",
+    "task_specific_branches": false,
+    "new_runtime_gates": false,
+    "replaced_existing_threshold_score": true
+  },
+  "real_rlbench_gate": {
+    "task": "place_cups",
+    "method": "full",
+    "sealed_episode_indices": [4, 16, 18, 21],
+    "successes": 4,
+    "episodes": 4,
+    "selected_reentry_state": "k4:t24",
+    "episodes_detail": [
+      {
+        "episode_index": 4,
+        "steps": 210,
+        "raw_relation_compatibility": 0.5874057353460601,
+        "relation_state_compatibility": 0.8391510504943717,
+        "result_path": "integrations/rlbench/results/diagnostics/reentry_relation_state_gate_v1/place_cups_full_ep4.json",
+        "result_sha256": "4077acd95295c2aba2e080abb88f51521a02d16e5f2097a1bd06bc0ff8520cca",
+        "trace_path": "integrations/rlbench/results/diagnostics/reentry_relation_state_gate_v1/policy_ep4/place_cups/episode_0000.jsonl",
+        "trace_sha256": "78e57a4c3da970da0c738b9ed3174b83716f6e39182d7f98b60c5fa92abd2b85"
+      },
+      {
+        "episode_index": 16,
+        "steps": 204,
+        "raw_relation_compatibility": 0.5850484629171342,
+        "relation_state_compatibility": 0.835783518453049,
+        "result_path": "integrations/rlbench/results/diagnostics/reentry_relation_state_gate_v1/place_cups_full_ep16.json",
+        "result_sha256": "ac4d7f4a6ed5a115d0b6e7d35bec94524aeafcbbf5d6ccfd01d346453808b794",
+        "trace_path": "integrations/rlbench/results/diagnostics/reentry_relation_state_gate_v1/policy_ep16/place_cups/episode_0000.jsonl",
+        "trace_sha256": "3b44ad94f316d54051f8e57e5eabb2c2ffe12f753320cdcf13c21a70af42841c"
+      },
+      {
+        "episode_index": 18,
+        "steps": 217,
+        "raw_relation_compatibility": 0.6037688923166677,
+        "relation_state_compatibility": 0.8625269890238112,
+        "result_path": "integrations/rlbench/results/diagnostics/reentry_relation_state_gate_v1/place_cups_full_ep18.json",
+        "result_sha256": "4622327a344a5d40005972d05f4e9c659de6cbdb18e8663806689af028de7e0b",
+        "trace_path": "integrations/rlbench/results/diagnostics/reentry_relation_state_gate_v1/policy_ep18/place_cups/episode_0000.jsonl",
+        "trace_sha256": "357724950fd76dbc32c1d125740c47b37560d886a40ea111a43fcbe1dfcffa5e"
+      },
+      {
+        "episode_index": 21,
+        "steps": 204,
+        "raw_relation_compatibility": 0.6136293921521339,
+        "relation_state_compatibility": 0.8766134173601912,
+        "result_path": "integrations/rlbench/results/diagnostics/reentry_relation_state_gate_v1/place_cups_full_ep21.json",
+        "result_sha256": "3d3b083fb808686b83b8e9ebee571a30eedc77ae7512f29e8c67f4bc64da16b1",
+        "trace_path": "integrations/rlbench/results/diagnostics/reentry_relation_state_gate_v1/policy_ep21/place_cups/episode_0000.jsonl",
+        "trace_sha256": "5c433cf50d609e41c80fbb20cc4ccc445ecae340898b557eafd9ddf14c91cbbe"
+      }
+    ]
+  },
+  "targeted_tests": {
+    "passed": 119,
+    "skipped": 0,
+    "failed": 0
+  },
+  "scope": "This four-episode gate replays every reproducible full-only PlaceCups failure from the stopped partial matrix and verifies the corrected reentry path. It is not a success-rate estimate and does not replace the preregistered 12800-episode formal matrix."
+}
