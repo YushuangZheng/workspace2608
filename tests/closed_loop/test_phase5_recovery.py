@@ -382,6 +382,7 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
     complete = step
     assert complete.phase == VerificationPhase.COMPLETE
     assert complete.decision == RelationDecision.LINKED
+    np.testing.assert_allclose(complete.verified_posterior, [0.1, 0.9])
 
     with pytest.raises(RuntimeError, match="已经验证过"):
         controller.start(
@@ -398,6 +399,30 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
         pending.event_id,
         replace(signature, task_state=StateId(1, 2)),
     )
+
+
+def test_verify_link_confirmation_commits_original_filter_posterior(
+    phase5_case,
+) -> None:
+    model, _demonstrations, _pending = phase5_case
+    updater = BeliefUpdater(model)
+    posterior = np.asarray([0.22, 0.78])
+
+    updater.commit_relation_confirmation(
+        "object",
+        posterior,
+        RelationDecision.LINKED,
+    )
+
+    np.testing.assert_allclose(updater._relation_posteriors["object"], posterior)
+    assert updater._stable_decisions["object"] == RelationDecision.LINKED
+    assert updater._informative_evidence_decisions["object"] == RelationDecision.LINKED
+    with pytest.raises(ValueError, match="不一致"):
+        updater.commit_relation_confirmation(
+            "object",
+            posterior,
+            RelationDecision.EXTERNAL,
+        )
 
 
 def test_verify_link_timeout_still_returns_and_unsafe_return_fails(
@@ -449,6 +474,67 @@ def test_verify_link_timeout_still_returns_and_unsafe_return_fails(
     )
     assert failed.phase == VerificationPhase.FAILED
     assert failed.failure_reason == "collision"
+
+
+def test_verify_link_can_confirm_during_return_after_probe_timeout(
+    phase5_case,
+) -> None:
+    model, demonstrations, pending = phase5_case
+    config = RelationVerificationConfig(
+        maximum_probe_seconds=0.05,
+        minimum_response_samples=2,
+        minimum_probe_motion=0.001,
+        return_position_tolerance=1.0e-5,
+    )
+    controller = RelationVerificationController(config)
+    request = RelationVerificationRequest(
+        "single", "object", "linked", pending.event_id
+    )
+    entry = pose(0.02)
+    controller.start(
+        request,
+        pending,
+        task_state=pending.candidate_state,
+        relation_state=RelationDecision.UNKNOWN,
+        grasp_event=0,
+        entry_pose=entry,
+        gripper_command=np.asarray([-1.0]),
+        recent_task_poses=(pose(0.0), entry),
+    )
+    static = replace(
+        features_for(model, demonstrations, pending.candidate_state),
+        actual_motion_magnitude=0.0,
+    )
+    probe = controller.update(
+        current_pose=entry,
+        features=static,
+        estimate=relation(RelationDecision.UNKNOWN, information=0.0),
+    )
+    response = verification_response_features(
+        static,
+        ee_translation=-0.005,
+        frame_translation=-0.005,
+    )
+    returning = controller.update(
+        current_pose=probe.action.pose,
+        features=response,
+        estimate=relation(RelationDecision.LINKED),
+    )
+    assert returning.phase == VerificationPhase.RETURN
+    assert returning.probe_exit_reason == ProbeExitReason.TIMEOUT
+    assert returning.verified_posterior is None
+
+    complete = controller.update(
+        current_pose=returning.action.pose,
+        features=response,
+        estimate=relation(
+            RelationDecision.LINKED,
+            posterior=(0.18, 0.82),
+        ),
+    )
+    assert complete.phase == VerificationPhase.COMPLETE
+    assert complete.decision == RelationDecision.LINKED
+    np.testing.assert_allclose(complete.verified_posterior, [0.18, 0.82])
 
 
 def test_verify_link_rejects_single_tick_external_when_probe_window_comoves(

@@ -167,7 +167,21 @@ class RelationVerificationStep:
     response_samples: int
     response_residual_ratio: float | None
     response_decision: RelationDecision
+    verified_posterior: Array | None = None
     failure_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.verified_posterior is None:
+            return
+        posterior = np.asarray(self.verified_posterior, dtype=np.float64)
+        if (
+            posterior.shape != (2,)
+            or not np.all(np.isfinite(posterior))
+            or np.any(posterior < 0.0)
+            or not np.isclose(float(np.sum(posterior)), 1.0)
+        ):
+            raise ValueError("主动验证后验必须为合法二元概率")
+        object.__setattr__(self, "verified_posterior", posterior.copy())
 
     @property
     def terminal(self) -> bool:
@@ -205,6 +219,7 @@ class RelationVerificationController:
         self._response_residual_squared = 0.0
         self._probe_exit_reason: ProbeExitReason | None = None
         self._verified_decision = RelationDecision.UNKNOWN
+        self._verified_posterior: Array | None = None
         self._failure_reason: str | None = None
 
     @staticmethod
@@ -400,6 +415,11 @@ class RelationVerificationController:
             response_samples=self._response_samples,
             response_residual_ratio=self._response_residual_ratio,
             response_decision=self._response_decision(),
+            verified_posterior=(
+                None
+                if self._verified_posterior is None
+                else self._verified_posterior.copy()
+            ),
             failure_reason=self._failure_reason,
         )
 
@@ -429,6 +449,7 @@ class RelationVerificationController:
             stable = self._stable_decision(estimate)
             if stable != RelationDecision.UNKNOWN:
                 self._verified_decision = stable
+                self._verified_posterior = estimate.posterior.copy()
                 self._begin_return(ProbeExitReason.STABLE_RELATION)
             elif not safety.probe_safe:
                 self._begin_return(ProbeExitReason.SAFETY)
@@ -451,6 +472,12 @@ class RelationVerificationController:
             stable = self._stable_decision(estimate)
             if stable != RelationDecision.UNKNOWN:
                 self._verified_decision = stable
+                index = 1 if stable == RelationDecision.LINKED else 0
+                if (
+                    self._verified_posterior is None
+                    or estimate.posterior[index] > self._verified_posterior[index]
+                ):
+                    self._verified_posterior = estimate.posterior.copy()
             if not safety.return_safe:
                 self.phase = VerificationPhase.FAILED
                 self._failure_reason = safety.reason or "unsafe_return"

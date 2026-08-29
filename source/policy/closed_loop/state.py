@@ -28,6 +28,11 @@ class ArmCommand:
     covariance: Array
     gripper: Array
     source: str
+    # ``None`` preserves the executor's legacy pose-completion sequencing for
+    # auxiliary or frozen commands.  TASK commands use an explicit Boolean:
+    # task-state/boundary semantics, rather than Cartesian millimetre error,
+    # decide whether the accompanying gripper transition may be committed.
+    gripper_authorized: bool | None = None
 
     def __post_init__(self) -> None:
         pose = np.asarray(self.pose, dtype=np.float64)
@@ -47,9 +52,17 @@ class ArmCommand:
             raise ValueError("顶层策略动作包含非有限值")
         if not self.source:
             raise ValueError("顶层策略动作必须标识来源")
+        if self.gripper_authorized is not None and not isinstance(
+            self.gripper_authorized, (bool, np.bool_)
+        ):
+            raise TypeError("夹爪授权必须为布尔值或 None")
         object.__setattr__(self, "pose", pose.copy())
         object.__setattr__(self, "covariance", covariance.copy())
         object.__setattr__(self, "gripper", gripper.copy())
+        if self.gripper_authorized is not None:
+            object.__setattr__(
+                self, "gripper_authorized", bool(self.gripper_authorized)
+            )
 
 
 @dataclass(frozen=True)

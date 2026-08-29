@@ -1,0 +1,50 @@
+{
+  "schema": "essay2608.phase6_preformal_gate.v1",
+  "date_utc": "2026-08-29",
+  "paper_comparable": false,
+  "purpose": "Quick mechanism gate after task gripper authorization, VERIFY_LINK posterior commit, and physical path-family escalation fixes.",
+  "controller": {
+    "profile": "stage6_hybrid_cartesian_executor_v17",
+    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v20",
+    "task_specific_branches": false
+  },
+  "tests": {
+    "targeted_passed": 79,
+    "full_passed": 651,
+    "full_skipped": 4,
+    "full_seconds": 323.72
+  },
+  "real_rlbench": [
+    {
+      "task": "place_cups",
+      "sealed_episode_index": 0,
+      "success": true,
+      "committed_policy_steps": 190,
+      "invalid_actions": 0,
+      "evidence": "Final gripper command was authorized by aligned task state despite the executor target remaining outside the fixed 1 mm envelope.",
+      "result_path": "integrations/rlbench/results/diagnostics/place_cups_v18_task_gripper_auth_ep0_h300.json",
+      "sha256": "9009094a2903b447c1d4421e22ae27db1fea4ce5eaadfe53d8b284b753f3418c"
+    },
+    {
+      "task": "bimanual_handover_item",
+      "sealed_episode_index": 0,
+      "success": true,
+      "first_success_policy_step": 245,
+      "diagnostic_continuation_steps": 25,
+      "reported_policy_steps": 270,
+      "invalid_actions": 0,
+      "verify_link_return_tick": 264,
+      "verified_relation_posterior_external_linked": [
+        0.12767549229800643,
+        0.8723245077019937
+      ],
+      "physical_stall_solver_tier_max": 6,
+      "collision_aware_linear_path_successes": 48,
+      "collision_aware_nonlinear_path_successes": 4,
+      "collision_relaxed_linear_path_successes": 0,
+      "result_path": "integrations/rlbench/results/diagnostics/handover_v21_gripper_q_path_fallback_ep0_h500.json",
+      "sha256": "1221a041815ff7cdb9381097ad09095a4e44f3cb1fb2b4f9b40fc3247b8d6676"
+    }
+  ],
+  "scope_limit": "This gate checks mechanism reachability and one sealed normal episode per affected behavior. It is not a success-rate estimate and does not replace the preregistered formal matrix."
+}

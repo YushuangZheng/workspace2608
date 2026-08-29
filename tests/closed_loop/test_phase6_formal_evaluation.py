@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 from evaluations.phase6_formal_evaluation import launch, run_cell, summarize
+from integrations.rlbench.rlbench_dynamac.core.runtime import (
+    STAGE6_IK_CONTROLLER_PROFILE,
+)
 from integrations.rlbench.rlbench_closed_loop.eval.fault_injection import (
     FaultInjectionKind,
 )
@@ -28,6 +31,10 @@ def test_formal_protocol_freezes_full_normal_and_balanced_fault_ranges() -> None
         "full",
     )
     assert protocol["statistics"]["threshold_tuning_from_fault_results"] is False
+    assert (
+        protocol["shared_execution"]["controller_profile"]
+        == STAGE6_IK_CONTROLLER_PROFILE
+    )
 
 
 def test_formal_matrix_has_exact_preregistered_cell_and_episode_counts() -> None:

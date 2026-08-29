@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,10 +17,12 @@ from essay2608.policy.closed_loop import (
     ExecutionDecision,
     ExecutionMode,
     PolicyLifecycle,
+    ProgressStatus,
     RelationEventId,
     RelationVerificationRequest,
     RecoveryTriggerDecision,
     RuntimeObservation,
+    StateId,
 )
 from integrations.rlbench.rlbench_closed_loop.observation_adapter import (
     ClosedLoopObservationAdapter,
@@ -30,8 +33,10 @@ from integrations.rlbench.rlbench_closed_loop.policy_server import (
 )
 from integrations.rlbench.rlbench_dynamac.core.task_specs import get_task_spec
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
-    apply_gripper_after_completed_policy_target,
+    apply_gripper_for_policy_target,
+    set_policy_gripper_authorization,
     policy_action_execution_status,
+    policy_action_execution_statuses,
 )
 from integrations.rlbench.rlbench_dynamac.data.demo_adapter import (
     load_low_dim_obs_pickles,
@@ -131,6 +136,7 @@ def test_rlbench_worker_reports_structured_policy_failure_before_next_tick() -> 
     assert response["failure_reasons"] == {"single": "no_legal_reentry_state"}
     assert response["transaction_id"] == 7
     assert response["action"] is not None
+    assert response["gripper_authorization"] == {"single": None}
 
 
 def test_rlbench_worker_commits_bounded_progress_without_completing_target() -> None:
@@ -147,8 +153,13 @@ def test_rlbench_worker_commits_bounded_progress_without_completing_target() -> 
             self.commits = []
             self.diagnostics = Diagnostics()
 
-        def commit(self, *, action_executed) -> None:
-            self.commits.append(action_executed)
+        def commit(
+            self,
+            *,
+            task_command_applied,
+            absolute_target_completed,
+        ) -> None:
+            self.commits.append((task_command_applied, absolute_target_completed))
 
     server = object.__new__(ClosedLoopPolicyServer)
     server.arms = ("single",)
@@ -165,6 +176,7 @@ def test_rlbench_worker_commits_bounded_progress_without_completing_target() -> 
         "pre_action_ee": {"single": pre_action},
         "commands": {"single": target},
         "command_covariances": {"single": covariance},
+        "gripper_authorization": {"single": None},
     }
 
     response = server._resolve(
@@ -172,7 +184,7 @@ def test_rlbench_worker_commits_bounded_progress_without_completing_target() -> 
         commit=True,
     )
 
-    assert server.policy.commits == [False]
+    assert server.policy.commits == [({"single": True}, {"single": False})]
     assert server._tick == 5
     assert np.array_equal(server._previous_ee["single"], pre_action)
     assert np.array_equal(server._previous_command["single"], target)
@@ -183,26 +195,102 @@ def test_rlbench_worker_commits_bounded_progress_without_completing_target() -> 
         "rlbench_action_resolution",
         {
             "status": "progressed",
+            "status_by_arm": {"single": "progressed"},
             "command_issued": True,
-            "absolute_target_completed": False,
+            "task_command_applied": {"single": True},
+            "action_response_observed": {"single": True},
+            "absolute_target_completed": {"single": False},
+            "gripper_authorization": {"single": None},
         },
     )
 
 
+def test_rlbench_worker_does_not_use_bimanual_status_as_progress_commit() -> None:
+    class Diagnostics:
+        def annotate_last(self, name, value) -> None:
+            del name, value
+
+    class Policy:
+        def __init__(self) -> None:
+            self.complete = False
+            self.commit_args = None
+            self.diagnostics = Diagnostics()
+
+        def commit(
+            self,
+            *,
+            task_command_applied,
+            absolute_target_completed,
+        ) -> None:
+            self.commit_args = (
+                task_command_applied,
+                absolute_target_completed,
+            )
+
+    server = object.__new__(ClosedLoopPolicyServer)
+    server.arms = ("left", "right")
+    server.policy = Policy()
+    server._tick = 2
+    pose = _pose_xyzw(0.0)
+    target = _pose_xyzw(0.1)
+    server._previous_ee = {"left": None, "right": None}
+    server._previous_command = {"left": None, "right": None}
+    server._previous_command_covariance = {"left": None, "right": None}
+    server._pending = {
+        "transaction_id": 3,
+        "pre_action_ee": {"left": pose.copy(), "right": pose.copy()},
+        "commands": {"left": target.copy(), "right": target.copy()},
+        "command_covariances": {"left": np.eye(6), "right": np.eye(6)},
+        "gripper_authorization": {"left": None, "right": None},
+    }
+
+    response = server._resolve(
+        {
+            "transaction_id": 3,
+            "primary_action_status": "progressed",
+            "primary_action_statuses": {
+                "left": "stopped",
+                "right": "progressed",
+            },
+        },
+        commit=True,
+    )
+
+    assert server.policy.commit_args == (
+        {"left": True, "right": True},
+        {"left": False, "right": False},
+    )
+    assert response["primary_action_statuses"] == {
+        "left": "stopped",
+        "right": "progressed",
+    }
+
+
 def test_rlbench_action_status_reads_stage6_arm_mode_only_when_available() -> None:
     assert policy_action_execution_status(SimpleNamespace()) == "reached"
+    assert policy_action_execution_statuses(SimpleNamespace()) == {"single": "reached"}
     environment = SimpleNamespace(
         _action_mode=SimpleNamespace(
-            arm_action_mode=SimpleNamespace(policy_action_status=lambda: "progressed")
+            arm_action_mode=SimpleNamespace(
+                policy_action_status=lambda: "progressed",
+                policy_action_statuses=lambda: {
+                    "left": "stopped",
+                    "right": "progressed",
+                },
+            )
         )
     )
     assert policy_action_execution_status(environment) == "progressed"
+    assert policy_action_execution_statuses(environment) == {
+        "left": "stopped",
+        "right": "progressed",
+    }
     environment._action_mode.arm_action_mode.policy_action_status = lambda: "invalid"
     with pytest.raises(RuntimeError, match="unsupported policy action"):
         policy_action_execution_status(environment)
 
 
-def test_stage6_gripper_command_waits_for_absolute_pose_completion() -> None:
+def test_stage6_gripper_uses_task_authorization_or_legacy_pose_completion() -> None:
     calls = []
     gripper = SimpleNamespace(
         action=lambda scene, action: calls.append((scene, action.copy()))
@@ -211,7 +299,7 @@ def test_stage6_gripper_command_waits_for_absolute_pose_completion() -> None:
     command = np.asarray([1.0])
 
     for status in ("progressed", "stopped"):
-        assert not apply_gripper_after_completed_policy_target(
+        assert not apply_gripper_for_policy_target(
             gripper,
             scene,
             command,
@@ -219,7 +307,7 @@ def test_stage6_gripper_command_waits_for_absolute_pose_completion() -> None:
         )
     assert calls == []
 
-    assert apply_gripper_after_completed_policy_target(
+    assert apply_gripper_for_policy_target(
         gripper,
         scene,
         command,
@@ -228,6 +316,99 @@ def test_stage6_gripper_command_waits_for_absolute_pose_completion() -> None:
     assert len(calls) == 1
     assert calls[0][0] is scene
     assert np.array_equal(calls[0][1], command)
+
+    assert apply_gripper_for_policy_target(
+        gripper,
+        scene,
+        command,
+        arm_status="stopped",
+        gripper_authorized=True,
+    )
+    assert not apply_gripper_for_policy_target(
+        gripper,
+        scene,
+        command,
+        arm_status="reached",
+        gripper_authorized=False,
+    )
+    assert len(calls) == 2
+
+
+def test_task_gripper_authorization_uses_alignment_and_boundary_transaction() -> None:
+    source = StateId(0, 2)
+    entry = StateId(1, 0)
+    final = StateId(1, 3)
+    policy = SimpleNamespace(
+        task_models={
+            "right": SimpleNamespace(
+                states={
+                    source: SimpleNamespace(
+                        topology=SimpleNamespace(has_cross_skill_successor=True)
+                    ),
+                    entry: SimpleNamespace(
+                        topology=SimpleNamespace(has_cross_skill_successor=False)
+                    ),
+                    final: SimpleNamespace(
+                        topology=SimpleNamespace(has_cross_skill_successor=False)
+                    ),
+                }
+            )
+        }
+    )
+    command = ArmCommand(
+        pose=_pose_xyzw(0.1),
+        covariance=np.eye(6),
+        gripper=np.asarray([-1.0]),
+        source="task_poe",
+    )
+
+    def authorization(reference, estimated, status, boundary=None):
+        return ClosedLoopMultiStreamPolicy._task_gripper_authorized(
+            policy,
+            "right",
+            command,
+            SimpleNamespace(cursor_after=SimpleNamespace(reference_state=reference)),
+            SimpleNamespace(
+                progress=SimpleNamespace(
+                    status=status,
+                    estimated_state=estimated,
+                )
+            ),
+            boundary,
+        )
+
+    # A source-skill terminal cannot close/open the gripper before its entry
+    # guard transaction commits, even when the progress posterior is aligned.
+    assert authorization(source, source, ProgressStatus.ALIGNED) is False
+    # A committed boundary authorizes the entry-state command in the same
+    # cycle although the posterior still describes the source terminal.
+    committed = SimpleNamespace(
+        transaction=SimpleNamespace(committed=(SimpleNamespace(arm_id="right"),))
+    )
+    assert authorization(entry, source, ProgressStatus.ALIGNED, committed) is True
+    # An ordinary/final task state is authorized only by posterior/reference
+    # agreement; physical reached/progressed/stopped is not an input.
+    assert authorization(final, final, ProgressStatus.ALIGNED) is True
+    assert authorization(final, entry, ProgressStatus.ALIGNED) is False
+    assert authorization(final, final, ProgressStatus.LOW_CONFIDENCE) is False
+
+
+def test_rlbench_gripper_authorization_is_forwarded_to_action_mode() -> None:
+    received = []
+    environment = SimpleNamespace(
+        _action_mode=SimpleNamespace(
+            set_policy_gripper_authorization=lambda value: received.append(value)
+        )
+    )
+    authorization = {"left": False, "right": True}
+    set_policy_gripper_authorization(environment, authorization)
+    assert received == [authorization]
+
+    with pytest.raises(RuntimeError, match="cannot consume"):
+        set_policy_gripper_authorization(
+            SimpleNamespace(),
+            {"single": True},
+        )
 
 
 def test_directional_boundary_verification_request_routes_to_receiver_arm() -> None:
@@ -339,9 +520,11 @@ def test_top_policy_bootstrap_abort_and_rejected_action_do_not_advance() -> None
 
     rejected = policy.act({"single": dynamac}, {"single": runtime0})
     assert rejected.arms["single"].belief.progress.nominal_state == initial
-    policy.commit(action_executed=False)
+    policy.commit(task_command_applied=False)
     assert policy.diagnostics.records[-1]["action_commit"] == {
-        "action_executed": False,
+        "task_command_applied": {"single": False},
+        "absolute_target_completed": {"single": False},
+        "gripper_command_applied": {"single": False},
         "executed_reference_states": None,
     }
     arm_diagnostics = policy.diagnostics.records[-1]["arms"]["single"]
@@ -367,7 +550,7 @@ def test_top_policy_bootstrap_abort_and_rejected_action_do_not_advance() -> None
     assert policy._last_executed_reference == {"single": initial}
 
 
-def test_policy_completes_only_after_final_reference_command_is_committed() -> None:
+def test_policy_completes_after_authorized_final_gripper_command_is_committed() -> None:
     bundle = BUNDLE_ROOT / "stack_wine"
     checkpoint = BASE_ROOT / "stack_wine/model.npz"
     try:
@@ -416,8 +599,22 @@ def test_policy_completes_only_after_final_reference_command_is_committed() -> N
     assert cycle.arms["single"].execution is not None
     assert cycle.arms["single"].execution.weighted_action.state_id == final_state
     assert policy.complete is False
-    policy.commit(action_executed=True)
+    # This test isolates the terminal commit contract.  State-to-gripper
+    # authorization itself is tested independently above and by real replay.
+    authorized_arm = replace(
+        cycle.arms["single"],
+        command=replace(
+            cycle.arms["single"].command,
+            gripper_authorized=True,
+        ),
+    )
+    policy._last_cycle = replace(cycle, arms={"single": authorized_arm})
+    policy.commit(
+        task_command_applied=True,
+        absolute_target_completed=False,
+    )
     assert policy.complete is True
+    assert policy._last_executed_reference == {"single": final_state}
     with pytest.raises(RuntimeError, match="已完成"):
         policy.act({"single": dynamac}, {"single": runtime})
 

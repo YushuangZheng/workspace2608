@@ -411,7 +411,7 @@ IK_SAMPLING_MAX_CONFIGS = 5
 IK_SAMPLING_MAX_TIME_MS = 10
 IK_JOINT_LIMIT_ATOL = 1.0e-9
 GLOBAL_IK_CONTROLLER_PROFILE = "global_pseudo_trac_sampling_path_formal_v1"
-STAGE6_IK_CONTROLLER_PROFILE = "stage6_hybrid_cartesian_executor_v16"
+STAGE6_IK_CONTROLLER_PROFILE = "stage6_hybrid_cartesian_executor_v17"
 FROZEN_V4_CONTROLLER_PROFILE = "v4_frozen_legacy_replay"
 FROZEN_V4_IK_RESOLUTION_METHOD = "pseudo_inverse"
 FROZEN_V4_IK_MAX_ITERATIONS = 6
@@ -651,7 +651,7 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
 
     @property
     def protocol_id(self) -> str:
-        return "rlbench-stage6-hybrid-cartesian-continuation-v18"
+        return "rlbench-stage6-hybrid-cartesian-continuation-v20"
 
     def metadata(self) -> dict[str, Any]:
         value = super().metadata()
@@ -741,9 +741,14 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
                     "collision_aware_first_then_bounded_relaxation"
                 ),
                 "same_target_alternate_solver_after_primary_stall": True,
+                "same_target_solver_tier_persistence": (
+                    "per_arm_exact_target_across_closed_loop_cycles"
+                ),
                 "physical_stall_solver_order": (
                     "pseudo_inverse_then_trac_ik_distance_then_"
-                    "cartesian_continuation_then_sampling_then_path"
+                    "cartesian_continuation_then_sampling_then_"
+                    "collision_aware_linear_path_then_collision_aware_"
+                    "nonlinear_path_then_collision_relaxed_linear_path"
                 ),
                 "physical_stall_sampling_candidate_validation": (
                     "shape_finite_joint_limits_and_joint_continuity"
@@ -861,12 +866,17 @@ def global_ik_controller_metadata(
                     "sampling_collision_policy"
                 ],
                 "same_target_alternate_solver_after_primary_stall": True,
+                "same_target_solver_tier_persistence": config.metadata()[
+                    "same_target_solver_tier_persistence"
+                ],
                 "physical_stall_resolution": (
                     "same_target_bounded_solver_escalation_then_report_stall"
                 ),
                 "physical_stall_solver_order": (
                     "pseudo_inverse_then_trac_ik_distance_then_"
-                    "cartesian_continuation_then_sampling_then_path"
+                    "cartesian_continuation_then_sampling_then_"
+                    "collision_aware_linear_path_then_collision_aware_"
+                    "nonlinear_path_then_collision_relaxed_linear_path"
                 ),
                 "physical_stall_sampling_candidate_validation": (
                     "shape_finite_joint_limits_and_joint_continuity"
@@ -914,6 +924,8 @@ class PreparedEECommand:
 
 
 _STAGE6_JOINT_CACHE_ATTRIBUTE = "_dynamac_stage6_joint_target_cache_v1"
+_STAGE6_SOLVER_TIER_ATTRIBUTE = "_dynamac_stage6_solver_tier_v1"
+_STAGE6_SOLVER_TIER_COUNT = 7
 
 
 def _same_stage6_cartesian_target(left: Array, right: Array) -> bool:
@@ -996,6 +1008,75 @@ def _invalidate_stage6_joint_command(arm: Any, target: Array) -> bool:
         return False
     delattr(arm, _STAGE6_JOINT_CACHE_ATTRIBUTE)
     return True
+
+
+def _stage6_same_target_solver_tier(
+    arm: Any,
+    target: Array,
+    *,
+    diagnostics: dict[str, Any],
+) -> int:
+    """Restore the bounded solver tier for one unchanged Cartesian target.
+
+    A Stage-6 policy target may span several observation cycles.  The raw
+    physics budget intentionally ends each cycle early, so a physically
+    stalled solver family must remember that result; otherwise every new
+    cycle restarts at pseudo-inverse and the documented fallback chain is
+    unreachable.  A changed target starts a fresh chain at tier zero.
+    """
+
+    state = getattr(arm, _STAGE6_SOLVER_TIER_ATTRIBUTE, None)
+    if isinstance(state, dict):
+        cached_pose = np.asarray(state.get("target_pose"), dtype=np.float64)
+        tier = state.get("minimum_solver_tier")
+        if (
+            cached_pose.shape == (7,)
+            and np.all(np.isfinite(cached_pose))
+            and _same_stage6_cartesian_target(cached_pose, target)
+            and isinstance(tier, int)
+            and not isinstance(tier, bool)
+            and tier in range(_STAGE6_SOLVER_TIER_COUNT)
+        ):
+            _increment_ik_diagnostic(diagnostics, "same_target_solver_tier_cache_hits")
+            if tier > 0:
+                _increment_ik_diagnostic(
+                    diagnostics, "same_target_cross_cycle_solver_resumes"
+                )
+            return int(tier)
+    _increment_ik_diagnostic(diagnostics, "same_target_solver_tier_cache_misses")
+    setattr(
+        arm,
+        _STAGE6_SOLVER_TIER_ATTRIBUTE,
+        {
+            "target_pose": np.asarray(target, dtype=np.float64).copy(),
+            "minimum_solver_tier": 0,
+        },
+    )
+    return 0
+
+
+def _store_stage6_same_target_solver_tier(
+    arm: Any,
+    target: Array,
+    tier: int,
+) -> None:
+    if isinstance(tier, bool) or tier not in range(_STAGE6_SOLVER_TIER_COUNT):
+        raise ValueError("stage-six solver tier must be an integer in [0, 6]")
+    setattr(
+        arm,
+        _STAGE6_SOLVER_TIER_ATTRIBUTE,
+        {
+            "target_pose": np.asarray(target, dtype=np.float64).copy(),
+            "minimum_solver_tier": int(tier),
+        },
+    )
+
+
+def _clear_stage6_same_target_solver_tier(arm: Any) -> None:
+    try:
+        delattr(arm, _STAGE6_SOLVER_TIER_ATTRIBUTE)
+    except AttributeError:
+        pass
 
 
 @dataclass
@@ -1146,21 +1227,81 @@ def policy_action_execution_status(task_environment: Any) -> str:
     return str(status)
 
 
-def apply_gripper_after_completed_policy_target(
+def policy_action_execution_statuses(task_environment: Any) -> dict[str, str]:
+    """Return per-arm physical response status for the latest policy target.
+
+    The aggregate status remains the authority for atomic gripper submission.
+    These per-arm values are executor diagnostics only; the closed-loop task
+    progress prior consumes the applied command and next observation, not this
+    low-level classification.
+    """
+
+    action_mode = getattr(task_environment, "_action_mode", None)
+    arm_action_mode = getattr(action_mode, "arm_action_mode", None)
+    statuses_fn = getattr(arm_action_mode, "policy_action_statuses", None)
+    if callable(statuses_fn):
+        statuses = statuses_fn()
+        if not isinstance(statuses, dict) or not statuses:
+            raise RuntimeError("policy arm action statuses must be a non-empty dict")
+    else:
+        statuses = {"single": policy_action_execution_status(task_environment)}
+    result = {}
+    for arm, status in statuses.items():
+        if not isinstance(arm, str) or not arm:
+            raise RuntimeError("policy arm action status keys must be arm names")
+        if status not in {"reached", "progressed", "stopped"}:
+            raise RuntimeError(f"unsupported per-arm policy action status: {status!r}")
+        result[arm] = str(status)
+    return result
+
+
+def apply_gripper_for_policy_target(
     gripper_action_mode: Any,
     scene: Any,
     gripper_action: Array,
     *,
     arm_status: str,
+    gripper_authorized: bool | None = None,
 ) -> bool:
-    """Apply a waypoint's gripper command only after its arm pose completes."""
+    """Apply a gripper command under task authorization or legacy sequencing.
+
+    Closed-loop TASK commands pass an explicit authorization derived from the
+    task posterior and boundary transaction.  ``None`` retains the historical
+    pose-completion rule for baseline, frozen-peer and auxiliary commands.
+    """
 
     if arm_status not in {"reached", "progressed", "stopped"}:
         raise ValueError(f"unsupported arm execution status: {arm_status!r}")
-    if arm_status != "reached":
+    if gripper_authorized is not None and not isinstance(
+        gripper_authorized, (bool, np.bool_)
+    ):
+        raise TypeError("gripper_authorized must be Boolean or None")
+    apply = (
+        arm_status == "reached"
+        if gripper_authorized is None
+        else bool(gripper_authorized)
+    )
+    if not apply:
         return False
     gripper_action_mode.action(scene, gripper_action)
     return True
+
+
+def set_policy_gripper_authorization(
+    task_environment: Any,
+    authorization: Mapping[str, bool | None] | None,
+) -> None:
+    """Attach one cycle's closed-loop gripper authorization to its action."""
+
+    action_mode = getattr(task_environment, "_action_mode", None)
+    setter = getattr(action_mode, "set_policy_gripper_authorization", None)
+    if callable(setter):
+        setter(authorization)
+        return
+    if authorization is not None and any(
+        value is not None for value in authorization.values()
+    ):
+        raise RuntimeError("action mode cannot consume policy gripper authorization")
 
 
 def commit_joint_hold_after_primary_failure(
@@ -1302,6 +1443,11 @@ def initialize_global_ik_controller_diagnostics() -> dict[str, Any]:
             "physical_stall_solver_escalations": 0,
             "physical_stall_solver_escalation_exhaustions": 0,
             "physical_stall_solver_tier_max": 0,
+            "same_target_solver_tier_cache_hits": 0,
+            "same_target_solver_tier_cache_misses": 0,
+            "same_target_cross_cycle_solver_resumes": 0,
+            "same_target_cross_cycle_solver_escalations": 0,
+            "same_target_solver_tier_resets_after_progress": 0,
             "same_target_joint_cache_hits": 0,
             "same_target_joint_cache_misses": 0,
             "same_target_joint_cache_rejections": 0,
@@ -2658,8 +2804,10 @@ def _prepare_stage6_hybrid_command(
     target solution.
     """
 
-    if isinstance(minimum_solver_tier, bool) or minimum_solver_tier not in range(5):
-        raise ValueError("minimum_solver_tier must be an integer in [0, 4]")
+    if isinstance(minimum_solver_tier, bool) or minimum_solver_tier not in range(
+        _STAGE6_SOLVER_TIER_COUNT
+    ):
+        raise ValueError("minimum_solver_tier must be an integer in [0, 6]")
 
     current = np.asarray(arm.get_joint_positions(), dtype=np.float64)
     if current.ndim != 1 or not np.all(np.isfinite(current)):
@@ -2791,7 +2939,10 @@ def _prepare_collision_aware_path_command(
     path_algorithm: Any,
     error_message: str,
     allow_near_nonlinear: bool = False,
+    minimum_path_tier: int = 0,
 ) -> PreparedEECommand | None:
+    if isinstance(minimum_path_tier, bool) or minimum_path_tier not in range(3):
+        raise ValueError("minimum_path_tier must be an integer in [0, 2]")
     _set_ik_group_properties(
         arm,
         resolution_method=FROZEN_V4_IK_RESOLUTION_METHOD,
@@ -2802,7 +2953,7 @@ def _prepare_collision_aware_path_command(
     )
     if isinstance(config, Stage6IKControllerConfig):
         linear_path = getattr(arm, "get_linear_path", None)
-        if callable(linear_path):
+        if callable(linear_path) and minimum_path_tier <= 0:
             _increment_ik_diagnostic(diagnostics, "linear_path_attempts")
             try:
                 path = linear_path(
@@ -2831,7 +2982,7 @@ def _prepare_collision_aware_path_command(
         nonlinear_allowed = bool(
             allow_near_nonlinear or translation > config.far_translation_threshold_m
         )
-        if nonlinear_allowed:
+        if nonlinear_allowed and minimum_path_tier <= 1:
             _increment_ik_diagnostic(diagnostics, "nonlinear_path_attempts")
             if translation > config.far_translation_threshold_m:
                 _increment_ik_diagnostic(diagnostics, "far_target_planner_attempts")
@@ -2867,7 +3018,7 @@ def _prepare_collision_aware_path_command(
                     mode="planned_path",
                     path=path,
                 )
-        else:
+        elif minimum_path_tier <= 1:
             _increment_ik_diagnostic(diagnostics, "near_target_nonlinear_planner_skips")
 
         # Collision relaxation remains a last resort for contact goals whose
@@ -3023,6 +3174,11 @@ def execute_global_ik_ee_control(
                     allow_near_nonlinear=bool(
                         use_stage6_hybrid_solver_order
                         and stage6_minimum_solver_tier >= 4
+                    ),
+                    minimum_path_tier=(
+                        max(0, stage6_minimum_solver_tier - 4)
+                        if use_stage6_hybrid_solver_order
+                        else 0
                     ),
                 )
             if command is None:
@@ -3188,6 +3344,9 @@ def execute_stage6_ik_ee_control(
     path_algorithm: Any,
     error_message: str,
     max_steps: int = 200,
+    per_arm_status_out: (
+        dict[int, Literal["reached", "progressed", "stopped"]] | None
+    ) = None,
 ) -> Literal["reached", "progressed", "stopped"]:
     """Reach one policy target with bounded Cartesian continuation.
 
@@ -3209,6 +3368,35 @@ def execute_stage6_ik_ee_control(
         (arm, np.asarray(target, dtype=np.float64).copy())
         for arm, target in arm_targets
     )
+    original_scores = {
+        id(arm): _cartesian_residual_score(arm, target, config=config)
+        for arm, target in normalized
+    }
+
+    def finish(
+        overall_status: Literal["reached", "progressed", "stopped"],
+    ) -> Literal["reached", "progressed", "stopped"]:
+        if per_arm_status_out is not None:
+            per_arm_status_out.clear()
+            for arm, target in normalized:
+                translation, rotation = end_effector_pose_distance(
+                    _arm_tip_pose(arm), target
+                )
+                if (
+                    translation <= config.control_acceptance_translation_tolerance_m
+                    and rotation <= config.control_acceptance_rotation_tolerance_rad
+                ):
+                    status: Literal["reached", "progressed", "stopped"] = "reached"
+                elif (
+                    _cartesian_residual_score(arm, target, config=config)
+                    < original_scores[id(arm)] - 1.0e-6
+                ):
+                    status = "progressed"
+                else:
+                    status = "stopped"
+                per_arm_status_out[id(arm)] = status
+        return overall_status
+
     # The previous bounded prefix may already have placed every tip inside the
     # accepted Cartesian envelope.  Accept that observation before rebuilding
     # or stepping any IK controller; issuing a fresh joint command here can
@@ -3219,18 +3407,26 @@ def execute_stage6_ik_ee_control(
         translation_tolerance_m=config.control_acceptance_translation_tolerance_m,
         rotation_tolerance_rad=config.control_acceptance_rotation_tolerance_rad,
     ):
+        for arm, _target in normalized:
+            _clear_stage6_same_target_solver_tier(arm)
         _increment_ik_diagnostic(
             diagnostics,
             "cartesian_pre_execution_control_accepts",
         )
-        return "reached"
-    original_scores = {
-        id(arm): _cartesian_residual_score(arm, target, config=config)
-        for arm, target in normalized
-    }
+        return finish("reached")
     before_scores = dict(original_scores)
     made_any_progress = False
-    minimum_solver_tier = 0
+    # Restore the lowest tier shared by the unchanged multi-arm transaction.
+    # If any arm has a new target its tier is zero, so the whole synchronized
+    # command safely restarts before later common stalls advance every lane.
+    minimum_solver_tier = min(
+        _stage6_same_target_solver_tier(
+            arm,
+            target,
+            diagnostics=diagnostics,
+        )
+        for arm, target in normalized
+    )
     raw_steps_at_entry = int(
         diagnostics.get("trac_ik_distance_controller_raw_physics_steps", 0)
     )
@@ -3246,7 +3442,7 @@ def execute_stage6_ik_ee_control(
                 diagnostics,
                 "cartesian_policy_action_physics_budget_exhaustions",
             )
-            return "progressed" if made_any_progress else "stopped"
+            return finish("progressed" if made_any_progress else "stopped")
         _increment_ik_diagnostic(diagnostics, "cartesian_direct_goal_attempts")
         prepared_commands: dict[int, PreparedEECommand] = {}
         try:
@@ -3281,7 +3477,7 @@ def execute_stage6_ik_ee_control(
                 diagnostics,
                 "cartesian_multi_pass_solver_exhaustions_after_progress",
             )
-            return "progressed" if made_any_progress else "stopped"
+            return finish("progressed" if made_any_progress else "stopped")
 
         if segment_index > 0:
             _increment_ik_diagnostic(
@@ -3293,6 +3489,8 @@ def execute_stage6_ik_ee_control(
             diagnostics=diagnostics,
         )
         if not unresolved_after_direct:
+            for arm, _target in normalized:
+                _clear_stage6_same_target_solver_tier(arm)
             for arm, target in normalized:
                 command = prepared_commands.get(id(arm))
                 if command is not None:
@@ -3309,12 +3507,14 @@ def execute_stage6_ik_ee_control(
                 _increment_ik_diagnostic(
                     diagnostics, "cartesian_multi_pass_goals_completed"
                 )
-            return "reached"
+            return finish("reached")
         if _cartesian_targets_within_tolerance(
             normalized,
             translation_tolerance_m=(config.control_acceptance_translation_tolerance_m),
             rotation_tolerance_rad=config.control_acceptance_rotation_tolerance_rad,
         ):
+            for arm, _target in normalized:
+                _clear_stage6_same_target_solver_tier(arm)
             for arm, target in normalized:
                 command = prepared_commands.get(id(arm))
                 if command is not None:
@@ -3333,7 +3533,7 @@ def execute_stage6_ik_ee_control(
                 _increment_ik_diagnostic(
                     diagnostics, "cartesian_multi_pass_goals_completed"
                 )
-            return "reached"
+            return finish("reached")
 
         direct_scores = {
             id(arm): _cartesian_residual_score(arm, target, config=config)
@@ -3376,6 +3576,17 @@ def execute_stage6_ik_ee_control(
                 _increment_ik_diagnostic(
                     diagnostics, "cartesian_partial_arm_progress_accepts"
                 )
+            # A fallback tier that produced real motion has changed the local
+            # kinematic/contact state.  Re-observe it on the next policy cycle
+            # and give the current-seeded local controller a fresh chance;
+            # tier persistence is only evidence about a *stalled* command,
+            # not a permanent ban after the world has improved.
+            if minimum_solver_tier > 0:
+                for arm, target in normalized:
+                    _store_stage6_same_target_solver_tier(arm, target, 0)
+                _increment_ik_diagnostic(
+                    diagnostics, "same_target_solver_tier_resets_after_progress"
+                )
             # Once an alternate family has produced useful motion, return the
             # measured progress to the policy.  The next policy cycle then
             # re-observes the world before deciding whether the same target is
@@ -3393,9 +3604,9 @@ def execute_stage6_ik_ee_control(
                     ),
                     raw_steps_used,
                 )
-                return "progressed"
+                return finish("progressed")
             if minimum_solver_tier > 0:
-                return "progressed"
+                return finish("progressed")
             before_scores = direct_scores
             continue
 
@@ -3414,6 +3625,25 @@ def execute_stage6_ik_ee_control(
             ),
         )
         if raw_physics_budget_exhausted:
+            if (
+                not direct_progressed
+                and minimum_solver_tier < _STAGE6_SOLVER_TIER_COUNT - 1
+            ):
+                minimum_solver_tier += 1
+                for arm, target in normalized:
+                    _store_stage6_same_target_solver_tier(
+                        arm, target, minimum_solver_tier
+                    )
+                _increment_ik_diagnostic(
+                    diagnostics, "physical_stall_solver_escalations"
+                )
+                _increment_ik_diagnostic(
+                    diagnostics, "same_target_cross_cycle_solver_escalations"
+                )
+                diagnostics["physical_stall_solver_tier_max"] = max(
+                    int(diagnostics.get("physical_stall_solver_tier_max", 0)),
+                    minimum_solver_tier,
+                )
             _increment_ik_diagnostic(
                 diagnostics,
                 "cartesian_policy_action_physics_budget_exhaustions",
@@ -3424,11 +3654,13 @@ def execute_stage6_ik_ee_control(
                 ),
                 raw_steps_used,
             )
-            return "progressed" if made_any_progress else "stopped"
+            return finish("progressed" if made_any_progress else "stopped")
         if made_any_progress:
-            return "progressed"
-        if minimum_solver_tier < 4:
+            return finish("progressed")
+        if minimum_solver_tier < _STAGE6_SOLVER_TIER_COUNT - 1:
             minimum_solver_tier += 1
+            for arm, target in normalized:
+                _store_stage6_same_target_solver_tier(arm, target, minimum_solver_tier)
             _increment_ik_diagnostic(diagnostics, "physical_stall_solver_escalations")
             diagnostics["physical_stall_solver_tier_max"] = max(
                 int(diagnostics.get("physical_stall_solver_tier_max", 0)),
@@ -3438,7 +3670,7 @@ def execute_stage6_ik_ee_control(
         _increment_ik_diagnostic(
             diagnostics, "physical_stall_solver_escalation_exhaustions"
         )
-        return "progressed" if made_any_progress else "stopped"
+        return finish("progressed" if made_any_progress else "stopped")
 
     _increment_ik_diagnostic(diagnostics, "cartesian_multi_pass_limit_exhaustions")
     final_scores = {
@@ -3449,7 +3681,7 @@ def execute_stage6_ik_ee_control(
         original_scores,
         final_scores,
     )
-    return "progressed" if overall_progressed else "stopped"
+    return finish("progressed" if overall_progressed else "stopped")
 
 
 def xyzw_to_wxyz(pose: Array) -> Array:

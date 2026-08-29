@@ -56,7 +56,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     Stage6IKControllerConfig,
     PrimaryActionRetryBudget,
     ScenarioController,
-    apply_gripper_after_completed_policy_target,
+    apply_gripper_for_policy_target,
     commit_joint_hold_after_primary_failure,
     execute_global_ik_ee_control,
     execute_stage6_ik_ee_control,
@@ -67,6 +67,8 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     initialize_global_ik_controller_diagnostics,
     initialize_ik_solver_diagnostics,
     policy_action_execution_status,
+    policy_action_execution_statuses,
+    set_policy_gripper_authorization,
     run_final_settling,
     solve_absolute_ee_ik_with_sampling_fallback,
     step_current_joint_hold_noop,
@@ -596,6 +598,10 @@ def _make_action_mode(
             self._external_solver_factory = external_solver_factory
             self._external_solvers = {}
             self._last_policy_action_status = "reached"
+            self._last_policy_action_statuses = {
+                "left": "reached",
+                "right": "reached",
+            }
             if controller_profile in {
                 GLOBAL_IK_CONTROLLER_PROFILE,
                 STAGE6_IK_CONTROLLER_PROFILE,
@@ -632,6 +638,13 @@ def _make_action_mode(
                 self._last_policy_action_status
                 if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
                 else "reached"
+            )
+
+        def policy_action_statuses(self):
+            return (
+                dict(self._last_policy_action_statuses)
+                if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
+                else {"left": "reached", "right": "reached"}
             )
 
         def _external_solver_for_arm(self, arm):
@@ -712,6 +725,10 @@ def _make_action_mode(
                         if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
                         else execute_global_ik_ee_control
                     )
+                    per_arm_status = {}
+                    executor_kwargs = {}
+                    if executor is execute_stage6_ik_ee_control:
+                        executor_kwargs["per_arm_status_out"] = per_arm_status
                     status = executor(
                         scene,
                         (
@@ -730,6 +747,7 @@ def _make_action_mode(
                             "bimanual formal pseudo/TRAC-IK/sampling/path EE "
                             "control failed"
                         ),
+                        **executor_kwargs,
                     )
                 except InvalidActionError:
                     self._execution_diagnostics[
@@ -738,6 +756,10 @@ def _make_action_mode(
                     raise
                 self._execution_diagnostics[f"joint_target_{status}"] += 1
                 self._last_policy_action_status = status
+                self._last_policy_action_statuses = {
+                    "right": per_arm_status.get(id(scene.robot.right_arm), status),
+                    "left": per_arm_status.get(id(scene.robot.left_arm), status),
+                }
                 return status
             # Solve both sides before moving either side, so a target that is
             # invalid even after the far-target fallback cannot create a
@@ -765,6 +787,10 @@ def _make_action_mode(
                 raise
             self._execution_diagnostics[f"joint_target_{status}"] += 1
             self._last_policy_action_status = "reached"
+            self._last_policy_action_statuses = {
+                "left": "reached",
+                "right": "reached",
+            }
             return "reached"
 
         def action_shape(self, scene):
@@ -776,6 +802,25 @@ def _make_action_mode(
             return (7,)
 
     class BoundedBimanualMoveArmThenGripper(BimanualMoveArmThenGripper):
+        def __init__(self, arm_action_mode, gripper_action_mode):
+            super().__init__(arm_action_mode, gripper_action_mode)
+            self._policy_gripper_authorization = None
+
+        def set_policy_gripper_authorization(self, authorization):
+            if authorization is None:
+                self._policy_gripper_authorization = None
+                return
+            if set(authorization) != {"left", "right"}:
+                raise ValueError(
+                    "bimanual gripper authorization must cover left and right"
+                )
+            normalized = {}
+            for arm, value in authorization.items():
+                if value is not None and not isinstance(value, bool):
+                    raise TypeError("bimanual gripper authorization must be Boolean")
+                normalized[arm] = value
+            self._policy_gripper_authorization = normalized
+
         def action(self, scene, action):
             if len(action) != 18:
                 raise ValueError("bimanual absolute EE action must contain 18 values")
@@ -801,15 +846,49 @@ def _make_action_mode(
                 arm_action,
                 ignore_collisions,
             )
-            # Preserve the original bimanual action as one atomic waypoint:
-            # neither gripper lane commits while either arm is still executing
-            # a bounded prefix of the shared Cartesian target.
-            apply_gripper_after_completed_policy_target(
-                self.gripper_action_mode,
-                scene,
-                gripper_action,
-                arm_status=status,
+            authorization = self._policy_gripper_authorization
+            self._policy_gripper_authorization = None
+            if authorization is None:
+                apply_gripper_for_policy_target(
+                    self.gripper_action_mode,
+                    scene,
+                    gripper_action,
+                    arm_status=status,
+                )
+                return
+            statuses = self.arm_action_mode.policy_action_statuses()
+            ready = {
+                arm: (
+                    statuses[arm] == "reached"
+                    if authorization[arm] is None
+                    else bool(authorization[arm])
+                )
+                for arm in ("right", "left")
+            }
+            if not any(ready.values()):
+                return
+            current = np.asarray(
+                [
+                    float(
+                        all(
+                            value > 0.9
+                            for value in scene.robot.right_gripper.get_open_amount()
+                        )
+                    ),
+                    float(
+                        all(
+                            value > 0.9
+                            for value in scene.robot.left_gripper.get_open_amount()
+                        )
+                    ),
+                ],
+                dtype=np.float64,
             )
+            masked = gripper_action.copy()
+            for index, arm in enumerate(("right", "left")):
+                if not ready[arm]:
+                    masked[index] = current[index]
+            self.gripper_action_mode.action(scene, masked)
 
     return BoundedBimanualMoveArmThenGripper(
         BimanualAbsoluteEndEffectorIK(),
@@ -1362,6 +1441,10 @@ def _run_v4_store_episode(
         if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
             raise RuntimeError("policy worker did not return an action transaction id")
         control_attempts += 1
+        set_policy_gripper_authorization(
+            task_environment,
+            response.get("gripper_authorization"),
+        )
         primary_action_succeeded = False
         try:
             observation, reward, terminate = task_environment.step(
@@ -1399,6 +1482,9 @@ def _run_v4_store_episode(
                 "commit",
                 transaction_id=transaction_id,
                 primary_action_status=policy_action_execution_status(task_environment),
+                primary_action_statuses=policy_action_execution_statuses(
+                    task_environment
+                ),
             )
             policy_complete = bool(commit.get("complete"))
             committed_policy_steps += 1
@@ -1761,6 +1847,10 @@ def _run_episode(
         if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
             raise RuntimeError("policy worker did not return an action transaction id")
         control_attempts += 1
+        set_policy_gripper_authorization(
+            task_environment,
+            response.get("gripper_authorization"),
+        )
         primary_action_succeeded = False
         try:
             observation, reward, terminate = task_environment.step(
@@ -1799,6 +1889,9 @@ def _run_episode(
                 "commit",
                 transaction_id=transaction_id,
                 primary_action_status=policy_action_execution_status(task_environment),
+                primary_action_statuses=policy_action_execution_statuses(
+                    task_environment
+                ),
             )
             policy_complete = bool(commit.get("complete"))
             committed_policy_steps += 1

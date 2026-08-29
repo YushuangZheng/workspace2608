@@ -200,6 +200,44 @@ class BeliefUpdater:
             status=ProgressStatus.ALIGNED,
         )
 
+    def commit_relation_confirmation(
+        self,
+        frame_id: str,
+        posterior: np.ndarray,
+        decision: RelationDecision,
+    ) -> None:
+        """Commit one VERIFY_LINK window result into the existing binary q.
+
+        The supplied posterior is the original relation filter's posterior at
+        the control cycle where the independent probe-response check accepted
+        the same decision.  No new relation state or confidence is created;
+        this merely prevents the mandatory return trajectory from discarding
+        the already accepted window before normal guards can consume it.
+        """
+
+        if frame_id not in self.task_model.relation_frames:
+            raise KeyError(f"主动验证引用未知关系参考系：{frame_id}")
+        if decision not in {RelationDecision.EXTERNAL, RelationDecision.LINKED}:
+            raise ValueError("主动验证只能提交已确认的二元关系")
+        value = np.asarray(posterior, dtype=np.float64)
+        if (
+            value.shape != (2,)
+            or not np.all(np.isfinite(value))
+            or np.any(value < 0.0)
+            or float(np.sum(value)) <= 0.0
+        ):
+            raise ValueError("主动验证后验必须为有限非负二元向量")
+        value = value / float(np.sum(value))
+        expected = 1 if decision == RelationDecision.LINKED else 0
+        if (
+            int(np.argmax(value)) != expected
+            or value[expected] < self.config.relation_filter.decision_probability
+        ):
+            raise ValueError("主动验证后验与稳定关系决策不一致")
+        self._relation_posteriors[frame_id] = value.copy()
+        self._stable_decisions[frame_id] = decision
+        self._informative_evidence_decisions[frame_id] = decision
+
     def reset(
         self,
         *,

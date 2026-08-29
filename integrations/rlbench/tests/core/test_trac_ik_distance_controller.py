@@ -172,6 +172,40 @@ class _CollisionSelectiveSamplingArm(_CartesianArm):
         return np.asarray([[float(position[0]), 0.0]], dtype=np.float64)
 
 
+class _TaggedPath(_Path):
+    def __init__(self, arm, target, kind):
+        super().__init__(arm, target)
+        self.kind = str(kind)
+
+    def step(self):
+        self.arm.last_path_kind = self.kind
+        return super().step()
+
+
+class _PhysicallyStalledPathArm(_LinearPathArm):
+    """Expose valid paths while only the final relaxed family can move."""
+
+    def __init__(self):
+        super().__init__()
+        self.last_path_kind = None
+        self.path_family_history = []
+
+    def get_linear_path(self, position, **kwargs):
+        self.linear_path_calls.append((np.asarray(position).copy(), dict(kwargs)))
+        kind = "relaxed_linear" if kwargs["ignore_collisions"] else "aware_linear"
+        self.path_family_history.append(kind)
+        return _TaggedPath(self, [float(position[0]), 0.0], kind)
+
+    def get_path(self, position, **kwargs):
+        self.path_calls.append((np.asarray(position).copy(), dict(kwargs)))
+        self.path_family_history.append("aware_nonlinear")
+        return _TaggedPath(
+            self,
+            [float(position[0]), 0.0],
+            "aware_nonlinear",
+        )
+
+
 class _Scene:
     def __init__(self, *arms):
         self.arms = arms
@@ -212,6 +246,17 @@ class _SlowScene(_Scene):
         change = np.clip(delta, -self.step_size, self.step_size)
         self.arm.velocity = change / 0.05
         self.arm.current += change
+
+
+class _RelaxedPathOnlyScene(_Scene):
+    def step(self):
+        self.steps += 1
+        for arm in self.arms:
+            if arm.last_path_kind == "relaxed_linear":
+                arm.velocity = (arm.target - arm.current) / 0.05
+                arm.current = arm.target.copy()
+            else:
+                arm.velocity = np.zeros_like(arm.current)
 
 
 class _Solver:
@@ -303,7 +348,14 @@ def _execute(scene, arm_targets, factory, *, config=None):
     return status, diagnostics
 
 
-def _execute_stage6(scene, arm_targets, factory, *, config=None):
+def _execute_stage6(
+    scene,
+    arm_targets,
+    factory,
+    *,
+    config=None,
+    per_arm_status_out=None,
+):
     diagnostics = initialize_global_ik_controller_diagnostics()
     status = execute_stage6_ik_ee_control(
         scene,
@@ -317,6 +369,7 @@ def _execute_stage6(scene, arm_targets, factory, *, config=None):
         invalid_action_error=_InvalidActionError,
         path_algorithm="RRTConnect",
         error_message="stage6 IK failed",
+        per_arm_status_out=per_arm_status_out,
     )
     return status, diagnostics
 
@@ -413,6 +466,9 @@ def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
         pytest.approx(np.deg2rad(0.1))
     )
     assert controller["same_target_alternate_solver_after_primary_stall"] is True
+    assert controller["same_target_solver_tier_persistence"] == (
+        "per_arm_exact_target_across_closed_loop_cycles"
+    )
     assert controller["physical_stall_resolution"] == (
         "same_target_bounded_solver_escalation_then_report_stall"
     )
@@ -732,6 +788,35 @@ def test_stage6_escalates_same_target_after_primary_physically_stalls():
     assert diagnostics["selected_via_trac_ik_distance"] == 1
 
 
+def test_stage6_persists_solver_escalation_across_raw_physics_budgets():
+    arm = _CartesianArm(jacobian_result=lambda _position: [0.0, 0.0])
+    scene = _Scene(arm)
+    factory = _Factory(lambda target: [target[0], 0.0])
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_raw_physics_steps=1,
+    )
+
+    first_status, first_diagnostics = _execute_stage6(
+        scene,
+        ((arm, _target(0.05)),),
+        factory,
+        config=config,
+    )
+    second_status, second_diagnostics = _execute_stage6(
+        scene,
+        ((arm, _target(0.05)),),
+        factory,
+        config=config,
+    )
+
+    assert first_status == "stopped"
+    assert first_diagnostics["same_target_cross_cycle_solver_escalations"] == 1
+    assert second_status == "reached"
+    assert arm.solver_events == ["pseudo_inverse", "trac_ik_distance"]
+    assert second_diagnostics["same_target_cross_cycle_solver_resumes"] == 1
+    assert arm.current[0] == pytest.approx(0.05)
+
+
 def test_stage6_resolves_again_when_cartesian_target_changes():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _Scene(arm)
@@ -854,6 +939,44 @@ def test_stage6_near_fallback_uses_collision_aware_rrt_after_measured_stall():
     assert diagnostics["linear_path_collision_relaxed_attempts"] == 0
 
 
+def test_stage6_path_families_advance_after_physical_not_only_planning_stall():
+    arm = _PhysicallyStalledPathArm()
+    scene = _RelaxedPathOnlyScene(arm)
+    factory = _Factory(RuntimeError("no external solution"))
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_raw_physics_steps=1,
+    )
+    statuses = []
+    diagnostics = []
+
+    for _ in range(7):
+        status, audit = _execute_stage6(
+            scene,
+            ((arm, _target(0.05)),),
+            factory,
+            config=config,
+        )
+        statuses.append(status)
+        diagnostics.append(audit)
+        if status == "reached":
+            break
+
+    assert statuses == ["stopped"] * 6 + ["reached"]
+    assert arm.path_family_history == [
+        "aware_linear",
+        "aware_linear",
+        "aware_linear",
+        "aware_linear",
+        "aware_linear",
+        "aware_nonlinear",
+        "relaxed_linear",
+    ]
+    assert diagnostics[-2]["nonlinear_path_successes"] == 1
+    assert diagnostics[-1]["linear_path_collision_relaxed_successes"] == 1
+    assert max(row["physical_stall_solver_tier_max"] for row in diagnostics) == 6
+    assert arm.current[0] == pytest.approx(0.05)
+
+
 def test_stage6_keeps_all_bimanual_targets_active_on_the_shared_physics_clock():
     right = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     left = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
@@ -878,15 +1001,21 @@ def test_stage6_accepts_one_arm_progress_while_the_other_is_stationary():
     stalled = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     factory = _Factory(lambda target: [target[0], 0.0])
 
+    per_arm_status = {}
     status, diagnostics = _execute_stage6(
         _PartiallyStalledScene(moving, stalled),
         ((moving, _target(0.05)), (stalled, _target(0.05))),
         factory,
+        per_arm_status_out=per_arm_status,
     )
 
     assert status == "progressed"
     assert moving.current[0] == pytest.approx(0.05)
     assert stalled.current[0] == pytest.approx(0.0)
+    assert per_arm_status == {
+        id(moving): "reached",
+        id(stalled): "stopped",
+    }
     assert diagnostics["cartesian_partial_arm_progress_accepts"] == 1
 
 

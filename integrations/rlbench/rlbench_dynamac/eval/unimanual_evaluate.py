@@ -61,7 +61,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     Stage6IKControllerConfig,
     PrimaryActionRetryBudget,
     ScenarioController,
-    apply_gripper_after_completed_policy_target,
+    apply_gripper_for_policy_target,
     commit_joint_hold_after_primary_failure,
     execute_global_ik_ee_control,
     execute_stage6_ik_ee_control,
@@ -73,6 +73,8 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     initialize_ik_solver_diagnostics,
     run_final_settling,
     policy_action_execution_status,
+    policy_action_execution_statuses,
+    set_policy_gripper_authorization,
     solve_absolute_ee_ik_with_sampling_fallback,
     step_current_joint_hold_noop,
     stage_scenario_motion_plan,
@@ -425,6 +427,7 @@ def _make_action_mode(
             self._external_solver_factory = external_solver_factory
             self._external_solvers = {}
             self._last_policy_action_status = "reached"
+            self._last_policy_action_statuses = {"single": "reached"}
             if controller_profile in {
                 GLOBAL_IK_CONTROLLER_PROFILE,
                 STAGE6_IK_CONTROLLER_PROFILE,
@@ -464,6 +467,13 @@ def _make_action_mode(
                 self._last_policy_action_status
                 if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
                 else "reached"
+            )
+
+        def policy_action_statuses(self):
+            return (
+                dict(self._last_policy_action_statuses)
+                if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
+                else {"single": "reached"}
             )
 
         def _external_solver_for_arm(self, arm):
@@ -533,6 +543,10 @@ def _make_action_mode(
                         if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
                         else execute_global_ik_ee_control
                     )
+                    per_arm_status = {}
+                    executor_kwargs = {}
+                    if executor is execute_stage6_ik_ee_control:
+                        executor_kwargs["per_arm_status_out"] = per_arm_status
                     status = executor(
                         scene,
                         ((scene.robot.arm, target),),
@@ -548,6 +562,7 @@ def _make_action_mode(
                             "unimanual formal pseudo/TRAC-IK/sampling/path EE "
                             "control failed"
                         ),
+                        **executor_kwargs,
                     )
                 except InvalidActionError:
                     self._execution_diagnostics[
@@ -556,6 +571,9 @@ def _make_action_mode(
                     raise
                 self._execution_diagnostics[f"joint_target_{status}"] += 1
                 self._last_policy_action_status = status
+                self._last_policy_action_statuses = {
+                    "single": per_arm_status.get(id(scene.robot.arm), status)
+                }
                 return status
             joints = self._solve(scene.robot.arm, target)
             scene.robot.arm.set_joint_target_positions(joints)
@@ -574,6 +592,7 @@ def _make_action_mode(
                 raise
             self._execution_diagnostics[f"joint_target_{status}"] += 1
             self._last_policy_action_status = "reached"
+            self._last_policy_action_statuses = {"single": "reached"}
             return "reached"
 
         def action_shape(self, scene):
@@ -581,6 +600,21 @@ def _make_action_mode(
             return (7,)
 
     class PoseGripperIgnore(MoveArmThenGripper):
+        def __init__(self, arm_action_mode, gripper_action_mode):
+            super().__init__(arm_action_mode, gripper_action_mode)
+            self._policy_gripper_authorization = None
+
+        def set_policy_gripper_authorization(self, authorization):
+            if authorization is None:
+                self._policy_gripper_authorization = None
+                return
+            if set(authorization) != {"single"}:
+                raise ValueError("unimanual gripper authorization must cover single")
+            value = authorization["single"]
+            if value is not None and not isinstance(value, bool):
+                raise TypeError("unimanual gripper authorization must be Boolean")
+            self._policy_gripper_authorization = value
+
         def action(self, scene, action):
             arm_size = int(np.prod(self.arm_action_mode.action_shape(scene)))
             arm_action = np.asarray(action[:arm_size])
@@ -591,14 +625,14 @@ def _make_action_mode(
                 arm_action,
                 ignore_collisions,
             )
-            # A bounded Cartesian prefix is not the policy waypoint.  Defer
-            # its gripper command until the same absolute pose target has been
-            # physically reached on a later observation cycle.
-            apply_gripper_after_completed_policy_target(
+            authorization = self._policy_gripper_authorization
+            self._policy_gripper_authorization = None
+            apply_gripper_for_policy_target(
                 self.gripper_action_mode,
                 scene,
                 gripper_action,
                 arm_status=status,
+                gripper_authorized=authorization,
             )
 
         def action_shape(self, scene):
@@ -1145,6 +1179,10 @@ def _run_episode(
         if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
             raise RuntimeError("policy worker did not return an action transaction id")
         control_attempts += 1
+        set_policy_gripper_authorization(
+            task_environment,
+            response.get("gripper_authorization"),
+        )
         primary_action_succeeded = False
         try:
             observation, reward, terminate = task_environment.step(
@@ -1183,6 +1221,9 @@ def _run_episode(
                 "commit",
                 transaction_id=transaction_id,
                 primary_action_status=policy_action_execution_status(task_environment),
+                primary_action_statuses=policy_action_execution_statuses(
+                    task_environment
+                ),
             )
             policy_complete = bool(commit.get("complete"))
             committed_policy_steps += 1

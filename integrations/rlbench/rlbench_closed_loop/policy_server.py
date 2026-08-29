@@ -32,6 +32,8 @@ CLOSED_LOOP_GRIPPER_TIMING = {
     **global_gripper_timing_metadata(),
     "rule": "committed_reference_state_command",
     "lookahead_source": "not_required_after_guarded_reference_commit",
+    "authorization": "aligned_task_state_or_committed_boundary_transaction",
+    "executor_status_role": "physical_diagnostic_and_legacy_auxiliary_fallback_only",
 }
 
 
@@ -135,6 +137,9 @@ class ClosedLoopPolicyServer:
             "command_covariances": {
                 arm: cycle.commands[arm].covariance.copy() for arm in self.arms
             },
+            "gripper_authorization": {
+                arm: cycle.commands[arm].gripper_authorized for arm in self.arms
+            },
         }
         action = commands_to_rlbench(cycle.commands, bimanual=self.bimanual)
         failure_reasons = {
@@ -151,6 +156,9 @@ class ClosedLoopPolicyServer:
             "action": action.tolist(),
             "transaction_id": transaction_id,
             "policy_mode": {arm: cycle.arms[arm].mode_after.value for arm in self.arms},
+            "gripper_authorization": {
+                arm: cycle.commands[arm].gripper_authorized for arm in self.arms
+            },
         }
 
     def _resolve(self, request: Mapping[str, Any], *, commit: bool) -> dict[str, Any]:
@@ -180,9 +188,36 @@ class ClosedLoopPolicyServer:
                 action_status = explicit_status
                 if action_status not in {"reached", "progressed", "stopped"}:
                     raise ValueError("primary_action_status 取值不受支持")
-            action_completed = action_status == "reached"
+            explicit_statuses = request.get("primary_action_statuses")
+            if explicit_statuses is None:
+                action_statuses = {arm: action_status for arm in self.arms}
+            else:
+                if not isinstance(explicit_statuses, Mapping):
+                    raise TypeError("primary_action_statuses 必须为逐臂映射")
+                if set(explicit_statuses) != set(self.arms):
+                    raise ValueError("primary_action_statuses 必须覆盖全部机械臂")
+                action_statuses = {}
+                for arm, status in explicit_statuses.items():
+                    if status not in {"reached", "progressed", "stopped"}:
+                        raise ValueError(f"primary_action_statuses[{arm}] 取值不受支持")
+                    action_statuses[arm] = str(status)
+                if action_status == "reached" and any(
+                    status != "reached" for status in action_statuses.values()
+                ):
+                    raise ValueError("整体 reached 要求所有机械臂均 reached")
+            action_response = {
+                arm: status in {"reached", "progressed"}
+                for arm, status in action_statuses.items()
+            }
+            action_completed = {
+                arm: status == "reached" for arm, status in action_statuses.items()
+            }
             command_issued = action_status != "failed"
-            self.policy.commit(action_executed=action_completed)
+            command_applied = {arm: command_issued for arm in self.arms}
+            self.policy.commit(
+                task_command_applied=command_applied,
+                absolute_target_completed=action_completed,
+            )
             self._previous_ee = self._pending["pre_action_ee"]
             self._previous_command = (
                 self._pending["commands"]
@@ -200,8 +235,14 @@ class ClosedLoopPolicyServer:
                 "rlbench_action_resolution",
                 {
                     "status": action_status,
+                    "status_by_arm": dict(action_statuses),
                     "command_issued": command_issued,
-                    "absolute_target_completed": action_completed,
+                    "task_command_applied": dict(command_applied),
+                    "action_response_observed": dict(action_response),
+                    "absolute_target_completed": dict(action_completed),
+                    "gripper_authorization": dict(
+                        self._pending["gripper_authorization"]
+                    ),
                 },
             )
             self._tick += 1
@@ -212,6 +253,7 @@ class ClosedLoopPolicyServer:
             "committed": commit,
             "aborted": not commit,
             "primary_action_status": action_status,
+            "primary_action_statuses": (None if not commit else dict(action_statuses)),
             "complete": self.policy.complete,
         }
 

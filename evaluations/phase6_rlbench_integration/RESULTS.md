@@ -54,3 +54,14 @@
 - `diagnostics/*_final_v21/`：39条无损压缩的逐周期 `JSONL.gz` 轨迹。
 
 本 pilot 支持“闭环进度减少时间空推进、动态角色参与关系失配后的执行阻断、完整恢复链使受控抓取/关系故障重新完成任务”的组件级结论。动态角色消融本身在后三类故障中仍为0/3，说明只阻断错误动作并不足以恢复成功，不能把完整方法的成功单独归因于角色切换。要形成论文正式实验，仍需冻结提交后扩大任务、variation、seed 和样本数，并预先规定统计方法与失败分类。
+
+## 正式评测前机制收口
+
+在不改写上述 v16/v18 pilot 身份的前提下，正式评测前又完成三项通用闭环修复：TASK 夹爪改由每臂进度对齐与边界事务授权，执行器 `reached/progressed/stopped` 只保留物理反馈语义；VERIFY_LINK 在原路返回结束时精确提交稳定周期的原二元关系后验；同一目标的碰撞感知线性路径若“生成成功但物理停滞”，后续周期会继续尝试碰撞感知非线性路径和最后的碰撞放宽线性路径。这些规则均不读取任务名、seed、StateId 或对象身份。
+
+快速真实门控使用封存正常索引0：PlaceCups 在190周期成功；Handover 在245周期首次成功、0 InvalidAction，诊断续跑中右臂完成 VERIFY_LINK 并以 `[0.127675, 0.872325]` 的原始在线后验返回 TASK。定向测试79项通过，全仓为 `651 passed, 4 skipped in 323.72s`。正式评测四种方法将统一使用 `stage6_hybrid_cartesian_executor_v17` / `rlbench-stage6-hybrid-cartesian-continuation-v20`；本节只是启动前门控，不与上方 pilot 合并统计。机器可读摘要保存在 `results/preformal_gate_v1/summary.json`。
+
+```text
+9009094a2903b447c1d4421e22ae27db1fea4ce5eaadfe53d8b284b753f3418c  integrations/rlbench/results/diagnostics/place_cups_v18_task_gripper_auth_ep0_h300.json
+1221a041815ff7cdb9381097ad09095a4e44f3cb1fb2b4f9b40fc3247b8d6676  integrations/rlbench/results/diagnostics/handover_v21_gripper_q_path_fallback_ep0_h500.json
+```

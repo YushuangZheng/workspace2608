@@ -20,6 +20,7 @@ from .execution_controller import (
     ExecutionCycleResult,
 )
 from .frame_roles import RelationVerificationRequest
+from .progress_filter import ProgressStatus
 from .recovery import (
     ClosedLoopRecoveryManager,
     ExecutionMode,
@@ -30,7 +31,12 @@ from .recovery import (
     RecoveryTriggerTracker,
 )
 from .reentry import ReentryEvaluation
-from .relation_verification import AuxiliaryAction, SafetyConstraintStatus
+from .relation_filter import RelationDecision
+from .relation_verification import (
+    AuxiliaryAction,
+    SafetyConstraintStatus,
+    VerificationPhase,
+)
 from .runtime_observation import RuntimeObservation
 from .serialization import load_policy_bundle, save_policy_bundle
 from .state import ArmCommand, ArmCycleResult, PolicyCycleResult, PolicyLifecycle
@@ -277,15 +283,47 @@ class ClosedLoopMultiStreamPolicy:
     def commit(
         self,
         *,
-        action_executed: bool = True,
+        task_command_applied: bool | Mapping[str, bool] = True,
+        absolute_target_completed: bool | Mapping[str, bool] | None = None,
         executed_reference_states: Mapping[str, StateId] | None = None,
     ) -> PolicyCycleResult:
         if self._pending_snapshot is None or self._last_cycle is None:
             raise RuntimeError("没有待提交的闭环策略周期")
-        if not isinstance(action_executed, (bool, np.bool_)):
-            raise TypeError("action_executed 必须为布尔值")
-        if not action_executed and executed_reference_states is not None:
-            raise ValueError("未执行动作时不能提交动作引用状态")
+
+        def normalize_flags(
+            value: bool | Mapping[str, bool],
+            *,
+            name: str,
+        ) -> dict[str, bool]:
+            if isinstance(value, (bool, np.bool_)):
+                return {arm: bool(value) for arm in self.arms}
+            if not isinstance(value, Mapping):
+                raise TypeError(f"{name} 必须为布尔值或逐臂布尔映射")
+            if set(value) != set(self.arms):
+                raise ValueError(f"{name} 必须覆盖全部机械臂")
+            normalized = {}
+            for arm, flag in value.items():
+                if not isinstance(flag, (bool, np.bool_)):
+                    raise TypeError(f"{name}[{arm}] 必须为布尔值")
+                normalized[arm] = bool(flag)
+            return normalized
+
+        applied_by_arm = normalize_flags(
+            task_command_applied,
+            name="task_command_applied",
+        )
+        completion_by_arm = normalize_flags(
+            (
+                task_command_applied
+                if absolute_target_completed is None
+                else absolute_target_completed
+            ),
+            name="absolute_target_completed",
+        )
+        if any(completion_by_arm[arm] and not applied_by_arm[arm] for arm in self.arms):
+            raise ValueError("绝对目标完成必须先向对应机械臂施加任务命令")
+        if not all(applied_by_arm.values()) and executed_reference_states is not None:
+            raise ValueError("存在未响应机械臂时不能提交完整回放动作引用状态")
         if executed_reference_states is not None:
             if set(executed_reference_states) != set(self.arms):
                 raise ValueError("回放动作引用必须覆盖全部机械臂")
@@ -293,17 +331,21 @@ class ClosedLoopMultiStreamPolicy:
                 if state not in self.task_models[arm].states:
                     raise KeyError(f"{arm} 回放动作引用状态不存在：{state}")
         result = self._last_cycle
-        if not action_executed:
-            # The pre-action inference transaction is still committed after a
-            # successful environment-side hold or component-isolated action,
-            # but a rejected arm command must not become that arm's next
-            # action-after progress anchor.
-            self._last_executed_reference = {arm: None for arm in self.arms}
-        elif executed_reference_states is not None:
+        if executed_reference_states is not None:
             # Fixed demonstration playback does not apply the counterfactual
             # policy command.  Its adapter supplies the recorded StateId of
             # the action that actually produced the next saved observation.
             self._last_executed_reference = dict(executed_reference_states)
+        else:
+            # Keep the tentative task-action anchor whenever the environment
+            # actually applied that arm's command.  The executor's physical
+            # reached/progressed/stopped classification is deliberately not
+            # consumed here: actual motion is already part of the next
+            # observation, while exact completion only controls the separate
+            # gripper/terminal transaction.
+            for arm in self.arms:
+                if not applied_by_arm[arm]:
+                    self._last_executed_reference[arm] = None
         for arm in self.arms:
             final_state = max(self.task_models[arm].states)
             at_final_task_state = bool(
@@ -313,15 +355,38 @@ class ClosedLoopMultiStreamPolicy:
             )
             if not at_final_task_state:
                 self._terminal_actions_committed.discard(arm)
-            elif (
-                action_executed
+            command = result.commands[arm]
+            gripper_command_applied = bool(
+                applied_by_arm[arm]
+                and (
+                    command.gripper_authorized is True
+                    or (command.gripper_authorized is None and completion_by_arm[arm])
+                )
+            )
+            if (
+                at_final_task_state
+                and gripper_command_applied
                 and self._last_executed_reference.get(arm) == final_state
             ):
                 self._terminal_actions_committed.add(arm)
         self.diagnostics.annotate_last(
             "action_commit",
             {
-                "action_executed": bool(action_executed),
+                "task_command_applied": dict(applied_by_arm),
+                "absolute_target_completed": dict(completion_by_arm),
+                "gripper_command_applied": {
+                    arm: bool(
+                        applied_by_arm[arm]
+                        and (
+                            result.commands[arm].gripper_authorized is True
+                            or (
+                                result.commands[arm].gripper_authorized is None
+                                and completion_by_arm[arm]
+                            )
+                        )
+                    )
+                    for arm in self.arms
+                },
                 "executed_reference_states": (
                     None
                     if executed_reference_states is None
@@ -475,6 +540,42 @@ class ClosedLoopMultiStreamPolicy:
             source=action.source,
         )
 
+    def _task_gripper_authorized(
+        self,
+        arm: str,
+        command: ArmCommand,
+        execution: ExecutionCycleResult | None,
+        belief: ClosedLoopBelief,
+        boundary: BoundaryCycleResult | None,
+    ) -> bool | None:
+        """Authorize TASK grippers from task belief and boundary semantics.
+
+        Physical executor completion is intentionally absent here.  A skill
+        terminal that has a cross-skill successor remains guarded until its
+        boundary transaction commits; ordinary and final-task states require
+        the progress posterior to agree with the executed reference state.
+        """
+
+        if command.source != "task_poe" or execution is None:
+            return None
+        committed_arms = (
+            frozenset()
+            if boundary is None or boundary.transaction is None
+            else frozenset(request.arm_id for request in boundary.transaction.committed)
+        )
+        if arm in committed_arms:
+            return True
+        reference = execution.cursor_after.reference_state
+        if (
+            belief.progress.status != ProgressStatus.ALIGNED
+            or belief.progress.estimated_state != reference
+        ):
+            return False
+        node = self.task_models[arm].states[reference]
+        if node.topology.has_cross_skill_successor:
+            return False
+        return True
+
     @staticmethod
     def _verification_request(
         arm: str,
@@ -528,17 +629,28 @@ class ClosedLoopMultiStreamPolicy:
                 current_pose=observation.ee_pose,
                 safety=verification_safety,
             )
-            action = None if result.verification is None else result.verification.action
+            verification = result.verification
+            if (
+                verification is not None
+                and verification.phase == VerificationPhase.COMPLETE
+                and verification.decision
+                in {RelationDecision.EXTERNAL, RelationDecision.LINKED}
+            ):
+                if verification.verified_posterior is None:
+                    raise RuntimeError("稳定主动验证结果缺少原关系后验")
+                assert manager.verification.request is not None
+                self.belief_updaters[arm].commit_relation_confirmation(
+                    manager.verification.request.frame_id,
+                    verification.verified_posterior,
+                    verification.decision,
+                )
+            action = None if verification is None else verification.action
             command = (
                 self._hold_command(observation, "verify_link_hold")
                 if action is None
                 else self._auxiliary_command(action)
             )
-            failure = (
-                None
-                if result.verification is None
-                else result.verification.failure_reason
-            )
+            failure = None if verification is None else verification.failure_reason
             return result, command, failure
 
         if manager.mode != ExecutionMode.RECOVERY:
@@ -1004,6 +1116,16 @@ class ClosedLoopMultiStreamPolicy:
         arm_results = {}
         for arm in self.arms:
             mode_after = self.recovery_managers[arm].mode
+            commands[arm] = replace(
+                commands[arm],
+                gripper_authorized=self._task_gripper_authorized(
+                    arm,
+                    commands[arm],
+                    executions.get(arm),
+                    beliefs[arm],
+                    boundary,
+                ),
+            )
             arm_results[arm] = ArmCycleResult(
                 arm_id=arm,
                 mode_before=modes_before[arm],
