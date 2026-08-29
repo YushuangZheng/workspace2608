@@ -5,7 +5,7 @@
   "minimum_information_weight": 0.1,
   "calibrations": {
     "left:0->1": {
-      "local_score_threshold": 0.005251965695635616,
+      "local_score_threshold": 0.19405456777793406,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     },
@@ -15,7 +15,7 @@
       "relation_thresholds": {}
     },
     "right:0->1": {
-      "local_score_threshold": 0.006270348531482378,
+      "local_score_threshold": 0.011400442960374046,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     },

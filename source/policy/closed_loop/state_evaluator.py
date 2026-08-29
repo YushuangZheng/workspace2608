@@ -8,7 +8,12 @@ from typing import Mapping
 
 import numpy as np
 
-from ..dynamac import pose_log_nearest, relative_pose
+from ..dynamac import (
+    pose_log_nearest,
+    product_of_experts,
+    relative_pose,
+    transform_marginal,
+)
 from .relation_filter import RelationDecision, RelationEstimate
 from .runtime_features import RuntimeFeatures
 from .scene_factors import FactorDistribution, FactorId
@@ -16,6 +21,55 @@ from .state_index import StateId
 from .task_model import ClosedLoopTaskModel, StateNode
 
 Array = np.ndarray
+
+
+def joint_peak_normalized_pose_support(
+    entries: list[tuple[str, Array, Array, Array, Array, float]],
+    *,
+    diagonalize: bool,
+) -> tuple[float, float, float]:
+    """Return one multi-flow support relative to its attainable PoE peak.
+
+    Each entry is ``(frame, frame_pose, local_mean, local_covariance,
+    observed_local_pose, weight)``.  The implementation deliberately reuses
+    the baseline transform and product operators; it does not introduce a
+    second SE(3) or PoE path.
+    """
+
+    if not entries:
+        return 1.0, 0.0, 0.0
+    marginals = []
+    weights = []
+    current_log_sum = 0.0
+    for frame, frame_pose, mean, covariance, value, weight in entries:
+        numeric_weight = float(weight)
+        if not math.isfinite(numeric_weight) or numeric_weight <= 0.0:
+            raise ValueError("联合位姿支持权重必须为有限正数")
+        support, _, _, _ = _gaussian_pose_terms(mean, covariance, value)
+        current_log_sum += numeric_weight * support
+        weights.append(numeric_weight)
+        marginals.append(
+            transform_marginal(
+                frame,
+                frame_pose,
+                mean,
+                covariance,
+                diagonalize=diagonalize,
+            )
+        )
+    joint_peak, _, _ = product_of_experts(
+        marginals,
+        precision_weights=weights,
+    )
+    peak_log_sum = 0.0
+    for entry, weight in zip(entries, weights, strict=True):
+        frame, frame_pose, mean, covariance, _, _ = entry
+        peak_relative = relative_pose(frame_pose, joint_peak)
+        peak_support, _, _, _ = _gaussian_pose_terms(mean, covariance, peak_relative)
+        peak_log_sum += weight * peak_support
+    normalized_log = min(0.0, current_log_sum - peak_log_sum)
+    compatibility = float(math.exp(max(-750.0, normalized_log / float(sum(weights)))))
+    return compatibility, float(current_log_sum), float(peak_log_sum)
 
 
 def _logsumexp(values: Array, weights: Array) -> float:
@@ -89,7 +143,11 @@ class CandidateScore:
     # determinants cannot reward a state merely for having a narrow model.
     robot_log_likelihood: float
     state_log_likelihood: float
+    # Joint-peak-normalized robot support consumed by the progress posterior.
     robot_log_support: float
+    # Sum of the individually peak-normalized stream supports before removing
+    # the state-dependent, jointly attainable PoE peak.
+    robot_unadjusted_log_support: float
     state_log_support: float
     relation_log_compatibility: float
     explanation_log_score: float
@@ -97,7 +155,18 @@ class CandidateScore:
     robot_compatibility: float
     state_compatibility: float
     relation_compatibility: float
+    # Zero during normal progress inference.  Recovery reentry reuses the
+    # already-configured recovery covariance inflation so its terminal state
+    # test is not stricter than the action distribution that produced it.
+    robot_covariance_inflation: float = 0.0
+    # ``robot_compatibility`` is the geometric mean of the individually
+    # peak-normalized stream supports and remains the quantity used by the
+    # existing posterior/expansion audits.  The absolute plausibility gate
+    # additionally removes the lower, jointly attainable peak of a multi-flow
+    # PoE whose transformed expert means do not coincide exactly.
+    robot_peak_normalized_compatibility: float = 1.0
     relation_peak_normalized_compatibility: float = 1.0
+    robot_attainable_peak_log_support: float = 0.0
     robot_frame_terms: dict[str, float] = field(default_factory=dict)
     robot_frame_weights: dict[str, float] = field(default_factory=dict)
     scene_factor_terms: dict[FactorId, float] = field(default_factory=dict)
@@ -170,8 +239,17 @@ class StateEvaluator:
         if frame.startswith("virtual_skill_"):
             return reliability
         estimate = relations.get(frame)
-        if estimate is None or estimate.decision_state == RelationDecision.UNKNOWN:
+        if estimate is None:
             return 0.0
+        # Robot-trajectory evidence consumes the continuous relation belief,
+        # not the thresholded relation decision.  ``Unknown`` means that the
+        # current posterior cannot yet be collapsed to external/linked; it
+        # does not erase a visible, reliable frame pose.  Weighting by the
+        # soft external mass keeps this scorer consistent with a DEFER stream
+        # that is safely down-weighted in the action PoE, while uncertainty is
+        # still represented continuously.  Missing/hidden/unreliable frames
+        # remain excluded by ``reliability`` above.  Discrete relation
+        # compatibility deliberately retains its stricter Unknown gate.
         return reliability * estimate.external
 
     def _robot_score(
@@ -180,6 +258,7 @@ class StateEvaluator:
         features: RuntimeFeatures,
         relations: Mapping[str, RelationEstimate],
         selected_mode: int | None,
+        covariance_inflation: float,
     ) -> tuple[
         float,
         float,
@@ -189,6 +268,9 @@ class StateEvaluator:
         dict[str, float],
         dict[str, tuple[GaussianComponentAudit, ...]],
         bool,
+        float,
+        float,
+        float,
     ]:
         mode_weights = self._mode_weights(node, selected_mode)
         # ``terms`` are the weighted peak-normalized log supports actually
@@ -213,9 +295,12 @@ class StateEvaluator:
             for mode, mode_weight in enumerate(mode_weights):
                 if mode_weight <= 0.0 or frame not in node.mode_selected_frames[mode]:
                     continue
+                covariance = node.stream_covariances[frame][mode]
+                if covariance_inflation > 0.0:
+                    covariance = covariance + np.eye(6) * covariance_inflation
                 support_log, raw_log, mahalanobis, logdet = _gaussian_pose_terms(
                     node.stream_means[frame][mode],
-                    node.stream_covariances[frame][mode],
+                    covariance,
                     features.relative_poses[frame],
                 )
                 mode_raw_logs[mode] = raw_log
@@ -255,8 +340,49 @@ class StateEvaluator:
                 math.exp(max(-750.0, compatibility_log_sum / compatibility_weight))
             )
         )
+        attainable_peak_log_support = 0.0
+        peak_normalized_compatibility = compatibility
+        # The integrated policy fixes one DynaMAC/MiDiGaP mode per skill.
+        # In that case the weighted transformed marginals define the same PoE
+        # action queried by the controller.  Its joint optimum is the
+        # attainable peak of L_robot; individual stream peaks generally cannot
+        # all be reached by one end-effector pose.  Correct only the absolute
+        # plausibility scale.  The per-stream support sum returned above—and
+        # therefore progress-state ranking—remains byte-for-byte unchanged.
+        if selected_mode is not None and compatibility_weight > 0.0:
+            peak_entries = []
+            for frame, weight in weights.items():
+                if weight <= 0.0 or frame not in features.frame_poses:
+                    continue
+                if frame not in node.mode_selected_frames[selected_mode]:
+                    continue
+                covariance = node.stream_covariances[frame][selected_mode]
+                if covariance_inflation > 0.0:
+                    covariance = covariance + np.eye(6) * covariance_inflation
+                peak_entries.append(
+                    (
+                        frame,
+                        features.frame_poses[frame],
+                        node.stream_means[frame][selected_mode],
+                        covariance,
+                        features.relative_poses[frame],
+                        weight,
+                    )
+                )
+            if peak_entries:
+                (
+                    peak_normalized_compatibility,
+                    _,
+                    attainable_peak_log_support,
+                ) = joint_peak_normalized_pose_support(
+                    peak_entries,
+                    diagonalize=(
+                        self.task_model.base_policy.config.diagonalize_transformed_covariance
+                    ),
+                )
+        joint_support_total = min(0.0, support_total - attainable_peak_log_support)
         return (
-            support_total,
+            joint_support_total,
             raw_total,
             compatibility,
             terms,
@@ -264,6 +390,9 @@ class StateEvaluator:
             weights,
             audits,
             compatibility_weight > 0.0,
+            peak_normalized_compatibility,
+            float(attainable_peak_log_support),
+            support_total,
         )
 
     def _factor_observation(
@@ -491,7 +620,11 @@ class StateEvaluator:
         relations: Mapping[str, RelationEstimate],
         *,
         mode_by_skill: Mapping[int, int] | None = None,
+        robot_covariance_inflation: float = 0.0,
     ) -> CandidateScore:
+        covariance_inflation = float(robot_covariance_inflation)
+        if not math.isfinite(covariance_inflation) or covariance_inflation < 0.0:
+            raise ValueError("机器人轨迹评分协方差放宽量必须为有限非负数")
         node = self.task_model.state(state_id)
         selected_mode = (
             None if mode_by_skill is None else mode_by_skill.get(state_id.skill_index)
@@ -505,7 +638,16 @@ class StateEvaluator:
             robot_weights,
             robot_audits,
             robot_available,
-        ) = self._robot_score(node, features, relations, selected_mode)
+            robot_peak_normalized_compat,
+            robot_attainable_peak_log_support,
+            robot_unadjusted_log_support,
+        ) = self._robot_score(
+            node,
+            features,
+            relations,
+            selected_mode,
+            covariance_inflation,
+        )
         (
             state_support_log,
             state_raw_log,
@@ -531,7 +673,7 @@ class StateEvaluator:
             + self.config.relation_weight * relation_log
         )
         normalized = (
-            robot_compat
+            robot_peak_normalized_compat
             * state_compat**self.config.scene_weight
             * relation_peak_normalized_compat**self.config.relation_weight
         )
@@ -540,6 +682,7 @@ class StateEvaluator:
             robot_log_likelihood=robot_raw_log,
             state_log_likelihood=state_raw_log,
             robot_log_support=robot_support_log,
+            robot_unadjusted_log_support=robot_unadjusted_log_support,
             state_log_support=state_support_log,
             relation_log_compatibility=relation_log,
             explanation_log_score=explanation_log,
@@ -547,7 +690,10 @@ class StateEvaluator:
             robot_compatibility=robot_compat,
             state_compatibility=state_compat,
             relation_compatibility=relation_compat,
+            robot_covariance_inflation=covariance_inflation,
+            robot_peak_normalized_compatibility=(robot_peak_normalized_compat),
             relation_peak_normalized_compatibility=(relation_peak_normalized_compat),
+            robot_attainable_peak_log_support=(robot_attainable_peak_log_support),
             robot_frame_terms=robot_terms,
             robot_frame_weights=robot_weights,
             scene_factor_terms=scene_terms,
@@ -571,6 +717,7 @@ class StateEvaluator:
         relations: Mapping[str, RelationEstimate],
         *,
         mode_by_skill: Mapping[int, int] | None = None,
+        robot_covariance_inflation: float = 0.0,
     ) -> dict[StateId, CandidateScore]:
         return {
             state: self.evaluate(
@@ -578,6 +725,7 @@ class StateEvaluator:
                 features,
                 relations,
                 mode_by_skill=mode_by_skill,
+                robot_covariance_inflation=robot_covariance_inflation,
             )
             for state in states
         }
@@ -588,4 +736,5 @@ __all__ = [
     "GaussianComponentAudit",
     "StateEvaluator",
     "StateEvaluatorConfig",
+    "joint_peak_normalized_pose_support",
 ]

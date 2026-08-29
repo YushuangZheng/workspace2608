@@ -137,6 +137,40 @@ def test_runtime_features_distinguish_comotion_external_and_static() -> None:
     assert static.action_excitation == pytest.approx(0.0)
 
 
+def test_runtime_features_measure_previous_poe_target_completion() -> None:
+    builder = RuntimeFeatureBuilder()
+    exact = RuntimeObservation(
+        tick=1,
+        ee_pose=pose(0.1),
+        frame_poses={"object": pose(0.4)},
+        gripper_state=np.asarray([-1.0]),
+        previous_command_pose=pose(0.1),
+        previous_ee_pose=pose(0.0),
+        tracking_reliability={"object": 1.0},
+        frame_visibility={"object": True},
+        previous_command_covariance=np.eye(6) * 0.01,
+    )
+    missed = RuntimeObservation(
+        tick=1,
+        ee_pose=pose(0.0),
+        frame_poses={"object": pose(0.4)},
+        gripper_state=np.asarray([-1.0]),
+        previous_command_pose=pose(0.1),
+        previous_ee_pose=pose(0.0),
+        tracking_reliability={"object": 1.0},
+        frame_visibility={"object": True},
+        previous_command_covariance=np.eye(6) * 0.01,
+    )
+    exact_features = builder.build(exact)
+    missed_features = builder.build(missed)
+    assert exact_features.command_tracking_available is True
+    assert exact_features.command_tracking_compatibility == pytest.approx(1.0)
+    assert missed_features.command_tracking_mahalanobis_squared == pytest.approx(1.0)
+    assert missed_features.command_tracking_compatibility == pytest.approx(
+        math.exp(-0.5 / 6.0)
+    )
+
+
 def test_runtime_motion_and_gaussian_support_ignore_quaternion_antipodes(
     phase2_model,
 ) -> None:
@@ -252,6 +286,52 @@ def test_relation_filter_has_shared_physical_semantics_without_static_false_link
     assert unknown.informative is False
 
 
+def test_relation_filter_bounds_one_cycle_outliers_but_accepts_sustained_motion(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    feature_builder = RuntimeFeatureBuilder()
+    relation_filter = RelationFilter(
+        model,
+        RelationFilterConfig(demonstration_prior_strength=0.0),
+        feature_builder=feature_builder,
+    )
+    progress = {StateId(0, 1): 1.0}
+    initial = observation(0, 0.0, 0.4, previous_ee_x=None)
+    carried_observation = observation(1, 0.1, 0.5, previous_ee_x=0.0)
+    carried = feature_builder.build(carried_observation, initial)
+    confirmed = relation_filter.update(
+        progress, carried, {"object": np.asarray([0.5, 0.5])}
+    )["object"]
+    assert confirmed.decision_state == RelationDecision.LINKED
+
+    # A small arm motion coincident with a large relative-pose impulse is a
+    # plausible tracking/contact outlier.  It must not erase a confirmed link
+    # in one cycle even though its instantaneous evidence favours external.
+    contact_observation = observation(2, 0.1025, 0.51, previous_ee_x=0.1)
+    contact = feature_builder.build(contact_observation, carried_observation)
+    transient = relation_filter.update(
+        progress,
+        contact,
+        {"object": confirmed.posterior},
+        previous_decisions={"object": RelationDecision.LINKED},
+    )["object"]
+    assert transient.observation_likelihood[0] > transient.observation_likelihood[1]
+    assert transient.decision_state == RelationDecision.LINKED
+
+    # A subsequent fully excited arm motion without object response remains
+    # strong enough to overturn the old relation and detect a real disconnect.
+    dropped_observation = observation(3, 0.2025, 0.51, previous_ee_x=0.1025)
+    dropped = feature_builder.build(dropped_observation, contact_observation)
+    disconnected = relation_filter.update(
+        progress,
+        dropped,
+        {"object": transient.posterior},
+        previous_decisions={"object": RelationDecision.LINKED},
+    )["object"]
+    assert disconnected.decision_state == RelationDecision.EXTERNAL
+
+
 def test_invisible_or_unreliable_relation_is_unknown(phase2_model) -> None:
     model, _ = phase2_model
     builder = RuntimeFeatureBuilder()
@@ -324,6 +404,102 @@ def test_confirmed_relation_persists_only_through_reliable_static_cycle(
     assert hidden.decision_state == RelationDecision.UNKNOWN
 
 
+def test_static_cycle_can_finish_only_an_evidence_supported_confirmation(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    builder = RuntimeFeatureBuilder()
+    relation_filter = RelationFilter(
+        model,
+        RelationFilterConfig(demonstration_prior_strength=0.0),
+        feature_builder=builder,
+    )
+    progress = {StateId(0, 1): 1.0}
+    previous = observation(0, 0.1, 0.5, previous_ee_x=None)
+    static = builder.build(observation(1, 0.1, 0.5, previous_ee_x=0.1), previous)
+    posterior = {"object": np.asarray([0.10, 0.90])}
+
+    unsupported = relation_filter.update(progress, static, posterior)["object"]
+    assert unsupported.informative is False
+    assert unsupported.decision_state == RelationDecision.UNKNOWN
+
+    supported = relation_filter.update(
+        progress,
+        static,
+        posterior,
+        previous_evidence_decisions={"object": RelationDecision.LINKED},
+    )["object"]
+    assert supported.informative is False
+    assert supported.decision_state == RelationDecision.LINKED
+
+
+def test_only_stable_informative_decision_replaces_relation_confirmation(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    updater = BeliefUpdater(model)
+    updater._stable_decisions = {"object": RelationDecision.LINKED}
+    updater._informative_evidence_decisions = {"object": RelationDecision.LINKED}
+    previous = observation(0, 0.0, 0.4, previous_ee_x=None)
+    features = RuntimeFeatureBuilder().build(
+        observation(1, 0.1, 0.5, previous_ee_x=0.0), previous
+    )
+
+    # Contact may transiently favour external even while the persistent
+    # posterior still accepts the established linked state.  That raw
+    # direction is not a new confirmed relation and must not overwrite the
+    # evidence used to bridge a later quiet cycle.
+    transient = RelationEstimate(
+        frame_id="object",
+        posterior=np.asarray([0.2, 0.8]),
+        predicted=np.asarray([0.1, 0.9]),
+        demonstration_prior=np.asarray([0.3, 0.7]),
+        observation_likelihood=np.asarray([0.99, 0.01]),
+        information_weight=1.0,
+        entropy=-float(np.sum(np.asarray([0.2, 0.8]) * np.log([0.2, 0.8]))),
+        informative=True,
+        decision_state=RelationDecision.LINKED,
+        informative_evidence_direction=RelationDecision.EXTERNAL,
+    )
+    updater._commit_informative_evidence(features, {"object": transient})
+    assert updater._informative_evidence_decisions["object"] == RelationDecision.LINKED
+
+    # A visible and reliable Unknown is posterior uncertainty, not an
+    # observation gap.  Preserve the last stable physical state so a future
+    # genuinely informative opposite decision can still be reported as a
+    # relation change.
+    uncertain = RelationEstimate(
+        frame_id="object",
+        posterior=np.asarray([0.5, 0.5]),
+        predicted=np.asarray([0.5, 0.5]),
+        demonstration_prior=np.asarray([0.3, 0.7]),
+        observation_likelihood=np.ones(2),
+        information_weight=0.0,
+        entropy=math.log(2.0),
+        informative=False,
+        decision_state=RelationDecision.UNKNOWN,
+    )
+    assert updater._relation_changes(features, {"object": uncertain}) == ()
+    assert updater._stable_decisions["object"] == RelationDecision.LINKED
+
+    confirmed_external = RelationEstimate(
+        frame_id="object",
+        posterior=np.asarray([0.9, 0.1]),
+        predicted=np.asarray([0.6, 0.4]),
+        demonstration_prior=np.asarray([0.7, 0.3]),
+        observation_likelihood=np.asarray([0.99, 0.01]),
+        information_weight=1.0,
+        entropy=-float(np.sum(np.asarray([0.9, 0.1]) * np.log([0.9, 0.1]))),
+        informative=True,
+        decision_state=RelationDecision.EXTERNAL,
+        informative_evidence_direction=RelationDecision.EXTERNAL,
+    )
+    changes = updater._relation_changes(features, {"object": confirmed_external})
+    assert len(changes) == 1
+    assert changes[0].previous == RelationDecision.LINKED
+    assert changes[0].current == RelationDecision.EXTERNAL
+
+
 def test_relation_does_not_resurrect_across_visibility_gap_without_new_motion(
     phase2_model,
 ) -> None:
@@ -393,11 +569,30 @@ def test_progress_prior_is_conditioned_on_the_action_reference(phase2_model) -> 
         posterior,
         executed_reference_state=action_reference,
     )
-    assert anchored.nominal_state == StateId(0, 2)
+    assert anchored.nominal_state == action_reference
     assert anchored.probabilities[StateId(0, 0)] == pytest.approx(0.15)
-    assert anchored.probabilities[action_reference] == pytest.approx(0.05)
-    assert anchored.probabilities[StateId(0, 2)] == pytest.approx(0.65)
-    assert anchored.probabilities[StateId(0, 3)] == pytest.approx(0.15)
+    assert anchored.probabilities[action_reference] == pytest.approx(0.70)
+    assert anchored.probabilities[StateId(0, 2)] == pytest.approx(0.15)
+
+
+def test_progress_prior_does_not_advance_without_an_executed_action(
+    phase2_model,
+) -> None:
+    model, _ = phase2_model
+    state = StateId(0, 0)
+    prior = ProgressPriorBuilder(model).build(
+        {state: 1.0},
+        action_executed=False,
+    )
+    assert prior.nominal_state == state
+    assert prior.probabilities == {state: 1.0}
+
+    with pytest.raises(ValueError, match="未执行动作"):
+        ProgressPriorBuilder(model).build(
+            {state: 1.0},
+            executed_reference_state=state,
+            action_executed=False,
+        )
 
 
 def candidate(
@@ -414,6 +609,7 @@ def candidate(
         ),
         state_log_likelihood=0.0,
         robot_log_support=log_score,
+        robot_unadjusted_log_support=log_score,
         state_log_support=0.0,
         relation_log_compatibility=0.0,
         explanation_log_score=log_score,
@@ -526,6 +722,73 @@ def test_linked_stream_precision_is_suppressed_in_progress_score(phase2_model) -
     assert math.isfinite(score.robot_log_likelihood)
 
 
+def test_unknown_relation_keeps_soft_external_robot_evidence_when_observable(
+    phase2_model,
+) -> None:
+    model, demonstrations = phase2_model
+    demo = demonstrations[0]
+    state_id = StateId(0, 1)
+    estimate = {
+        "object": relation_estimate("object", (0.8, 0.2), RelationDecision.UNKNOWN)
+    }
+    visible = RuntimeObservation(
+        tick=1,
+        ee_pose=demo.ee_pose[1],
+        frame_poses={"object": demo.frames["object"][1]},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=demo.action_pose[0],
+        previous_ee_pose=demo.ee_pose[0],
+        tracking_reliability={"object": 0.5},
+        frame_visibility={"object": True},
+    )
+    visible_score = StateEvaluator(model).evaluate(
+        state_id,
+        RuntimeFeatureBuilder().build(visible),
+        estimate,
+        mode_by_skill={0: 0},
+    )
+    assert visible_score.robot_frame_weights["object"] == pytest.approx(0.4)
+    # The hard Unknown decision still cannot masquerade as discrete relation
+    # evidence; only the observable robot trajectory uses the soft posterior.
+    assert "object" not in visible_score.relation_frame_weights
+
+    hidden = RuntimeObservation(
+        tick=1,
+        ee_pose=demo.ee_pose[1],
+        frame_poses={"object": demo.frames["object"][1]},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=demo.action_pose[0],
+        previous_ee_pose=demo.ee_pose[0],
+        tracking_reliability={"object": 0.5},
+        frame_visibility={"object": False},
+    )
+    hidden_score = StateEvaluator(model).evaluate(
+        state_id,
+        RuntimeFeatureBuilder().build(hidden),
+        estimate,
+        mode_by_skill={0: 0},
+    )
+    assert "object" not in hidden_score.robot_frame_weights
+
+    unreliable = RuntimeObservation(
+        tick=1,
+        ee_pose=demo.ee_pose[1],
+        frame_poses={"object": demo.frames["object"][1]},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=demo.action_pose[0],
+        previous_ee_pose=demo.ee_pose[0],
+        tracking_reliability={"object": 0.0},
+        frame_visibility={"object": True},
+    )
+    unreliable_score = StateEvaluator(model).evaluate(
+        state_id,
+        RuntimeFeatureBuilder().build(unreliable),
+        estimate,
+        mode_by_skill={0: 0},
+    )
+    assert "object" not in unreliable_score.robot_frame_weights
+
+
 def test_absolute_explanation_removes_soft_relation_prior_peak_scale(
     phase2_model,
 ) -> None:
@@ -588,6 +851,55 @@ def test_absolute_explanation_removes_soft_relation_prior_peak_scale(
         assert ambiguous.relation_log_compatibility == pytest.approx(math.log(0.5))
     finally:
         node.demo_relation_priors["object"] = original
+
+
+def test_absolute_explanation_uses_jointly_attainable_multiflow_peak(
+    phase2_model,
+) -> None:
+    model, demonstrations = phase2_model
+    demo = demonstrations[0]
+    state_id = StateId(0, 1)
+    node = model.state(state_id)
+    # Duplicate the retained stream with an intentionally displaced local
+    # mean.  One EE pose cannot sit at both individual expert means, while the
+    # weighted PoE still has a well-defined attainable joint optimum.
+    node.selected_frames = ("object", "second")
+    node.mode_selected_frames = (("object", "second"),)
+    node.stream_means["second"] = node.stream_means["object"].copy()
+    node.stream_means["second"][0, 0] += 0.03
+    node.stream_covariances["second"] = node.stream_covariances["object"].copy()
+    second_frame = demo.frames["object"][1].copy()
+    runtime = RuntimeObservation(
+        tick=1,
+        ee_pose=demo.ee_pose[1],
+        frame_poses={"object": demo.frames["object"][1], "second": second_frame},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=demo.action_pose[0],
+        previous_ee_pose=demo.ee_pose[0],
+        tracking_reliability={"object": 1.0, "second": 1.0},
+        frame_visibility={"object": True, "second": True},
+    )
+    features = RuntimeFeatureBuilder().build(runtime)
+    relations = {
+        "object": relation_estimate(
+            "object", (0.999, 0.001), RelationDecision.EXTERNAL
+        ),
+        "second": relation_estimate(
+            "second", (0.999, 0.001), RelationDecision.EXTERNAL
+        ),
+    }
+    score = StateEvaluator(model).evaluate(
+        state_id, features, relations, mode_by_skill={0: 0}
+    )
+    assert score.robot_compatibility < score.robot_peak_normalized_compatibility
+    assert 0.0 < score.robot_peak_normalized_compatibility <= 1.0
+    assert score.robot_attainable_peak_log_support < 0.0
+    assert score.robot_log_support > score.robot_unadjusted_log_support
+    assert score.explanation_log_score == pytest.approx(
+        score.robot_log_support
+        + score.state_log_support
+        + score.relation_log_compatibility
+    )
 
 
 def test_node_and_edge_scene_factors_use_the_unified_observation(phase2_model) -> None:

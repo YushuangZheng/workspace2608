@@ -1,0 +1,7 @@
+task,arm,skill,selected_folds,positive_gain_folds,mean_position_error_reduction_mm,interpretation
+bimanual_put_bottle_in_fridge,left,1,5,2,-0.9116,reject
+bimanual_handover_item,left,3,5,4,1.4230,retain_with_relation_path
+bimanual_handover_item,left,4,4,2,-0.0018,retain_with_relation_path
+bimanual_lift_tray,left,0,5,4,5.2330,reject_synchrony_confounded
+bimanual_sweep_to_dustpan,left,0,4,4,3.1221,reject_synchrony_confounded
+bimanual_sweep_to_dustpan,right,0,4,0,-0.6493,reject

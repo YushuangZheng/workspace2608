@@ -38,7 +38,11 @@ class ProgressEstimate:
 class ProgressFilterConfig:
     minimum_confidence: float = 0.55
     maximum_normalized_entropy: float = 0.80
-    minimum_explanation_score: float = 0.001
+    # Calibrated on held-out, normal RLBench closed-loop control rather than
+    # on the five demonstrations used to fit the state models.  The lower
+    # value accounts for normal contact/servo offsets while the score remains
+    # the same joint trajectory/scene/relation explanation from phase two.
+    minimum_explanation_score: float = 1.0e-5
     probability_floor: float = 1.0e-300
 
     def __post_init__(self) -> None:
@@ -92,8 +96,8 @@ class ProgressFilter:
             )
             probabilities = np.asarray([posterior[state] for state in states])
             confidence = posterior[estimated]
-            entropy = float(
-                -np.sum(
+            entropy = -float(
+                np.sum(
                     probabilities
                     * np.log(np.maximum(probabilities, self.config.probability_floor))
                 )
@@ -129,8 +133,8 @@ class ProgressFilter:
             key=lambda state: (posterior[state], -self._global_index[state]),
         )
         confidence = posterior[estimated]
-        entropy = float(
-            -np.sum(
+        entropy = -float(
+            np.sum(
                 probabilities
                 * np.log(np.maximum(probabilities, self.config.probability_floor))
             )

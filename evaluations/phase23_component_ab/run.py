@@ -347,10 +347,10 @@ def _progress_trace(
         current = samples[source_index]
         belief = updater.update(
             _runtime_observation(tick, current, previous),
-            # Offline observations follow the recorded demonstration action.
+            # Offline observations follow the recorded target-state action.
             # The controller query is audited but is not applied to this
             # fixed counterfactual trajectory.
-            executed_reference_state=previous.state_id,
+            executed_reference_state=current.state_id,
             mode_by_skill=mode_by_skill,
         )
         execution = controller.update(
@@ -590,7 +590,7 @@ def _relation_trace(
     for tick, current in enumerate(samples[1:], start=1):
         belief = updater.update(
             _runtime_observation(tick, current, previous),
-            executed_reference_state=previous.state_id,
+            executed_reference_state=current.state_id,
             mode_by_skill=mode_by_skill,
         )
         execution = controller.update(

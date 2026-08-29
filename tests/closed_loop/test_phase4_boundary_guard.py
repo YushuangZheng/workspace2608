@@ -14,6 +14,7 @@ from essay2608.policy import (
     DynaMACObservation,
 )
 from essay2608.policy.closed_loop import (
+    BeliefUpdater,
     BoundaryCalibration,
     BoundaryId,
     BoundaryModel,
@@ -27,6 +28,8 @@ from essay2608.policy.closed_loop import (
     FactorId,
     LinkPendingCandidate,
     LocalCompletionModel,
+    MismatchCounters,
+    MismatchUpdate,
     MultiArmBoundaryController,
     ProgressEstimate,
     ProgressStatus,
@@ -35,15 +38,132 @@ from essay2608.policy.closed_loop import (
     RelationEventId,
     RelationGuardDistribution,
     ReliabilityStatistics,
+    RecoveryConfig,
+    RecoveryTriggerTracker,
     RuntimeFeatureBuilder,
     RuntimeObservation,
     StateId,
 )
 from essay2608.policy.dynamac import pose_compose, relative_pose
+from essay2608.policy.closed_loop.entry_guard import _factor_observation
+from evaluations.phase4_boundary_calibration.run import (
+    _acceptance_rows,
+    _calibrate,
+)
 
 
 def pose(x: float, y: float = 0.0, z: float = 0.0) -> np.ndarray:
     return np.asarray([x, y, z, 1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+
+
+def test_cross_arm_scene_factor_resolves_each_arm_dedicated_ee_pose() -> None:
+    left_pose = pose(0.20, 0.10)
+    right_pose = pose(0.55, -0.05)
+
+    def features(arm: str):
+        own = left_pose if arm == "left" else right_pose
+        peer_name = "right_ee" if arm == "left" else "left_ee"
+        peer = right_pose if arm == "left" else left_pose
+        previous = RuntimeObservation(
+            tick=0,
+            ee_pose=own,
+            frame_poses={peer_name: peer},
+            gripper_state=np.asarray([1.0]),
+            previous_command_pose=None,
+            previous_ee_pose=None,
+            tracking_reliability={},
+            frame_visibility={},
+        )
+        current = RuntimeObservation(
+            tick=1,
+            ee_pose=own,
+            frame_poses={peer_name: peer},
+            gripper_state=np.asarray([1.0]),
+            previous_command_pose=None,
+            previous_ee_pose=own,
+            tracking_reliability={},
+            frame_visibility={},
+        )
+        return RuntimeFeatureBuilder().build(current, previous)
+
+    factor = FactorId("edge", "left_ee", "right_ee")
+    value, reliability = _factor_observation(
+        factor,
+        {"left": features("left"), "right": features("right")},
+        "right",
+    )
+    assert value is not None
+    np.testing.assert_allclose(value, relative_pose(right_pose, left_pose))
+    assert reliability == pytest.approx(1.0)
+
+
+def test_local_calibration_is_independent_of_directional_guard_wait() -> None:
+    rows = []
+    for demonstration, score in enumerate((0.8, 0.9)):
+        rows.append(
+            {
+                "task": "synthetic",
+                "arm": "left",
+                "boundary": "left:0->1",
+                "transaction_group": "",
+                "demonstration": demonstration,
+                "tick": 0,
+                "phase": "recorded",
+                "hold_cycle": -1,
+                "truth_in_terminal_window": 0,
+                "local_score": 0.1,
+                "local_evidence_available": 1,
+                "guard_raw_satisfied": 0,
+            }
+        )
+        for hold_cycle in range(3):
+            rows.append(
+                {
+                    "task": "synthetic",
+                    "arm": "left",
+                    "boundary": "left:0->1",
+                    "transaction_group": "",
+                    "demonstration": demonstration,
+                    "tick": hold_cycle + 1,
+                    "phase": "terminal_hold",
+                    "hold_cycle": hold_cycle,
+                    "truth_in_terminal_window": 1,
+                    "local_score": score,
+                    "local_evidence_available": 1,
+                    # The receiver has not established the required relation
+                    # yet.  This must not erase valid LocalDone evidence.
+                    "guard_raw_satisfied": 0,
+                }
+            )
+    config = {
+        "control_period_seconds": 0.05,
+        "minimum_confirmation_seconds": 0.10,
+        "terminal_settling_seconds": 0.0,
+        "positive_floor_fraction": 0.8,
+        "demonstration_indices": [0, 1],
+        "default_relation_probability": 0.7,
+        "minimum_tracking_reliability": 0.25,
+        "minimum_scene_reliability": 0.25,
+        "minimum_information_weight": 0.1,
+    }
+    summaries, _, runtime = _calibrate(rows, config)
+    assert summaries[0]["status"] == "calibrated"
+    assert summaries[0]["normal_terminal_score_floor"] == pytest.approx(0.8)
+    assert runtime["synthetic"]["calibrations"]["left:0->1"]
+
+    acceptance = _acceptance_rows(
+        [
+            {
+                **rows[-1],
+                "local_done": 1,
+                "guard_evidence_available": 1,
+                "directional_guard_wait": 1,
+                "transition_permitted": 0,
+            }
+        ]
+    )
+    assert acceptance[0]["expected_directional_wait"] == 1
+    assert acceptance[0]["accepted"] == 1
 
 
 def _make_model(
@@ -258,6 +378,10 @@ def _config(models, *, cycles: int = 2, local_threshold: float = 0.5):
     )
 
 
+def _updaters(models):
+    return {arm: BeliefUpdater(model) for arm, model in models.items()}
+
+
 def _controller_tick(controller, model, demonstrations, belief):
     final = model.skill_states[0][-1]
     if controller.cursor.reference_state != final:
@@ -379,7 +503,13 @@ def test_guard_relation_and_scene_fail_closed_and_reset_streak() -> None:
     assert relation.consecutive_cycles == 1
 
 
-def test_pending_link_unknown_requests_verification_without_permit() -> None:
+@pytest.mark.parametrize(
+    "decision",
+    (RelationDecision.UNKNOWN, RelationDecision.EXTERNAL),
+)
+def test_pending_link_unresolved_requests_verification_without_permit(
+    decision: RelationDecision,
+) -> None:
     model, demonstrations = _make_model("single")
     boundary_id = BoundaryId("single", 0, 1)
     boundary = model.boundaries[boundary_id]
@@ -404,8 +534,8 @@ def test_pending_link_unknown_requests_verification_without_permit() -> None:
     )
     unknown = _relation(
         "target",
-        (0.3, 0.7),
-        RelationDecision.UNKNOWN,
+        (0.3, 0.7) if decision == RelationDecision.UNKNOWN else (0.9, 0.1),
+        decision,
         information_weight=0.0,
     )
     guard = EntryGuard(
@@ -462,6 +592,83 @@ def test_cross_arm_relation_guard_uses_other_arm_current_belief() -> None:
     assert cross_result.condition_id.arm_id == "right"
     assert cross_result.reason == "relation_unknown"
 
+    # A stable but not-yet-linked peer is still a directional readiness wait,
+    # not a request for the left arm to recover the right arm's relation.
+    right_external = _relation("target", (0.9, 0.1), RelationDecision.EXTERNAL)
+    beliefs = {
+        "left": _belief(left_model, left_demos, 2),
+        "right": _belief(right_model, right_demos, 2, target_relation=right_external),
+    }
+    waiting, _ = guard.evaluate(
+        boundary_id,
+        beliefs,
+        left_model.skill_states[0][-1],
+        mode_by_arm_skill={"left": {0: 0, 1: 0}, "right": {0: 0, 1: 0}},
+    )
+    tracker = RecoveryTriggerTracker(
+        models,
+        RecoveryConfig(boundary_relation_mismatch_cycles=1),
+    )
+    empty = MismatchUpdate(counters=MismatchCounters(), events=())
+    trigger = tracker.update(
+        {"left": empty, "right": empty},
+        transition_requests={"left": waiting},
+        beliefs=beliefs,
+    )
+    assert not trigger.triggered
+    assert trigger.intents == ()
+
+    # Once the relation-owning arm has reached an all-demonstration Pending
+    # occurrence, the same stable external observation is no longer merely
+    # "the peer is not ready yet".  A linked guard now routes a LINK repair to
+    # that arm, while the waiting arm remains at its own boundary.
+    candidate_state = right_model.skill_states[0][-1]
+    pending_id = RelationEventId(
+        "right", "target", candidate_state.skill_index, 0, 0, "link_pending"
+    )
+    right_model.link_pending_events[pending_id] = LinkPendingCandidate(
+        event_id=pending_id,
+        arm_id="right",
+        frame_id="target",
+        candidate_state=candidate_state,
+        context_state=right_model.skill_states[0][0],
+        local_means=np.stack([pose(0.0)]),
+        local_covariances=np.stack([np.eye(6) * 0.01]),
+        gripper_commands=np.asarray([[-1.0]]),
+        support_fraction=1.0,
+        demonstration_indices=(0, 1, 2, 3, 4),
+        event_local_indices=(3, 3, 3, 3, 3),
+    )
+    linked = RelationGuardDistribution(0.3, 0.7, "linked")
+    left_model.boundaries[boundary_id] = replace(
+        left_model.boundaries[boundary_id],
+        relation_conditions={cross_guard: linked},
+    )
+    pending_guard = EntryGuard(models, "left", _config(models, cycles=1))
+    failed_link, _ = pending_guard.evaluate(
+        boundary_id,
+        beliefs,
+        left_model.skill_states[0][-1],
+        mode_by_arm_skill={"left": {0: 0, 1: 0}, "right": {0: 0, 1: 0}},
+    )
+    pending_tracker = RecoveryTriggerTracker(
+        models,
+        RecoveryConfig(boundary_relation_mismatch_cycles=1),
+    )
+    pending_trigger = pending_tracker.update(
+        {"left": empty, "right": empty},
+        transition_requests={"left": failed_link},
+        beliefs=beliefs,
+        mode_by_arm_skill={"left": {0: 0, 1: 0}, "right": {0: 0, 1: 0}},
+    )
+    assert pending_trigger.triggered
+    assert pending_trigger.reasons == ("left:boundary_relation_mismatch",)
+    assert len(pending_trigger.intents) == 1
+    assert pending_trigger.intents[0].arm_id == "right"
+    assert pending_trigger.intents[0].frame_id == "target"
+    assert pending_trigger.intents[0].expected_relation == RelationDecision.LINKED
+    assert pending_trigger.intents[0].actual_relation == RelationDecision.EXTERNAL
+
 
 @pytest.mark.parametrize("transaction_group", ["joint_boundary", None])
 def test_multi_arm_transaction_is_joint_or_asynchronous(transaction_group) -> None:
@@ -476,6 +683,7 @@ def test_multi_arm_transaction_is_joint_or_asynchronous(transaction_group) -> No
     controllers = {
         arm: ClosedLoopExecutionController(model) for arm, model in models.items()
     }
+    updaters = _updaters(models)
     left_belief = _belief(left_model, left_demos, 1)
     right_belief = _belief(right_model, right_demos, 1, end_probability=0.0)
     left_execution = _controller_tick(
@@ -485,7 +693,10 @@ def test_multi_arm_transaction_is_joint_or_asynchronous(transaction_group) -> No
         controllers["right"], right_model, right_demos, right_belief
     )
     boundary = MultiArmBoundaryController(
-        models, controllers, _config(models, cycles=1)
+        models,
+        controllers,
+        _config(models, cycles=1),
+        belief_updaters=updaters,
     )
     result = boundary.update(
         {"left": left_belief, "right": right_belief},
@@ -497,13 +708,66 @@ def test_multi_arm_transaction_is_joint_or_asynchronous(transaction_group) -> No
     if transaction_group is None:
         assert [request.arm_id for request in result.transaction.committed] == ["left"]
         assert controllers["left"].cursor.reference_state.skill_index == 1
+        assert updaters["left"].progress_posterior == {
+            left_model.skill_states[1][0]: 1.0
+        }
     else:
         assert result.transaction.committed == ()
         assert result.transaction.held_transaction_groups == ("joint_boundary",)
         assert controllers["left"].cursor.reference_state.skill_index == 0
+        assert updaters["left"].progress_posterior == {
+            left_model.skill_states[0][0]: 1.0
+        }
     assert controllers["right"].cursor.reference_state.skill_index == 0
     assert left_execution.weighted_action.available
     assert right_execution.weighted_action.available
+
+
+@pytest.mark.parametrize("transaction_group", [None, "joint_boundary"])
+def test_only_task_arm_is_evaluated_while_joint_transaction_stays_atomic(
+    transaction_group,
+) -> None:
+    affected = ("left", "right")
+    left_model, left_demos = _make_model(
+        "left", transaction_group=transaction_group, affected_arms=affected
+    )
+    right_model, right_demos = _make_model(
+        "right", transaction_group=transaction_group, affected_arms=affected
+    )
+    models = {"left": left_model, "right": right_model}
+    controllers = {
+        arm: ClosedLoopExecutionController(model) for arm, model in models.items()
+    }
+    updaters = _updaters(models)
+    beliefs = {
+        "left": _belief(left_model, left_demos, 1),
+        "right": _belief(right_model, right_demos, 1),
+    }
+    _controller_tick(controllers["left"], left_model, left_demos, beliefs["left"])
+    _controller_tick(controllers["right"], right_model, right_demos, beliefs["right"])
+    boundary = MultiArmBoundaryController(
+        models,
+        controllers,
+        _config(models, cycles=1),
+        belief_updaters=updaters,
+    )
+
+    result = boundary.update(
+        beliefs,
+        arms=frozenset({"right"}),
+        mode_by_arm_skill={"left": {0: 0, 1: 0}, "right": {0: 0, 1: 0}},
+    )
+
+    assert set(result.requests) == {"right"}
+    assert result.transaction is not None
+    if transaction_group is None:
+        assert [request.arm_id for request in result.transaction.committed] == ["right"]
+        assert controllers["right"].cursor.reference_state.skill_index == 1
+    else:
+        assert result.transaction.committed == ()
+        assert result.transaction.held_transaction_groups == ("joint_boundary",)
+        assert controllers["right"].cursor.reference_state.skill_index == 0
+    assert controllers["left"].cursor.reference_state.skill_index == 0
 
 
 def test_joint_transaction_commits_both_arms_in_the_same_tick() -> None:
@@ -518,14 +782,24 @@ def test_joint_transaction_commits_both_arms_in_the_same_tick() -> None:
     controllers = {
         arm: ClosedLoopExecutionController(model) for arm, model in models.items()
     }
+    updaters = _updaters(models)
     beliefs = {
         "left": _belief(left_model, left_demos, 1),
         "right": _belief(right_model, right_demos, 1),
     }
-    _controller_tick(controllers["left"], left_model, left_demos, beliefs["left"])
-    _controller_tick(controllers["right"], right_model, right_demos, beliefs["right"])
+    executions = {
+        "left": _controller_tick(
+            controllers["left"], left_model, left_demos, beliefs["left"]
+        ),
+        "right": _controller_tick(
+            controllers["right"], right_model, right_demos, beliefs["right"]
+        ),
+    }
     boundary = MultiArmBoundaryController(
-        models, controllers, _config(models, cycles=1)
+        models,
+        controllers,
+        _config(models, cycles=1),
+        belief_updaters=updaters,
     )
     result = boundary.update(
         beliefs,
@@ -540,6 +814,100 @@ def test_joint_transaction_commits_both_arms_in_the_same_tick() -> None:
         controller.cursor.reference_state.skill_index == 1
         for controller in controllers.values()
     )
+    assert all(
+        updaters[arm].progress_posterior == {model.skill_states[1][0]: 1.0}
+        for arm, model in models.items()
+    )
+    for arm, model, demos in (
+        ("left", left_model, left_demos),
+        ("right", right_model, right_demos),
+    ):
+        demo = demos[0]
+        observation = DynaMACObservation(
+            demo.ee_pose[3],
+            {
+                **{name: values[3] for name, values in demo.frames.items()},
+                "virtual_skill_1": demo.ee_pose[3],
+            },
+        )
+        refreshed = controllers[arm].query_after_boundary_transition(
+            executions[arm],
+            beliefs[arm],
+            observation,
+            mode_by_skill={0: 0, 1: 0},
+        )
+        source_terminal = model.skill_states[0][-1]
+        entry_state = model.skill_states[1][0]
+        assert refreshed.weighted_action.state_id == source_terminal
+        assert refreshed.progress_anchor_state == entry_state
+        assert refreshed.weighted_action.action is not None
+        source_action = model.query_state(
+            observation,
+            source_terminal,
+            refreshed.weighted_action.stream_weights,
+            mode_index=0,
+        )
+        entry_action = model.query_state(observation, entry_state, mode_index=0)
+        np.testing.assert_allclose(
+            refreshed.weighted_action.action.pose,
+            source_action.pose,
+        )
+        np.testing.assert_allclose(
+            refreshed.weighted_action.action.gripper,
+            entry_action.gripper,
+        )
+        assert (
+            refreshed.weighted_action.action.diagnostics["boundary_transition"][
+                "continuous_target_source"
+            ]
+            == "source_terminal_state"
+        )
+
+
+def test_joint_transaction_can_delegate_one_cursor_to_reentry_atomically() -> None:
+    affected = ("left", "right")
+    left_model, left_demos = _make_model(
+        "left", transaction_group="joint", affected_arms=affected
+    )
+    right_model, right_demos = _make_model(
+        "right", transaction_group="joint", affected_arms=affected
+    )
+    models = {"left": left_model, "right": right_model}
+    controllers = {
+        arm: ClosedLoopExecutionController(model) for arm, model in models.items()
+    }
+    updaters = _updaters(models)
+    beliefs = {
+        "left": _belief(left_model, left_demos, 1),
+        "right": _belief(right_model, right_demos, 1),
+    }
+    _controller_tick(controllers["left"], left_model, left_demos, beliefs["left"])
+    _controller_tick(controllers["right"], right_model, right_demos, beliefs["right"])
+    boundary = MultiArmBoundaryController(
+        models,
+        controllers,
+        _config(models, cycles=1),
+        belief_updaters=updaters,
+    )
+    evaluation = boundary.evaluate(
+        beliefs,
+        mode_by_arm_skill={"left": {0: 0, 1: 0}, "right": {0: 0, 1: 0}},
+    )
+    preview = boundary.transactions.preview(tuple(evaluation.requests.values()))
+    assert {request.arm_id for request in preview.committed} == {"left", "right"}
+    committed = boundary.commit_requests(
+        evaluation,
+        externally_committed_arms=frozenset({"left"}),
+    )
+    assert committed.transaction is not None
+    assert {request.arm_id for request in committed.transaction.committed} == {
+        "left",
+        "right",
+    }
+    assert controllers["left"].cursor.reference_state.skill_index == 0
+    assert controllers["right"].cursor.reference_state.skill_index == 1
+    assert updaters["left"].progress_posterior == {left_model.skill_states[0][0]: 1.0}
+    assert updaters["right"].progress_posterior == {right_model.skill_states[1][0]: 1.0}
 
 
 def test_multi_arm_evaluation_rejects_mixed_snapshot_ticks() -> None:
@@ -549,8 +917,12 @@ def test_multi_arm_evaluation_rejects_mixed_snapshot_ticks() -> None:
     controllers = {
         arm: ClosedLoopExecutionController(model) for arm, model in models.items()
     }
+    updaters = _updaters(models)
     boundary = MultiArmBoundaryController(
-        models, controllers, _config(models, cycles=1)
+        models,
+        controllers,
+        _config(models, cycles=1),
+        belief_updaters=updaters,
     )
     with pytest.raises(ValueError, match="pre-action tick"):
         boundary.update(

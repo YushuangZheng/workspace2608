@@ -208,6 +208,15 @@ def _raw_guard_satisfied(request: Any) -> bool:
     )
 
 
+def _guard_evidence_available(request: Any) -> bool:
+    return all(
+        result.observed and result.stable
+        for condition_id, result in request.condition_results.items()
+        if condition_id.kind
+        in {ConditionKind.GUARD_RELATION, ConditionKind.GUARD_SCENE}
+    )
+
+
 def _trace_row(
     *,
     task: str,
@@ -244,6 +253,10 @@ def _trace_row(
         "local_consecutive_cycles": local.consecutive_cycles,
         "local_done": int(local.done),
         "guard_raw_satisfied": int(_raw_guard_satisfied(request)),
+        "guard_evidence_available": int(_guard_evidence_available(request)),
+        "directional_guard_wait": int(
+            not boundary.transaction_group and len(boundary.affected_arms) > 1
+        ),
         "transition_permitted": int(request.permitted),
         "verification_request_count": len(request.verification_requests),
     }
@@ -395,7 +408,7 @@ def _replay_task_demo(
                 continue
             belief = updaters[arm].update(
                 _runtime_observation(tick, current, previous),
-                executed_reference_state=previous.state_id,
+                executed_reference_state=current.state_id,
                 mode_by_skill=mode_by_arm_skill[arm],
             )
             beliefs[arm] = belief
@@ -499,9 +512,7 @@ def _calibrate(
             if row["phase"] == "recorded" and not int(row["truth_in_terminal_window"]):
                 preterminal.append(row)
         positive_ready = [
-            row
-            for row in stable_hold
-            if int(row["local_evidence_available"]) and int(row["guard_raw_satisfied"])
+            row for row in stable_hold if int(row["local_evidence_available"])
         ]
         positive_floor = min(
             (float(row["local_score"]) for row in positive_ready), default=0.0
@@ -511,7 +522,6 @@ def _calibrate(
                 float(row["local_score"])
                 for row in preterminal
                 if int(row["local_evidence_available"])
-                and int(row["guard_raw_satisfied"])
             ),
             default=0.0,
         )
@@ -546,7 +556,6 @@ def _calibrate(
                 false_runs.append(
                     _longest_true_run(
                         bool(int(row["local_evidence_available"]))
-                        and bool(int(row["guard_raw_satisfied"]))
                         and float(row["local_score"]) > threshold
                         for row in recorded
                     )
@@ -562,7 +571,6 @@ def _calibrate(
                 )
                 hold_run = _longest_true_run(
                     bool(int(row["local_evidence_available"]))
-                    and bool(int(row["guard_raw_satisfied"]))
                     and float(row["local_score"]) > threshold
                     for row in held
                 )
@@ -642,7 +650,7 @@ def _report(
         f"- 正常示范：每任务 {len(config['demonstration_indices'])} 条",
         f"- 已标定边界：{calibrated}/{len(summaries)}",
         f"- 无需连续确认消歧即可分离的边界：{separated}/{len(summaries)}",
-        f"- 正常运行配置放行复核：{sum(row['accepted'] for row in acceptance)}/{len(acceptance)} 条边界×示范",
+        f"- 正常运行配置决策复核：{sum(row['accepted'] for row in acceptance)}/{len(acceptance)} 条边界×示范",
         f"- 真实模型联合事务：{len(transaction_groups)} 组，正常联合就绪复核 {sum(row['accepted'] for row in joint_acceptance)}/{len(joint_acceptance)} 组×示范",
         "- 故障数据使用：0",
         "",
@@ -691,7 +699,7 @@ def _report(
             "",
             "## 口径",
             "",
-            "`theta_local` 与 `H` 只由正常回放确定。若边界前与末端分数重叠，不增加新的特殊门控，而是由既有连续确认机制抑制短暂提前脉冲。末端保持分支使用相同的在线关系与进度更新链，并以真实 0.05 秒控制周期重复当前正常末端观测。",
+            "`theta_local` 与 `H` 只由正常回放中的本地完成度确定，不以关系/场景守卫是否已经放行为正样本筛选条件。若边界前与末端分数重叠，不增加新的特殊门控，而是由既有连续确认机制抑制短暂提前脉冲。末端保持分支使用相同的在线关系与进度更新链，并以真实 0.05 秒控制周期重复当前正常末端观测；单向跨臂条件尚未满足时，`LocalDone=True` 且继续等待也是正确决策。",
             "",
         ]
     )
@@ -729,7 +737,23 @@ def _acceptance_rows(
         ]
         first_permit = permitted_cycles[0] if permitted_cycles else -1
         final_permitted = bool(held and int(held[-1]["transition_permitted"]))
-        accepted = premature == 0 and final_permitted
+        final_local_done = bool(held and int(held[-1]["local_done"]))
+        final_guard_ready = bool(held and int(held[-1]["guard_raw_satisfied"]))
+        final_guard_observed = bool(held and int(held[-1]["guard_evidence_available"]))
+        directional_wait = bool(held and int(held[-1]["directional_guard_wait"]))
+        expected_decision = final_guard_ready or directional_wait
+        decision_correct = (
+            final_permitted
+            if final_guard_ready
+            else directional_wait and not final_permitted
+        )
+        accepted = bool(
+            premature == 0
+            and final_local_done
+            and final_guard_observed
+            and expected_decision
+            and decision_correct
+        )
         result.append(
             {
                 "task": task,
@@ -739,6 +763,12 @@ def _acceptance_rows(
                 "demonstration": demonstration,
                 "premature_preterminal_permits": premature,
                 "first_terminal_hold_permit_cycle": first_permit,
+                "final_terminal_hold_local_done": int(final_local_done),
+                "final_guard_evidence_available": int(final_guard_observed),
+                "final_guard_raw_satisfied": int(final_guard_ready),
+                "expected_directional_wait": int(
+                    directional_wait and not final_guard_ready
+                ),
                 "final_terminal_hold_permitted": int(final_permitted),
                 "accepted": int(accepted),
             }

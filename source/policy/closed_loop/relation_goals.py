@@ -108,7 +108,7 @@ class RelationGoalPlanner:
                         actual_relation=intent.actual_relation,
                         source_state=source_state,
                         mode=mode,
-                        link_anchor=self.anchor_registry.resolve(
+                        link_anchor=self.anchor_registry.resolve_for_recovery(
                             frame, source_state, mode
                         ),
                     )

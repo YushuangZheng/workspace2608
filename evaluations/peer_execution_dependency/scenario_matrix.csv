@@ -1,0 +1,7 @@
+scenario,shared_or_transfer_relation,ordinary_physical_reference,exclusive_directed_peer_geometry,expected
+independent_object_manipulation,0,1,0,reject_peer_execution_stream
+handover_shared_object,1,0,1,retain_peer_execution_stream
+cooperative_shared_carry,1,1,0,retain_when_eq6_selected
+peer_only_directed_approach,0,0,1,retain_peer_execution_stream
+constant_synchronized_empty_space_motion,0,0,0,reject_peer_execution_stream
+boundary_only_peer_readiness,0,1,0,express_with_boundary_guard_not_action_stream

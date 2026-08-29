@@ -1,0 +1,510 @@
+{
+  "arms": [
+    "left",
+    "right"
+  ],
+  "base_policy_fingerprints": {
+    "left": "a90a77b06b2af3a4f6fa89a04cfe1508bd3295a70822a5fe58badf1467d8fcd8",
+    "right": "1c066c4353a43c67b935d00ed00165af833117e528c507f6937d5aa549bb1317"
+  },
+  "config": {
+    "belief": {
+      "candidate_expansion": {
+        "extension_prior_mass": 0.08,
+        "minimum_relation_compatibility": 0.6,
+        "minimum_robot_compatibility": 0.01,
+        "minimum_scene_compatibility": 0.01
+      },
+      "progress_filter": {
+        "maximum_normalized_entropy": 0.8,
+        "minimum_confidence": 0.55,
+        "minimum_explanation_score": 1e-05,
+        "probability_floor": 1e-300
+      },
+      "progress_prior": {
+        "early_completion_weight": 0.15,
+        "incomplete_weight": 0.2,
+        "local_backward_radius": 1,
+        "local_forward_radius": 2,
+        "normal_completion_weight": 0.65
+      },
+      "relation_filter": {
+        "decision_probability": 0.7,
+        "demonstration_prior_strength": 0.35,
+        "gripper_log_bias": 0.15,
+        "maximum_decision_entropy": 0.62,
+        "minimum_information_weight": 0.1,
+        "minimum_tracking_reliability": 0.25,
+        "observation_outlier_probability": 0.002,
+        "persistence_probability": 0.98,
+        "probability_floor": 1e-12,
+        "residual_motion_floor": 0.0005,
+        "residual_ratio_scale": 0.25
+      },
+      "runtime_features": {
+        "full_excitation_motion": 0.01,
+        "rotation_length_scale": 0.1
+      },
+      "state_evaluator": {
+        "probability_floor": 1e-12,
+        "relation_weight": 1.0,
+        "scene_weight": 1.0
+      }
+    },
+    "boundary": {
+      "calibrations": {
+        "left:0->1": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.6997901716604288,
+          "relation_thresholds": {}
+        },
+        "left:1->2": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.007981804575222582,
+          "relation_thresholds": {}
+        },
+        "left:2->3": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.0011900809954459605,
+          "relation_thresholds": {}
+        },
+        "left:3->4": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.16927451442837285,
+          "relation_thresholds": {}
+        },
+        "left:4->5": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.041094147483057314,
+          "relation_thresholds": {}
+        },
+        "left:5->6": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.4588143460761205,
+          "relation_thresholds": {}
+        },
+        "right:0->1": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.002747132514543951,
+          "relation_thresholds": {}
+        },
+        "right:1->2": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.323253036907337,
+          "relation_thresholds": {}
+        },
+        "right:2->3": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.5761798736859908,
+          "relation_thresholds": {}
+        },
+        "right:3->4": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.5766344920616601,
+          "relation_thresholds": {}
+        },
+        "right:4->5": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.5763581312236673,
+          "relation_thresholds": {}
+        },
+        "right:5->6": {
+          "confirmation_cycles": 2,
+          "local_score_threshold": 0.1698191619798493,
+          "relation_thresholds": {}
+        }
+      },
+      "default_relation_probability": 0.7,
+      "minimum_information_weight": 0.1,
+      "minimum_scene_reliability": 0.25,
+      "minimum_tracking_reliability": 0.25
+    },
+    "execution": {
+      "frame_roles": {
+        "expected_relation_probability": 0.7,
+        "minimum_information_weight": 0.1,
+        "minimum_tracking_reliability": 0.25
+      },
+      "minimum_action_equivalence_compatibility": 0.8,
+      "mismatch": {
+        "no_plausible_cycles": 20,
+        "persistent_hold_cycles": 20,
+        "relation_mismatch_cycles": 5,
+        "stalled_progress_cycles": 20
+      }
+    },
+    "recovery": {
+      "recovery": {
+        "action_position_variance": 0.0002,
+        "action_rotation_variance": 0.0005,
+        "boundary_relation_mismatch_cycles": 3,
+        "covariance_inflation": 0.0001,
+        "maximum_attempts_per_goal": 2,
+        "maximum_reentry_cycles": 40,
+        "maximum_relation_verify_cycles": 30,
+        "maximum_total_cycles": 400,
+        "maximum_waypoint_cycles": 40,
+        "minimum_information_weight": 0.1,
+        "open_gripper_command": 1.0,
+        "pose_position_tolerance": 0.004,
+        "unlink_fallback_distance": 0.05,
+        "unlink_open_cycles": 2
+      },
+      "reentry": {
+        "minimum_explanation_score": 0.001,
+        "minimum_relation_compatibility": 0.6,
+        "minimum_robot_compatibility": 0.001,
+        "minimum_scene_compatibility": 0.01,
+        "require_relation_evidence_when_available": true
+      },
+      "verification": {
+        "action_position_variance": 1e-05,
+        "action_rotation_variance": 0.0001,
+        "control_period_seconds": 0.05,
+        "maximum_probe_seconds": 1.0,
+        "maximum_return_cycles": 80,
+        "minimum_approach_displacement": 0.0001,
+        "minimum_information_weight": 0.1,
+        "minimum_probe_motion": 0.002,
+        "minimum_tracking_reliability": 0.25,
+        "probe_speed": 0.02,
+        "return_position_tolerance": 0.002,
+        "task_history_length": 12
+      }
+    }
+  },
+  "schema": "essay2608.closed_loop_policy_bundle.v1",
+  "summary": {
+    "arms": [
+      "left",
+      "right"
+    ],
+    "complete": false,
+    "config": {
+      "belief": {
+        "candidate_expansion": {
+          "extension_prior_mass": 0.08,
+          "minimum_relation_compatibility": 0.6,
+          "minimum_robot_compatibility": 0.01,
+          "minimum_scene_compatibility": 0.01
+        },
+        "progress_filter": {
+          "maximum_normalized_entropy": 0.8,
+          "minimum_confidence": 0.55,
+          "minimum_explanation_score": 1e-05,
+          "probability_floor": 1e-300
+        },
+        "progress_prior": {
+          "early_completion_weight": 0.15,
+          "incomplete_weight": 0.2,
+          "local_backward_radius": 1,
+          "local_forward_radius": 2,
+          "normal_completion_weight": 0.65
+        },
+        "relation_filter": {
+          "decision_probability": 0.7,
+          "demonstration_prior_strength": 0.35,
+          "gripper_log_bias": 0.15,
+          "maximum_decision_entropy": 0.62,
+          "minimum_information_weight": 0.1,
+          "minimum_tracking_reliability": 0.25,
+          "observation_outlier_probability": 0.002,
+          "persistence_probability": 0.98,
+          "probability_floor": 1e-12,
+          "residual_motion_floor": 0.0005,
+          "residual_ratio_scale": 0.25
+        },
+        "runtime_features": {
+          "full_excitation_motion": 0.01,
+          "rotation_length_scale": 0.1
+        },
+        "state_evaluator": {
+          "probability_floor": 1e-12,
+          "relation_weight": 1.0,
+          "scene_weight": 1.0
+        }
+      },
+      "boundary": {
+        "calibrations": {
+          "left:0->1": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.6997901716604288,
+            "relation_thresholds": {}
+          },
+          "left:1->2": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.007981804575222582,
+            "relation_thresholds": {}
+          },
+          "left:2->3": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.0011900809954459605,
+            "relation_thresholds": {}
+          },
+          "left:3->4": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.16927451442837285,
+            "relation_thresholds": {}
+          },
+          "left:4->5": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.041094147483057314,
+            "relation_thresholds": {}
+          },
+          "left:5->6": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.4588143460761205,
+            "relation_thresholds": {}
+          },
+          "right:0->1": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.002747132514543951,
+            "relation_thresholds": {}
+          },
+          "right:1->2": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.323253036907337,
+            "relation_thresholds": {}
+          },
+          "right:2->3": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.5761798736859908,
+            "relation_thresholds": {}
+          },
+          "right:3->4": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.5766344920616601,
+            "relation_thresholds": {}
+          },
+          "right:4->5": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.5763581312236673,
+            "relation_thresholds": {}
+          },
+          "right:5->6": {
+            "confirmation_cycles": 2,
+            "local_score_threshold": 0.1698191619798493,
+            "relation_thresholds": {}
+          }
+        },
+        "default_relation_probability": 0.7,
+        "minimum_information_weight": 0.1,
+        "minimum_scene_reliability": 0.25,
+        "minimum_tracking_reliability": 0.25
+      },
+      "execution": {
+        "frame_roles": {
+          "expected_relation_probability": 0.7,
+          "minimum_information_weight": 0.1,
+          "minimum_tracking_reliability": 0.25
+        },
+        "minimum_action_equivalence_compatibility": 0.8,
+        "mismatch": {
+          "no_plausible_cycles": 20,
+          "persistent_hold_cycles": 20,
+          "relation_mismatch_cycles": 5,
+          "stalled_progress_cycles": 20
+        }
+      },
+      "recovery": {
+        "recovery": {
+          "action_position_variance": 0.0002,
+          "action_rotation_variance": 0.0005,
+          "boundary_relation_mismatch_cycles": 3,
+          "covariance_inflation": 0.0001,
+          "maximum_attempts_per_goal": 2,
+          "maximum_reentry_cycles": 40,
+          "maximum_relation_verify_cycles": 30,
+          "maximum_total_cycles": 400,
+          "maximum_waypoint_cycles": 40,
+          "minimum_information_weight": 0.1,
+          "open_gripper_command": 1.0,
+          "pose_position_tolerance": 0.004,
+          "unlink_fallback_distance": 0.05,
+          "unlink_open_cycles": 2
+        },
+        "reentry": {
+          "minimum_explanation_score": 0.001,
+          "minimum_relation_compatibility": 0.6,
+          "minimum_robot_compatibility": 0.001,
+          "minimum_scene_compatibility": 0.01,
+          "require_relation_evidence_when_available": true
+        },
+        "verification": {
+          "action_position_variance": 1e-05,
+          "action_rotation_variance": 0.0001,
+          "control_period_seconds": 0.05,
+          "maximum_probe_seconds": 1.0,
+          "maximum_return_cycles": 80,
+          "minimum_approach_displacement": 0.0001,
+          "minimum_information_weight": 0.1,
+          "minimum_probe_motion": 0.002,
+          "minimum_tracking_reliability": 0.25,
+          "probe_speed": 0.02,
+          "return_position_tolerance": 0.002,
+          "task_history_length": 12
+        }
+      }
+    },
+    "diagnostic_ticks": 0,
+    "failed": false,
+    "initialized": false,
+    "models": {
+      "left": {
+        "arm_id": "left",
+        "base_policy_fingerprint": "a90a77b06b2af3a4f6fa89a04cfe1508bd3295a70822a5fe58badf1467d8fcd8",
+        "base_policy_selection_semantics_id": "eq5_skill_majority_gate_timestep_availability_before_eq6_and_poe_time_state_position3d_unimodal_v1",
+        "boundary_count": 6,
+        "builder_config": {
+          "boundary_compatibility_margin": 1e-06,
+          "boundary_relation_support": 0.7,
+          "boundary_scene_min_stable_fraction": 1.0,
+          "boundary_terminal_window": 3,
+          "link_anchor_horizon": 16,
+          "peer_execution_dependencies": [
+            {
+              "eligible": true,
+              "geometry": {
+                "directed": true,
+                "dominates_terminal_spread": true,
+                "eligible": true,
+                "minimum_relative_motion": 0.261678129272605,
+                "terminal_spread": 0.000377751061569218
+              },
+              "mode": 0,
+              "peer_frame": "right_ee",
+              "physical_frames": [],
+              "reason": "shared_or_transfer_relation",
+              "relation_path_frames": [
+                "item0"
+              ],
+              "skill_index": 3
+            },
+            {
+              "eligible": true,
+              "geometry": {
+                "directed": true,
+                "dominates_terminal_spread": true,
+                "eligible": true,
+                "minimum_relative_motion": 0.19971380135255346,
+                "terminal_spread": 0.003422804563807182
+              },
+              "mode": 0,
+              "peer_frame": "right_ee",
+              "physical_frames": [],
+              "reason": "shared_or_transfer_relation",
+              "relation_path_frames": [
+                "item0"
+              ],
+              "skill_index": 4
+            }
+          ],
+          "progress_scene_weight": 1.0,
+          "reentry_horizon": 4,
+          "relation_alpha": 6.0,
+          "relation_comotion_residual_ratio": 0.1,
+          "relation_comotion_residual_threshold": 1e-05,
+          "relation_epsilon": 1e-12,
+          "relation_event_alignment_tolerance": 2,
+          "relation_event_support": 0.8,
+          "relation_link_threshold": 0.7,
+          "relation_minimum_dwell": 2,
+          "relation_minimum_excitation": 3e-07,
+          "relation_unlink_threshold": 0.3,
+          "scene_max_neighborhood": 2,
+          "scene_min_loo_accuracy": 0.8,
+          "scene_min_loo_gain": 1e-06,
+          "scene_min_stable_fraction": 0.8,
+          "scene_min_support": 0.8,
+          "scene_recognition_neighborhood": 2,
+          "scene_support_confidence": 0.99,
+          "transaction_boundary_tolerance": 0.03
+        },
+        "link_anchor_count": 1,
+        "link_origin_count": 140,
+        "link_pending_count": 0,
+        "relation_frames": [
+          "item0",
+          "item1",
+          "item2",
+          "item3",
+          "item4",
+          "right_ee"
+        ],
+        "scene_factor_count": 0,
+        "schema_version": 4,
+        "skill_state_counts": {
+          "0": 74,
+          "1": 26,
+          "2": 45,
+          "3": 45,
+          "4": 26,
+          "5": 22,
+          "6": 24
+        },
+        "state_count": 262,
+        "unlink_event_count": 1
+      },
+      "right": {
+        "arm_id": "right",
+        "base_policy_fingerprint": "1c066c4353a43c67b935d00ed00165af833117e528c507f6937d5aa549bb1317",
+        "base_policy_selection_semantics_id": "eq5_skill_majority_gate_timestep_availability_before_eq6_and_poe_time_state_position3d_unimodal_v1",
+        "boundary_count": 6,
+        "builder_config": {
+          "boundary_compatibility_margin": 1e-06,
+          "boundary_relation_support": 0.7,
+          "boundary_scene_min_stable_fraction": 1.0,
+          "boundary_terminal_window": 3,
+          "link_anchor_horizon": 16,
+          "peer_execution_dependencies": [],
+          "progress_scene_weight": 1.0,
+          "reentry_horizon": 4,
+          "relation_alpha": 6.0,
+          "relation_comotion_residual_ratio": 0.1,
+          "relation_comotion_residual_threshold": 1e-05,
+          "relation_epsilon": 1e-12,
+          "relation_event_alignment_tolerance": 2,
+          "relation_event_support": 0.8,
+          "relation_link_threshold": 0.7,
+          "relation_minimum_dwell": 2,
+          "relation_minimum_excitation": 3e-07,
+          "relation_unlink_threshold": 0.3,
+          "scene_max_neighborhood": 2,
+          "scene_min_loo_accuracy": 0.8,
+          "scene_min_loo_gain": 1e-06,
+          "scene_min_stable_fraction": 0.8,
+          "scene_min_support": 0.8,
+          "scene_recognition_neighborhood": 2,
+          "scene_support_confidence": 0.99,
+          "transaction_boundary_tolerance": 0.03
+        },
+        "link_anchor_count": 0,
+        "link_origin_count": 0,
+        "link_pending_count": 1,
+        "relation_frames": [
+          "item0",
+          "item1",
+          "item2",
+          "item3",
+          "item4",
+          "left_ee"
+        ],
+        "scene_factor_count": 0,
+        "schema_version": 4,
+        "skill_state_counts": {
+          "0": 74,
+          "1": 26,
+          "2": 45,
+          "3": 45,
+          "4": 26,
+          "5": 22,
+          "6": 24
+        },
+        "state_count": 262,
+        "unlink_event_count": 0
+      }
+    },
+    "name": "closed_loop_multistream",
+    "pending": false
+  }
+}

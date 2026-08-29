@@ -146,7 +146,59 @@ class BeliefUpdater:
         self.expansion_config = config.candidate_expansion
         self._states = tuple(sorted(task_model.states))
         self._global_index = {state: index for index, state in enumerate(self._states)}
+        self._last_progress: ProgressEstimate
         self.reset()
+
+    @property
+    def progress_posterior(self) -> dict[StateId, float]:
+        """Return the committed progress posterior without exposing mutation."""
+
+        return dict(self._progress_posterior)
+
+    def validate_boundary_transition(
+        self,
+        boundary_id: BoundaryId,
+        target_state: StateId,
+    ) -> None:
+        if boundary_id.arm_id != self.task_model.arm_id:
+            raise ValueError("进度投影的边界机械臂与任务模型不一致")
+        if boundary_id not in self.task_model.boundaries:
+            raise KeyError(f"进度投影引用未知边界：{boundary_id.token}")
+        expected = self.task_model.skill_states[boundary_id.target_skill][0]
+        if target_state != expected:
+            raise ValueError("边界进度投影目标必须是下一技能入口状态")
+        if any(
+            state.skill_index > boundary_id.source_skill
+            for state, probability in self._progress_posterior.items()
+            if probability > 0.0
+        ):
+            raise RuntimeError("边界提交前进度后验已经越过待提交边界")
+
+    def commit_boundary_transition(
+        self,
+        boundary_id: BoundaryId,
+        target_state: StateId,
+    ) -> None:
+        """Project all pre-boundary progress mass onto a committed entry.
+
+        The current cycle's returned belief remains an audit of the source
+        state.  Only the internally committed posterior for the next control
+        cycle is changed.  Relation posteriors and observations are untouched.
+        """
+
+        self.validate_boundary_transition(boundary_id, target_state)
+        projected = {target_state: 1.0}
+        self._progress_posterior = projected
+        self._last_progress = replace(
+            self._last_progress,
+            prior=dict(projected),
+            posterior=dict(projected),
+            nominal_state=target_state,
+            estimated_state=target_state,
+            confidence=1.0,
+            entropy=0.0,
+            status=ProgressStatus.ALIGNED,
+        )
 
     def reset(
         self,
@@ -178,8 +230,8 @@ class BeliefUpdater:
             ),
         )
         probabilities = np.asarray(tuple(self._progress_posterior.values()))
-        entropy = float(
-            -np.sum(probabilities * np.log(np.maximum(probabilities, 1.0e-300)))
+        entropy = -float(
+            np.sum(probabilities * np.log(np.maximum(probabilities, 1.0e-300)))
         )
         self._last_progress = ProgressEstimate(
             prior=dict(self._progress_posterior),
@@ -206,22 +258,69 @@ class BeliefUpdater:
         if any(decision == RelationDecision.UNKNOWN for decision in decisions.values()):
             raise ValueError("初始稳定关系判定不能为 Unknown")
         self._stable_decisions = decisions
+        self._informative_evidence_decisions: dict[str, RelationDecision] = {}
+
+    def _commit_informative_evidence(
+        self,
+        features: RuntimeFeatures,
+        estimates: Mapping[str, RelationEstimate],
+    ) -> None:
+        """Keep the last relation *confirmed* by informative motion.
+
+        An instantaneous likelihood direction is not itself a confirmed
+        relation.  In particular, transient contact can favour ``external``
+        for one or more samples while the persistent posterior still supports
+        a previously confirmed ``linked`` relation.  Saving that raw direction
+        would silently replace the confirmation before the filter has actually
+        accepted a state change, and later quiet cycles could no longer retain
+        the valid decision.
+
+        Only an informative, stable posterior decision that agrees with the
+        current evidence direction is therefore committed.  Visibility or
+        reliability gaps still invalidate the confirmation exactly as before.
+        """
+
+        for frame, estimate in estimates.items():
+            visible = features.frame_visibility.get(frame, False)
+            reliable = (
+                features.tracking_reliability.get(frame, 0.0)
+                >= self.config.relation_filter.minimum_tracking_reliability
+            )
+            if not visible or not reliable:
+                # A visibility/reliability gap invalidates continuity.  The
+                # relation must acquire fresh motion evidence after reappearing.
+                self._informative_evidence_decisions.pop(frame, None)
+                continue
+            direction = estimate.informative_evidence_direction
+            if (
+                estimate.informative
+                and direction in {RelationDecision.EXTERNAL, RelationDecision.LINKED}
+                and estimate.decision_state == direction
+            ):
+                self._informative_evidence_decisions[frame] = estimate.decision_state
 
     def _relation_changes(
         self,
+        features: RuntimeFeatures,
         estimates: Mapping[str, RelationEstimate],
     ) -> tuple[RelationChange, ...]:
         changes = []
         for frame, estimate in estimates.items():
             current = estimate.decision_state
             if current == RelationDecision.UNKNOWN:
-                # RelationFilter only preserves a stable decision through a
-                # visible, reliable and posterior-consistent low-excitation
-                # cycle.  Reaching Unknown therefore breaks that continuity
-                # (occlusion, unreliable tracking, or posterior conflict).
-                # Do not resurrect the pre-gap decision when the frame later
-                # reappears without fresh informative motion.
-                self._stable_decisions.pop(frame, None)
+                visible = features.frame_visibility.get(frame, False)
+                reliable = (
+                    features.tracking_reliability.get(frame, 0.0)
+                    >= self.config.relation_filter.minimum_tracking_reliability
+                )
+                if not visible or not reliable:
+                    # An actual observation-quality gap breaks continuity: the
+                    # relation must acquire fresh motion evidence after it
+                    # reappears.  A visible, reliable posterior-conflict or
+                    # low-excitation Unknown is only a temporary lack of a
+                    # discrete decision and must not erase the last confirmed
+                    # physical state.
+                    self._stable_decisions.pop(frame, None)
                 continue
             previous = self._stable_decisions.get(frame)
             if previous is not None and previous != current:
@@ -338,6 +437,7 @@ class BeliefUpdater:
         observation: RuntimeObservation,
         *,
         executed_reference_state: StateId | None = None,
+        action_executed: bool = True,
         permitted_boundaries: frozenset[BoundaryId] = frozenset(),
         mode_by_skill: Mapping[int, int] | None = None,
     ) -> ClosedLoopBelief:
@@ -347,6 +447,7 @@ class BeliefUpdater:
         progress_prior = self.progress_prior_builder.build(
             self._progress_posterior,
             executed_reference_state=executed_reference_state,
+            action_executed=action_executed,
             permitted_boundaries=permitted_boundaries,
         )
         relation_estimates = self.relation_filter.update(
@@ -354,9 +455,11 @@ class BeliefUpdater:
             features,
             self._relation_posteriors,
             previous_decisions=self._stable_decisions,
+            previous_evidence_decisions=self._informative_evidence_decisions,
             mode_by_skill=mode_by_skill,
         )
-        changes = self._relation_changes(relation_estimates)
+        self._commit_informative_evidence(features, relation_estimates)
+        changes = self._relation_changes(features, relation_estimates)
         local_scores = self.state_evaluator.evaluate_many(
             progress_prior.candidates,
             features,
@@ -439,9 +542,11 @@ class BeliefUpdater:
             features,
             self._relation_posteriors,
             previous_decisions=self._stable_decisions,
+            previous_evidence_decisions=self._informative_evidence_decisions,
             mode_by_skill=mode_by_skill,
         )
-        changes = self._relation_changes(relation_estimates)
+        self._commit_informative_evidence(features, relation_estimates)
+        changes = self._relation_changes(features, relation_estimates)
         candidates = tuple(sorted(frozen_progress, key=self._global_index.__getitem__))
         scores = self.state_evaluator.evaluate_many(
             candidates,

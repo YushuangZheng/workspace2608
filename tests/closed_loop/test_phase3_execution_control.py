@@ -11,6 +11,7 @@ import pytest
 
 from essay2608.policy import (
     DynaMAC,
+    DynaMACAction,
     DynaMACConfig,
     DynaMACDemonstration,
     DynaMACObservation,
@@ -24,6 +25,7 @@ from essay2608.policy.closed_loop import (
     ClosedLoopTaskModelBuilder,
     ExecutionDecision,
     FrameRole,
+    FrameRoleConfig,
     FrameRoleRouter,
     LinkPendingCandidate,
     MismatchConfig,
@@ -38,6 +40,7 @@ from essay2608.policy.closed_loop import (
     RuntimeFeatureBuilder,
     RuntimeObservation,
     StateId,
+    WeightedPoEResult,
     weighted_product_of_experts,
 )
 from essay2608.policy.dynamac import pose_compose, pose_inverse
@@ -131,6 +134,8 @@ def relation_estimate(
     decision: RelationDecision,
     *,
     information_weight: float = 1.0,
+    observation_likelihood: tuple[float, float] = (1.0, 1.0),
+    informative: bool | None = None,
 ) -> RelationEstimate:
     values = np.asarray(posterior, dtype=np.float64)
     return RelationEstimate(
@@ -138,10 +143,12 @@ def relation_estimate(
         posterior=values,
         predicted=values,
         demonstration_prior=np.asarray([0.5, 0.5]),
-        observation_likelihood=np.ones(2),
+        observation_likelihood=np.asarray(observation_likelihood, dtype=np.float64),
         information_weight=information_weight,
         entropy=-float(np.sum(values * np.log(np.maximum(values, 1.0e-12)))),
-        informative=decision != RelationDecision.UNKNOWN,
+        informative=(
+            decision != RelationDecision.UNKNOWN if informative is None else informative
+        ),
         decision_state=decision,
     )
 
@@ -385,6 +392,138 @@ def test_confirmed_unselected_link_is_monitored_without_reenabling_poe(
     assert recovered.recovery_intents[0].frame_id == "object"
 
 
+def test_formal_link_uses_learned_interval_motion_to_confirm_posterior_lag(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    state_id = anchor.linked_entry_states[0]
+    mode = event_id.mode
+    router = FrameRoleRouter(model)
+    lagging = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=state_id,
+        estimated=state_id,
+        relation=relation_estimate(
+            "object",
+            (0.90, 0.10),
+            RelationDecision.EXTERNAL,
+            information_weight=0.4,
+            observation_likelihood=(0.01, 1.0),
+        ),
+    )
+
+    snapshot = router.route(
+        state_id,
+        lagging,
+        mode_by_skill={state_id.skill_index: mode},
+    )
+    decision = snapshot.decisions["object"]
+    assert decision.role == FrameRole.DEFER
+    assert decision.formal_link_confirmation_pending is True
+    assert decision.execution_weight == 0.0
+    assert decision.blocks_advance is False
+    assert snapshot.recovery_intents == ()
+
+
+def test_formal_link_confirmation_never_masks_fresh_external_evidence_or_drop(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    state_id = anchor.linked_entry_states[0]
+    modes = {state_id.skill_index: event_id.mode}
+
+    contradicted = FrameRoleRouter(model).route(
+        state_id,
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=state_id,
+            estimated=state_id,
+            relation=relation_estimate(
+                "object",
+                (0.90, 0.10),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(1.0, 0.01),
+            ),
+        ),
+        mode_by_skill=modes,
+    )
+    assert contradicted.decisions["object"].role == FrameRole.RECOVER
+    assert contradicted.blocks_advance is True
+
+    router = FrameRoleRouter(model)
+    confirmed = belief_for(
+        model,
+        demos,
+        tick=2,
+        nominal=state_id,
+        estimated=state_id,
+        relation=relation_estimate("object", (0.01, 0.99), RelationDecision.LINKED),
+    )
+    assert (
+        router.route(state_id, confirmed, mode_by_skill=modes).blocks_advance is False
+    )
+    dropped = router.route(
+        state_id,
+        belief_for(
+            model,
+            demos,
+            tick=3,
+            nominal=state_id,
+            estimated=state_id,
+            relation=relation_estimate(
+                "object",
+                (0.90, 0.10),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(0.01, 1.0),
+            ),
+        ),
+        mode_by_skill=modes,
+    )
+    assert dropped.decisions["object"].formal_link_confirmation_pending is False
+    assert dropped.decisions["object"].role == FrameRole.RECOVER
+    assert dropped.blocks_advance is True
+
+
+def test_formal_link_natural_confirmation_uses_full_learned_interval(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    assert len(anchor.linked_entry_states) >= 2
+    state_id = anchor.linked_entry_states[-1]
+    router = FrameRoleRouter(model)
+    unresolved = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=state_id,
+        estimated=state_id,
+        relation=relation_estimate(
+            "object",
+            (0.5, 0.5),
+            RelationDecision.UNKNOWN,
+            information_weight=0.0,
+        ),
+        static=True,
+    )
+    snapshot = router.route(
+        state_id,
+        unresolved,
+        mode_by_skill={state_id.skill_index: event_id.mode},
+    )
+    assert snapshot.decisions["object"].formal_link_confirmation_pending is True
+    assert snapshot.decisions["object"].role == FrameRole.DEFER
+    assert snapshot.blocks_advance is False
+
+
 def test_weighted_poe_one_preserves_baseline_and_zero_removes_expert() -> None:
     first = GaussianMarginal("first", pose(0.0), np.eye(6) * 0.02)
     second = GaussianMarginal("second", pose(0.1), np.eye(6) * 0.03)
@@ -406,7 +545,7 @@ def test_weighted_poe_one_preserves_baseline_and_zero_removes_expert() -> None:
     assert np.allclose(second.mean, pose(0.1))
 
 
-def test_controller_holds_and_continues_querying_current_state(phase3_model) -> None:
+def test_controller_advances_after_current_reference_is_reached(phase3_model) -> None:
     model, demos = phase3_model
     current = StateId(0, 0)
     successor = StateId(0, 1)
@@ -417,20 +556,183 @@ def test_controller_holds_and_continues_querying_current_state(phase3_model) -> 
         model,
         demos,
         tick=1,
-        nominal=successor,
+        nominal=current,
         estimated=current,
         relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
-        status=ProgressStatus.BACKWARD_REALIGNMENT,
     )
     result = controller.update(
         belief,
         dynamac_observation(model, demos, current),
         mode_by_skill={0: 0},
+        action_executed=True,
     )
-    assert result.decision == ExecutionDecision.HOLD
-    assert result.cursor_after.reference_state == current
+    assert result.decision == ExecutionDecision.ADVANCE
+    assert result.cursor_after.reference_state == successor
     assert result.weighted_action.action is not None
-    assert result.weighted_action.action.diagnostics["time_index"] == 0
+    assert result.weighted_action.action.diagnostics["time_index"] == 1
+
+
+def _install_control_targets(
+    monkeypatch,
+    controller: ClosedLoopExecutionController,
+    targets: dict[StateId, tuple[np.ndarray, float]],
+) -> None:
+    def query(observation, state_id, roles, *, mode_index=None):
+        del observation, mode_index
+        target, gripper = targets[state_id]
+        return WeightedPoEResult(
+            state_id=state_id,
+            stream_weights=roles.execution_weights,
+            participating_frames=tuple(
+                frame
+                for frame, weight in roles.execution_weights.items()
+                if weight > 0.0
+            ),
+            action=DynaMACAction(
+                pose=target.copy(),
+                covariance=np.eye(6, dtype=np.float64) * 0.01,
+                gripper=np.asarray([gripper], dtype=np.float64),
+                diagnostics={"time_index": state_id.local_index},
+            ),
+        )
+
+    monkeypatch.setattr(controller.weighted_poe, "query", query)
+
+
+def test_low_confidence_equivalent_controls_aggregate_and_advance(
+    phase3_model,
+    monkeypatch,
+) -> None:
+    model, demos = phase3_model
+    current = StateId(0, 0)
+    successor = StateId(0, 1)
+    for state in (current, successor):
+        force_relation_prior(model, state, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    _install_control_targets(
+        monkeypatch,
+        controller,
+        {current: (pose(0.0), 1.0), successor: (pose(0.0), 1.0)},
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=successor,
+        estimated=current,
+        posterior={current: 0.5, successor: 0.5},
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+        status=ProgressStatus.LOW_CONFIDENCE,
+    )
+
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+        action_executed=True,
+    )
+
+    assert belief.progress.status == ProgressStatus.LOW_CONFIDENCE
+    assert result.control_equivalence.accepted is True
+    assert result.control_equivalence.equivalent_states == (current, successor)
+    assert result.control_equivalence.aggregated_confidence == pytest.approx(1.0)
+    assert result.control_equivalence.normalized_class_entropy == pytest.approx(0.0)
+    assert result.decision == ExecutionDecision.ADVANCE
+    assert result.cursor_after.reference_state == successor
+    assert result.reasons == (
+        "control_equivalent_progress_uncertainty",
+        "current_reference_reached",
+    )
+
+
+@pytest.mark.parametrize(
+    ("successor_pose", "successor_gripper"),
+    ((pose(0.5), 1.0), (pose(0.0), -1.0)),
+)
+def test_low_confidence_control_relevant_ambiguity_still_holds(
+    phase3_model,
+    monkeypatch,
+    successor_pose,
+    successor_gripper,
+) -> None:
+    model, demos = phase3_model
+    current = StateId(0, 0)
+    successor = StateId(0, 1)
+    for state in (current, successor):
+        force_relation_prior(model, state, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    _install_control_targets(
+        monkeypatch,
+        controller,
+        {
+            current: (pose(0.0), 1.0),
+            successor: (successor_pose, successor_gripper),
+        },
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=successor,
+        estimated=current,
+        posterior={current: 0.5, successor: 0.5},
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+        status=ProgressStatus.LOW_CONFIDENCE,
+    )
+
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+        action_executed=True,
+    )
+
+    assert result.control_equivalence.accepted is False
+    assert result.control_equivalence.equivalent_states == (current,)
+    assert result.decision == ExecutionDecision.HOLD
+    assert "low_progress_confidence" in result.reasons
+
+
+def test_control_equivalence_never_crosses_skill_boundary(
+    phase3_model,
+    monkeypatch,
+) -> None:
+    model, demos = phase3_model
+    terminal = StateId(0, 3)
+    entry = StateId(1, 0)
+    for state in (terminal, entry):
+        force_relation_prior(model, state, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(terminal)
+    _install_control_targets(
+        monkeypatch,
+        controller,
+        {terminal: (pose(0.0), 1.0), entry: (pose(0.0), 1.0)},
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=terminal,
+        estimated=terminal,
+        posterior={terminal: 0.5, entry: 0.5},
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+        status=ProgressStatus.LOW_CONFIDENCE,
+    )
+
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, terminal),
+        mode_by_skill={0: 0, 1: 0},
+        action_executed=True,
+    )
+
+    assert result.control_equivalence.accepted is False
+    assert result.control_equivalence.class_count == 2
+    assert result.decision == ExecutionDecision.HOLD
+    assert "low_progress_confidence" in result.reasons
 
 
 def test_unknown_holds_but_reuses_last_trusted_servo_weight(phase3_model) -> None:
@@ -624,13 +926,12 @@ def test_controller_advances_one_direct_successor_only(phase3_model) -> None:
     assert result.weighted_action.action.diagnostics["time_index"] == 1
 
 
-def test_committed_reference_is_the_next_cycle_action_prior_anchor(
+def test_committed_reference_is_the_next_cycle_completion_prior_anchor(
     phase3_model,
 ) -> None:
     model, demos = phase3_model
     current = StateId(0, 0)
     successor = StateId(0, 1)
-    following = StateId(0, 2)
     force_relation_prior(model, current, linked=False)
     force_relation_prior(model, successor, linked=False)
     controller = ClosedLoopExecutionController(model)
@@ -654,10 +955,11 @@ def test_committed_reference_is_the_next_cycle_action_prior_anchor(
         executed_reference_state=controller.cursor.reference_state,
     )
     assert controller.cursor.reference_state == successor
-    assert next_prior.nominal_state == following
+    assert next_prior.nominal_state == successor
+    assert next_prior.probabilities[successor] == pytest.approx(0.85)
 
 
-def test_controller_realigns_index_without_reverse_trajectory_playback(
+def test_controller_holds_current_target_instead_of_replaying_backward(
     phase3_model,
 ) -> None:
     model, demos = phase3_model
@@ -682,11 +984,246 @@ def test_controller_realigns_index_without_reverse_trajectory_playback(
         dynamac_observation(model, demos, estimated),
         mode_by_skill={0: 0},
     )
-    assert result.decision == ExecutionDecision.REALIGN
-    assert result.cursor_after.reference_state == estimated
+    assert result.decision == ExecutionDecision.HOLD
+    assert result.reasons == ("current_target_incomplete",)
+    assert result.cursor_after.reference_state == current
     assert result.weighted_action.action is not None
-    assert result.weighted_action.action.diagnostics["time_index"] == 0
+    assert result.weighted_action.action.diagnostics["time_index"] == 2
     assert result.weighted_action.action.diagnostics["query_advances_clock"] is False
+
+
+def test_control_equivalent_low_confidence_lag_completes_current_reference(
+    phase3_model,
+    monkeypatch,
+) -> None:
+    model, demos = phase3_model
+    estimated = StateId(0, 0)
+    current = StateId(0, 1)
+    successor = StateId(0, 2)
+    for state in (estimated, current, successor):
+        force_relation_prior(model, state, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    _install_control_targets(
+        monkeypatch,
+        controller,
+        {
+            estimated: (pose(0.0), 1.0),
+            current: (pose(0.0), 1.0),
+            successor: (pose(0.0), 1.0),
+        },
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=current,
+        estimated=estimated,
+        posterior={estimated: 0.52, current: 0.45, successor: 0.03},
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+        status=ProgressStatus.LOW_CONFIDENCE,
+    )
+
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+        action_executed=True,
+    )
+
+    assert result.control_equivalence.accepted is True
+    assert result.control_equivalence.equivalent_states == (
+        estimated,
+        current,
+        successor,
+    )
+    assert result.decision == ExecutionDecision.ADVANCE
+    assert result.cursor_after.reference_state == successor
+    assert result.reasons == (
+        "control_equivalent_progress_uncertainty",
+        "control_equivalent_current_reference_reached",
+    )
+
+
+def test_control_equivalent_backward_realign_completes_adjacent_reference(
+    phase3_model,
+    monkeypatch,
+) -> None:
+    model, demos = phase3_model
+    estimated = StateId(0, 0)
+    current = StateId(0, 1)
+    successor = StateId(0, 2)
+    for state in (estimated, current, successor):
+        force_relation_prior(model, state, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    _install_control_targets(
+        monkeypatch,
+        controller,
+        {
+            estimated: (pose(0.0), 1.0),
+            current: (pose(0.0), 1.0),
+            successor: (pose(0.0), 1.0),
+        },
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=current,
+        estimated=estimated,
+        posterior={estimated: 0.94, current: 0.058, successor: 0.002},
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+        status=ProgressStatus.BACKWARD_REALIGNMENT,
+    )
+
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+        action_executed=True,
+    )
+
+    assert result.control_equivalence.evaluated is True
+    assert result.control_equivalence.accepted is True
+    assert result.control_equivalence.equivalent_states == (
+        estimated,
+        current,
+        successor,
+    )
+    assert result.decision == ExecutionDecision.ADVANCE
+    assert result.cursor_after.reference_state == successor
+    assert result.reasons == (
+        "control_equivalent_backward_realignment",
+        "control_equivalent_current_reference_reached",
+    )
+
+
+@pytest.mark.parametrize(
+    ("current_pose", "current_gripper"),
+    ((pose(0.5), 1.0), (pose(0.0), -1.0)),
+)
+def test_control_relevant_backward_realign_still_holds(
+    phase3_model,
+    monkeypatch,
+    current_pose,
+    current_gripper,
+) -> None:
+    model, demos = phase3_model
+    estimated = StateId(0, 0)
+    current = StateId(0, 1)
+    successor = StateId(0, 2)
+    for state in (estimated, current, successor):
+        force_relation_prior(model, state, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    _install_control_targets(
+        monkeypatch,
+        controller,
+        {
+            estimated: (pose(0.0), 1.0),
+            current: (current_pose, current_gripper),
+            successor: (current_pose, current_gripper),
+        },
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=current,
+        estimated=estimated,
+        posterior={estimated: 0.94, current: 0.058, successor: 0.002},
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+        status=ProgressStatus.BACKWARD_REALIGNMENT,
+    )
+
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+        action_executed=True,
+    )
+
+    assert result.control_equivalence.evaluated is True
+    assert result.control_equivalence.accepted is False
+    assert result.control_equivalence.equivalent_states == (estimated,)
+    assert result.decision == ExecutionDecision.HOLD
+    assert result.cursor_after.reference_state == current
+    assert result.reasons == ("current_target_incomplete",)
+
+
+def test_control_equivalent_backward_realign_does_not_absorb_two_state_lag(
+    phase3_model,
+    monkeypatch,
+) -> None:
+    model, demos = phase3_model
+    estimated = StateId(0, 0)
+    intermediate = StateId(0, 1)
+    current = StateId(0, 2)
+    for state in (estimated, intermediate, current):
+        force_relation_prior(model, state, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    _install_control_targets(
+        monkeypatch,
+        controller,
+        {
+            estimated: (pose(0.0), 1.0),
+            intermediate: (pose(0.0), 1.0),
+            current: (pose(0.0), 1.0),
+        },
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=current,
+        estimated=estimated,
+        posterior={estimated: 0.94, intermediate: 0.04, current: 0.02},
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+        status=ProgressStatus.BACKWARD_REALIGNMENT,
+    )
+
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+        action_executed=True,
+    )
+
+    assert result.control_equivalence.evaluated is True
+    assert result.control_equivalence.accepted is False
+    assert result.decision == ExecutionDecision.HOLD
+    assert result.cursor_after.reference_state == current
+    assert result.reasons == ("current_target_incomplete",)
+
+
+def test_trusted_progress_not_exact_command_covariance_controls_advancement(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    current = StateId(0, 1)
+    successor = StateId(0, 2)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    force_relation_prior(model, successor, linked=False)
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=successor,
+        estimated=successor,
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+    )
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+        action_executed=True,
+    )
+    assert result.decision == ExecutionDecision.ADVANCE
+    assert result.reasons == ("early_successor_reached",)
+    assert result.cursor_after.reference_state == successor
 
 
 def test_reliable_relation_mismatch_blocks_progress_and_emits_after_persistence(
@@ -744,6 +1281,76 @@ def test_reliable_relation_mismatch_blocks_progress_and_emits_after_persistence(
     assert second_result.mismatch.events[0].frame_ids == ("object",)
 
 
+def test_blocked_proposed_state_contributes_persistent_relation_mismatch(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    # The current state is the final state of the learned LINK interval, so it
+    # may still execute natural confirmation motion.  Its successor is outside
+    # that interval and must expose the persistent external contradiction.
+    current = anchor.linked_entry_states[-1]
+    successor = model.state(current).topology.successors[0]
+    force_relation_prior(model, current, linked=True)
+    force_relation_prior(model, successor, linked=True)
+    controller = ClosedLoopExecutionController(
+        model,
+        ClosedLoopExecutionConfig(
+            mismatch=MismatchConfig(
+                no_plausible_cycles=3,
+                relation_mismatch_cycles=2,
+                persistent_hold_cycles=10,
+                stalled_progress_cycles=10,
+            )
+        ),
+    )
+    controller.reset(current)
+    relation = relation_estimate(
+        "object",
+        (0.95, 0.05),
+        RelationDecision.EXTERNAL,
+        information_weight=0.5,
+        observation_likelihood=(0.01, 1.0),
+    )
+
+    first = controller.update(
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=current,
+            estimated=current,
+            relation=relation,
+        ),
+        dynamac_observation(model, demos, current),
+        mode_by_skill={current.skill_index: event_id.mode},
+        action_executed=True,
+    )
+    assert first.cursor_after.reference_state == current
+    assert "proposed_reference_blocked_by_role" in first.reasons
+    assert first.mismatch.counters.relation_mismatch == 1
+    assert first.mismatch.events == ()
+
+    second = controller.update(
+        belief_for(
+            model,
+            demos,
+            tick=2,
+            nominal=current,
+            estimated=current,
+            relation=relation,
+        ),
+        dynamac_observation(model, demos, current),
+        mode_by_skill={current.skill_index: event_id.mode},
+        action_executed=True,
+    )
+    assert second.cursor_after.reference_state == current
+    assert [event.kind for event in second.mismatch.events] == [
+        MismatchKind.RELATION_MISMATCH
+    ]
+    assert second.mismatch.events[0].recovery_intents[0].frame_id == "object"
+
+
 def test_role_router_never_changes_cursor_and_controller_owns_all_commits(
     phase3_model,
 ) -> None:
@@ -779,8 +1386,13 @@ def test_role_router_never_changes_cursor_and_controller_owns_all_commits(
         )
 
 
-def test_pending_unknown_with_observable_low_excitation_requests_verification(
+@pytest.mark.parametrize(
+    "decision",
+    (RelationDecision.UNKNOWN, RelationDecision.EXTERNAL),
+)
+def test_pending_unresolved_with_observable_low_excitation_requests_verification(
     phase3_model,
+    decision: RelationDecision,
 ) -> None:
     model, demos = phase3_model
     pending_state = StateId(0, 3)
@@ -815,8 +1427,8 @@ def test_pending_unknown_with_observable_low_excitation_requests_verification(
         estimated=pending_state,
         relation=relation_estimate(
             "object",
-            (0.5, 0.5),
-            RelationDecision.UNKNOWN,
+            (0.5, 0.5) if decision == RelationDecision.UNKNOWN else (0.9, 0.1),
+            decision,
             information_weight=0.0,
         ),
         static=True,
@@ -828,8 +1440,131 @@ def test_pending_unknown_with_observable_low_excitation_requests_verification(
         belief,
         mode_by_skill={0: 0, 1: 0, 2: 0},
     )
-    assert snapshot.decisions["object"].role == FrameRole.DEFER
+    assert snapshot.decisions["object"].role == (
+        FrameRole.DEFER if decision == RelationDecision.UNKNOWN else FrameRole.EXECUTE
+    )
     assert snapshot.recovery_intents == ()
+    assert len(snapshot.verification_requests) == 1
+    assert snapshot.verification_requests[0].pending_event_id == event_id
+
+
+def test_pending_verification_does_not_require_current_poe_selection(
+    phase3_model,
+) -> None:
+    """A newly linked frame normally leaves PoE but can still need verification."""
+
+    model, demos = phase3_model
+    pending_state = StateId(0, 3)
+    future_linked = StateId(1, 0)
+    force_relation_prior(model, pending_state, linked=True)
+    force_relation_prior(model, future_linked, linked=True)
+    node = model.state(pending_state)
+    node.selected_frames = tuple(
+        frame for frame in node.selected_frames if frame != "object"
+    )
+    node.mode_selected_frames = tuple(
+        tuple(frame for frame in frames if frame != "object")
+        for frames in node.mode_selected_frames
+    )
+    event_id = RelationEventId(
+        model.arm_id,
+        "object",
+        pending_state.skill_index,
+        0,
+        0,
+        "link_pending",
+    )
+    model.link_pending_events[event_id] = LinkPendingCandidate(
+        event_id=event_id,
+        arm_id=model.arm_id,
+        frame_id="object",
+        candidate_state=pending_state,
+        context_state=StateId(0, 0),
+        local_means=np.stack([pose(0.0), pose(0.01)]),
+        local_covariances=np.stack([np.eye(6) * 0.01] * 2),
+        gripper_commands=np.asarray([[1.0], [-1.0]]),
+        demonstration_indices=(0, 1, 2, 3, 4),
+        event_local_indices=(3, 3, 3, 3, 3),
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=pending_state,
+        estimated=pending_state,
+        relation=relation_estimate(
+            "object",
+            (0.9, 0.1),
+            RelationDecision.EXTERNAL,
+            information_weight=0.0,
+        ),
+        static=True,
+    )
+
+    snapshot = FrameRoleRouter(model).route(
+        pending_state,
+        belief,
+        mode_by_skill={0: 0, 1: 0, 2: 0},
+    )
+
+    assert "object" not in snapshot.decisions
+    assert len(snapshot.verification_requests) == 1
+    assert snapshot.verification_requests[0].pending_event_id == event_id
+
+
+def test_pending_event_context_remains_active_after_the_closing_state(
+    phase3_model,
+) -> None:
+    """Natural motion may become uninformative only after the closing sample."""
+
+    model, demos = phase3_model
+    pending_state = StateId(0, 1)
+    later_state = StateId(0, 3)
+    future_linked = StateId(1, 0)
+    force_relation_prior(model, pending_state, linked=True)
+    force_relation_prior(model, later_state, linked=True)
+    force_relation_prior(model, future_linked, linked=True)
+    event_id = RelationEventId(
+        model.arm_id,
+        "object",
+        pending_state.skill_index,
+        0,
+        0,
+        "link_pending",
+    )
+    model.link_pending_events[event_id] = LinkPendingCandidate(
+        event_id=event_id,
+        arm_id=model.arm_id,
+        frame_id="object",
+        candidate_state=pending_state,
+        context_state=StateId(0, 0),
+        local_means=np.stack([pose(0.0), pose(0.01)]),
+        local_covariances=np.stack([np.eye(6) * 0.01] * 2),
+        gripper_commands=np.asarray([[1.0], [-1.0]]),
+        demonstration_indices=(0, 1, 2, 3, 4),
+        event_local_indices=(1, 1, 1, 1, 1),
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=later_state,
+        estimated=later_state,
+        relation=relation_estimate(
+            "object",
+            (0.45, 0.55),
+            RelationDecision.UNKNOWN,
+            information_weight=0.0,
+        ),
+        static=True,
+    )
+
+    snapshot = FrameRoleRouter(model).route(
+        later_state,
+        belief,
+        mode_by_skill={0: 0, 1: 0, 2: 0},
+    )
+
     assert len(snapshot.verification_requests) == 1
     assert snapshot.verification_requests[0].pending_event_id == event_id
 
@@ -918,8 +1653,60 @@ def test_no_plausible_and_persistent_hold_have_independent_counters(
     }
 
 
+def test_rejected_command_does_not_become_task_level_no_plausible_event(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    state = StateId(0, 0)
+    force_relation_prior(model, state, linked=False)
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=state,
+        estimated=state,
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+        status=ProgressStatus.NO_PLAUSIBLE_STATE,
+    )
+    roles = FrameRoleRouter(model).route(state, belief, mode_by_skill={0: 0})
+    tracker = MismatchTracker(
+        MismatchConfig(
+            no_plausible_cycles=1,
+            relation_mismatch_cycles=2,
+            persistent_hold_cycles=1,
+            stalled_progress_cycles=2,
+        )
+    )
+
+    rejected = tracker.update(
+        belief,
+        ClosedLoopExecutionController(model).cursor,
+        ExecutionDecision.HOLD,
+        roles,
+        action_executed=False,
+    )
+
+    assert rejected.counters.no_plausible_state == 0
+    assert [event.kind for event in rejected.events] == [MismatchKind.PERSISTENT_HOLD]
+
+
 def test_tracked_phase_three_config_matches_code_defaults() -> None:
     path = Path("configs/closed_loop_execution.json")
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload == asdict(ClosedLoopExecutionConfig())
     assert ClosedLoopExecutionConfig.from_json(path).to_dict() == payload
+
+
+def test_phase_three_config_reads_legacy_command_completion_threshold() -> None:
+    legacy = ClosedLoopExecutionConfig.from_mapping(
+        {"minimum_command_completion_compatibility": 0.75}
+    )
+    assert legacy.minimum_action_equivalence_compatibility == pytest.approx(0.75)
+    assert "minimum_command_completion_compatibility" not in legacy.to_dict()
+
+
+def test_phase_three_config_ignores_legacy_formal_link_state_cap() -> None:
+    legacy = ClosedLoopExecutionConfig.from_mapping(
+        {"frame_roles": {"formal_link_confirmation_states": 5}}
+    )
+    assert "formal_link_confirmation_states" not in legacy.to_dict()["frame_roles"]

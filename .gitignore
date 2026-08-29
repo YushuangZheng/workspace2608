@@ -91,6 +91,8 @@ lightning_logs/
 /integrations/rlbench/models/**
 !/integrations/rlbench/models/v4/
 !/integrations/rlbench/models/v4/release_manifest.json
+!/integrations/rlbench/models/closed_loop_v1/
+!/integrations/rlbench/models/closed_loop_v1/**
 
 # Raw formal results, diagnostics, replay manifests, and videos are generated
 # artifacts (some JSON files exceed GitHub's normal per-file limit). Publish

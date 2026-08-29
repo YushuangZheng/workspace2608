@@ -146,10 +146,10 @@ def test_stack_wine_normal_replay_routes_roles_and_keeps_actions_available() -> 
             truth, ee_pose, frames, _, _ = current
             belief = updater.update(
                 runtime_observation(tick, current, previous),
-                # The replayed observation comes from the demonstration's
-                # recorded previous-state action; the queried controller
-                # action is not applied to the fixed trace.
-                executed_reference_state=previous[0],
+                # The fixed trace supplies the recorded target state whose
+                # action produced this observation; the queried controller
+                # action is not applied to the demonstration.
+                executed_reference_state=current[0],
                 mode_by_skill=mode_by_skill,
             )
             cycle = controller.update(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Mapping, Sequence
 
 from .belief_updater import BeliefUpdater, ClosedLoopBelief
@@ -60,10 +61,16 @@ class ReentrySelector:
         task_model: ClosedLoopTaskModel,
         config: ReentryConfig = ReentryConfig(),
         evaluator_config: StateEvaluatorConfig = StateEvaluatorConfig(),
+        *,
+        robot_covariance_inflation: float = 0.0,
     ) -> None:
+        inflation = float(robot_covariance_inflation)
+        if not math.isfinite(inflation) or inflation < 0.0:
+            raise ValueError("重入机器人协方差放宽量必须为有限非负数")
         self.task_model = task_model
         self.config = config
         self.evaluator = StateEvaluator(task_model, evaluator_config)
+        self.robot_covariance_inflation = inflation
         self._global_index = {
             state: index for index, state in enumerate(sorted(task_model.states))
         }
@@ -106,6 +113,7 @@ class ReentrySelector:
             belief.runtime_features,
             belief.relation_estimates,
             mode_by_skill=mode_by_skill,
+            robot_covariance_inflation=self.robot_covariance_inflation,
         )
         rejections: dict[StateId, tuple[str, ...]] = {}
         accepted = []

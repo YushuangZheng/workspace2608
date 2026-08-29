@@ -1,0 +1,211 @@
+{
+  "schema": "essay2608.rlbench.closed_loop_build.v1",
+  "task": "stack_wine",
+  "bimanual": false,
+  "demonstrations": [
+    "episode0",
+    "episode1",
+    "episode2",
+    "episode3",
+    "episode4"
+  ],
+  "base_model_root": "/home/zhengyushuang/workspace/essay2608/integrations/rlbench/models/v4",
+  "closed_loop_output_root": "/tmp/essay2608-closed-loop-all-calibrated-3P8Csz",
+  "files": {
+    "configs/closed_loop_task_model.json": "158694feb75e7c2259af7c60092114885d5e9df29be97ebde32d688d3cbde765",
+    "configs/closed_loop_belief.json": "59bb5d51e37b17500680e23374febf3574422d5c9d5c2f60eb55461b244bb128",
+    "configs/closed_loop_execution.json": "8a70274114dd73f70c6ca48f03e58d733d69c51590034d50d789b4f4f29e4699",
+    "configs/closed_loop_recovery.json": "ff9c3d2d37b4be49d62517f45524a9caca03fac7b5d30d95879c13fe5de7713c",
+    "configs/closed_loop_boundary/stack_wine.json": "03aa022f4fbd8b8f78ac9bb06952d98f27e2b4da9c8906fb91c28388506f3e03",
+    "integrations/rlbench/models/v4/stack_wine/model.npz": "6779ac3fc2f63fde6bbe9bc4e137eca3f9600a006e1e4c173a6dd7501bf6beac",
+    "integrations/rlbench/data/training/main/stack_wine/all_variations/episodes/episode0/low_dim_obs.pkl": "bbd2a2661461aeef08ab588c7760089726cd8e14e13295d5cba64ff272cb8f11",
+    "integrations/rlbench/data/training/main/stack_wine/all_variations/episodes/episode1/low_dim_obs.pkl": "1aa681ef481191e785b51d4187aa630f795858a7386b6f3f5e7dbc2a2bfbec13",
+    "integrations/rlbench/data/training/main/stack_wine/all_variations/episodes/episode2/low_dim_obs.pkl": "8032180129869609c9ed64932b46d0f6989fdf1f10365b0288788e70b8e294eb",
+    "integrations/rlbench/data/training/main/stack_wine/all_variations/episodes/episode3/low_dim_obs.pkl": "ed3b726234d953ba1bdc7732e05780633830468dfb393e66bc034d338c9a6aeb",
+    "integrations/rlbench/data/training/main/stack_wine/all_variations/episodes/episode4/low_dim_obs.pkl": "834867b269c5bcbcc33cb4e6c9d2526fc7ac5cc6a344b4098e20e472cfca9b81"
+  },
+  "policy_summary": {
+    "name": "closed_loop_multistream",
+    "arms": [
+      "single"
+    ],
+    "models": {
+      "single": {
+        "schema_version": 3,
+        "arm_id": "single",
+        "base_policy_fingerprint": "79cee027633640306a59fc516fecb38be74a66ce4b7c76bd8b2ff3115038541a",
+        "base_policy_selection_semantics_id": "eq5_skill_majority_gate_timestep_availability_before_eq6_and_poe_time_state_position3d_unimodal_v1",
+        "state_count": 181,
+        "skill_state_counts": {
+          "0": 72,
+          "1": 11,
+          "2": 59,
+          "3": 39
+        },
+        "boundary_count": 3,
+        "link_anchor_count": 1,
+        "link_pending_count": 0,
+        "unlink_event_count": 0,
+        "link_origin_count": 96,
+        "relation_frames": [
+          "wine_bottle",
+          "success_sensor"
+        ],
+        "scene_factor_count": 0,
+        "builder_config": {
+          "relation_alpha": 6.0,
+          "relation_epsilon": 1e-12,
+          "relation_link_threshold": 0.7,
+          "relation_unlink_threshold": 0.3,
+          "relation_minimum_dwell": 2,
+          "relation_event_support": 0.8,
+          "relation_event_alignment_tolerance": 2,
+          "relation_minimum_excitation": 3e-07,
+          "relation_comotion_residual_threshold": 1e-05,
+          "relation_comotion_residual_ratio": 0.1,
+          "link_anchor_horizon": 16,
+          "reentry_horizon": 4,
+          "scene_max_neighborhood": 2,
+          "scene_recognition_neighborhood": 2,
+          "scene_min_support": 0.8,
+          "scene_min_stable_fraction": 0.8,
+          "scene_support_confidence": 0.99,
+          "scene_min_loo_gain": 1e-06,
+          "scene_min_loo_accuracy": 0.8,
+          "progress_scene_weight": 1.0,
+          "boundary_terminal_window": 3,
+          "boundary_relation_support": 0.7,
+          "boundary_scene_min_stable_fraction": 1.0,
+          "boundary_compatibility_margin": 1e-06,
+          "transaction_boundary_tolerance": 0.03
+        }
+      }
+    },
+    "config": {
+      "belief": {
+        "runtime_features": {
+          "rotation_length_scale": 0.1,
+          "full_excitation_motion": 0.01
+        },
+        "progress_prior": {
+          "incomplete_weight": 0.2,
+          "normal_completion_weight": 0.65,
+          "early_completion_weight": 0.15,
+          "local_backward_radius": 1,
+          "local_forward_radius": 2
+        },
+        "relation_filter": {
+          "persistence_probability": 0.98,
+          "demonstration_prior_strength": 0.35,
+          "minimum_information_weight": 0.1,
+          "minimum_tracking_reliability": 0.25,
+          "maximum_decision_entropy": 0.62,
+          "decision_probability": 0.7,
+          "residual_ratio_scale": 0.25,
+          "residual_motion_floor": 0.0005,
+          "observation_outlier_probability": 0.002,
+          "gripper_log_bias": 0.15,
+          "probability_floor": 1e-12
+        },
+        "state_evaluator": {
+          "scene_weight": 1.0,
+          "relation_weight": 1.0,
+          "probability_floor": 1e-12
+        },
+        "progress_filter": {
+          "minimum_confidence": 0.55,
+          "maximum_normalized_entropy": 0.8,
+          "minimum_explanation_score": 1e-05,
+          "probability_floor": 1e-300
+        },
+        "candidate_expansion": {
+          "extension_prior_mass": 0.08,
+          "minimum_relation_compatibility": 0.6,
+          "minimum_robot_compatibility": 0.01,
+          "minimum_scene_compatibility": 0.01
+        }
+      },
+      "execution": {
+        "frame_roles": {
+          "expected_relation_probability": 0.7,
+          "minimum_tracking_reliability": 0.25,
+          "minimum_information_weight": 0.1
+        },
+        "mismatch": {
+          "no_plausible_cycles": 20,
+          "relation_mismatch_cycles": 5,
+          "persistent_hold_cycles": 20,
+          "stalled_progress_cycles": 20
+        },
+        "minimum_action_equivalence_compatibility": 0.8
+      },
+      "boundary": {
+        "default_relation_probability": 0.7,
+        "minimum_tracking_reliability": 0.25,
+        "minimum_scene_reliability": 0.25,
+        "minimum_information_weight": 0.1,
+        "calibrations": {
+          "single:0->1": {
+            "local_score_threshold": 0.05538487292215119,
+            "confirmation_cycles": 2,
+            "relation_thresholds": {}
+          },
+          "single:1->2": {
+            "local_score_threshold": 0.4015123877122173,
+            "confirmation_cycles": 2,
+            "relation_thresholds": {}
+          },
+          "single:2->3": {
+            "local_score_threshold": 0.012572731088955779,
+            "confirmation_cycles": 2,
+            "relation_thresholds": {}
+          }
+        }
+      },
+      "recovery": {
+        "verification": {
+          "control_period_seconds": 0.05,
+          "probe_speed": 0.02,
+          "maximum_probe_seconds": 1.0,
+          "minimum_probe_motion": 0.002,
+          "minimum_information_weight": 0.1,
+          "minimum_tracking_reliability": 0.25,
+          "minimum_approach_displacement": 0.0001,
+          "task_history_length": 12,
+          "return_position_tolerance": 0.002,
+          "maximum_return_cycles": 80,
+          "action_position_variance": 1e-05,
+          "action_rotation_variance": 0.0001
+        },
+        "recovery": {
+          "covariance_inflation": 0.0001,
+          "pose_position_tolerance": 0.004,
+          "maximum_waypoint_cycles": 40,
+          "maximum_relation_verify_cycles": 30,
+          "maximum_attempts_per_goal": 2,
+          "maximum_total_cycles": 400,
+          "maximum_reentry_cycles": 40,
+          "minimum_information_weight": 0.1,
+          "unlink_open_cycles": 2,
+          "open_gripper_command": 1.0,
+          "unlink_fallback_distance": 0.05,
+          "action_position_variance": 0.0002,
+          "action_rotation_variance": 0.0005,
+          "boundary_relation_mismatch_cycles": 3
+        },
+        "reentry": {
+          "minimum_explanation_score": 0.001,
+          "minimum_robot_compatibility": 0.001,
+          "minimum_scene_compatibility": 0.01,
+          "minimum_relation_compatibility": 0.6,
+          "require_relation_evidence_when_available": true
+        }
+      }
+    },
+    "initialized": false,
+    "pending": false,
+    "failed": false,
+    "complete": false,
+    "diagnostic_ticks": 0
+  }
+}

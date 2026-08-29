@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping, cast
 
 import numpy as np
 
@@ -23,7 +23,7 @@ from .relation_events import (
     RelationStateKey,
     UnlinkEventMetadata,
 )
-from .scene_factors import FactorDistribution, FactorId
+from .scene_factors import FactorDistribution, FactorId, FactorSpace
 from .state_index import StateId, StateTopology, build_state_topology
 
 if TYPE_CHECKING:
@@ -67,6 +67,19 @@ class StateNode:
         self.mode_priors = mode_priors.copy()
         if len(self.mode_selected_frames) != modes:
             raise ValueError("StateNode 每个模态必须具有对应的流选择结果")
+        unknown_selected = set(self.selected_frames).difference(self.stream_means)
+        if unknown_selected:
+            raise ValueError(f"StateNode 选择了未建模流：{sorted(unknown_selected)}")
+        mode_union: set[str] = set()
+        for selected in self.mode_selected_frames:
+            unknown_mode = set(selected).difference(self.stream_means)
+            if unknown_mode:
+                raise ValueError(
+                    f"StateNode 模态选择了未建模流：{sorted(unknown_mode)}"
+                )
+            mode_union.update(selected)
+        if set(self.selected_frames) != mode_union:
+            raise ValueError("StateNode selected_frames 必须等于逐模态选择结果的并集")
         for name, score in self.demo_relation_scores.items():
             values = np.asarray(score, dtype=np.float64)
             if (
@@ -121,7 +134,7 @@ class ClosedLoopTaskModel:
     relation_frames: tuple[str, ...] = ()
     builder_config: dict[str, Any] = field(default_factory=dict)
     base_policy_fingerprint: str = ""
-    schema_version: int = 3
+    schema_version: int = 4
 
     def __post_init__(self) -> None:
         if not self.base_policy.fitted:
@@ -189,6 +202,70 @@ class ClosedLoopTaskModel:
         except KeyError as exc:
             raise KeyError(f"闭环任务模型不存在状态 {state_id}") from exc
 
+    def active_link_pending_candidate(
+        self,
+        frame_id: str,
+        state_id: StateId,
+        mode_by_skill: Mapping[int, int] | None = None,
+    ) -> LinkPendingCandidate | None:
+        """Resolve the latest still-active relation occurrence at a state.
+
+        ``LINK_PENDING`` identifies an event occurrence, not only its closing
+        sample.  Its context therefore remains active after ``candidate_state``
+        until a later enabled LINK, LINK_PENDING, or UNLINK for the same
+        arm-frame pair replaces it.  This does not create a formal
+        ``link_origin`` and does not assert that the relation is linked.
+        """
+
+        if state_id not in self.states:
+            raise KeyError(f"闭环任务模型不存在状态 {state_id}")
+        ordered_states = tuple(
+            state
+            for skill in sorted(self.skill_states)
+            for state in self.skill_states[skill]
+        )
+        global_index = {state: index for index, state in enumerate(ordered_states)}
+        context_index = global_index[state_id]
+
+        def enabled(event_id: RelationEventId) -> bool:
+            if event_id.frame_id != frame_id:
+                return False
+            if mode_by_skill is None:
+                return True
+            selected_mode = mode_by_skill.get(event_id.skill_index)
+            return selected_mode is None or selected_mode == event_id.mode
+
+        transitions: list[tuple[int, int, str, LinkPendingCandidate | None]] = []
+        for event_id, candidate in self.link_pending_events.items():
+            if enabled(event_id):
+                transitions.append(
+                    (
+                        global_index[candidate.candidate_state],
+                        0,
+                        event_id.token,
+                        candidate,
+                    )
+                )
+        for event_id, anchor in self.link_anchors.items():
+            if not enabled(event_id):
+                continue
+            event_state = (
+                anchor.linked_entry_states[0]
+                if anchor.linked_entry_states
+                else anchor.context_state
+            )
+            transitions.append((global_index[event_state], 1, event_id.token, None))
+        for event_id, event in self.unlink_events.items():
+            if enabled(event_id):
+                transitions.append(
+                    (global_index[event.release_state], 1, event_id.token, None)
+                )
+
+        reached = [row for row in transitions if row[0] <= context_index]
+        if not reached:
+            return None
+        return max(reached, key=lambda row: row[:3])[3]
+
     def summary(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
@@ -246,11 +323,14 @@ class ClosedLoopTaskModel:
         metadata: dict[str, Any],
         archive: Any,
     ) -> FactorDistribution:
+        space_value = str(metadata.get("space", "se3"))
+        if space_value not in {"se3", "euclidean"}:
+            raise ValueError(f"未知场景因子空间：{space_value}")
         return FactorDistribution(
             mean=archive[metadata["mean"]].copy(),
             covariance=archive[metadata["covariance"]].copy(),
             sample_count=int(metadata["sample_count"]),
-            space=str(metadata.get("space", "se3")),
+            space=cast(FactorSpace, space_value),
             observability=float(metadata["observability"]),
             stable_fraction=float(metadata.get("stable_fraction", 1.0)),
             loo_gain=float(metadata["loo_gain"]),
@@ -277,6 +357,14 @@ class ClosedLoopTaskModel:
                         name: prior.tolist()
                         for name, prior in sorted(node.demo_relation_priors.items())
                     },
+                    # The closed-loop sidecar may remove an Eq.6-selected peer
+                    # end-effector from execution after bimanual dependency
+                    # analysis.  Persist that strict subset instead of silently
+                    # reconstructing the frozen base-policy selection on load.
+                    "selected_frames": list(node.selected_frames),
+                    "mode_selected_frames": [
+                        list(selected) for selected in node.mode_selected_frames
+                    ],
                     "scene_factors": [
                         {
                             "factor_id": factor_id.token,
@@ -446,7 +534,7 @@ class ClosedLoopTaskModel:
             )
 
         metadata = {
-            "schema": "essay2608.closed_loop_task_model.v3",
+            "schema": "essay2608.closed_loop_task_model.v4",
             "schema_version": self.schema_version,
             "arm_id": self.arm_id,
             "base_policy_fingerprint": self.base_policy_fingerprint,
@@ -483,7 +571,11 @@ class ClosedLoopTaskModel:
         path = Path(path)
         with np.load(path, allow_pickle=False) as archive:
             metadata = json.loads(str(archive["metadata_json"].item()))
-            if metadata.get("schema") != "essay2608.closed_loop_task_model.v3":
+            schema = metadata.get("schema")
+            if schema not in {
+                "essay2608.closed_loop_task_model.v3",
+                "essay2608.closed_loop_task_model.v4",
+            }:
                 raise ValueError("不支持的闭环任务模型 schema")
             if metadata.get("base_policy_fingerprint") != base_policy.fingerprint():
                 raise ValueError("闭环任务模型与提供的基础 DynaMAC 指纹不匹配")
@@ -515,6 +607,25 @@ class ClosedLoopTaskModel:
                     }
                     for item in record["scene_factors"]
                 }
+                if schema == "essay2608.closed_loop_task_model.v4":
+                    selected_frames = tuple(record["selected_frames"])
+                    mode_selected_frames = tuple(
+                        tuple(selected) for selected in record["mode_selected_frames"]
+                    )
+                else:
+                    # Read-only compatibility for stage-one schema v3.  Those
+                    # sidecars predate peer execution-dependency filtering and
+                    # therefore used the frozen DynaMAC selection verbatim.
+                    selected_frames = tuple(skill.selected_frames)
+                    mode_selected_frames = tuple(
+                        tuple(
+                            name
+                            for name, stream in skill.streams.items()
+                            if name in skill.selected_frames
+                            and stream.is_selected(mode)
+                        )
+                        for mode in range(len(skill.mode_priors))
+                    )
                 states[state_id] = StateNode(
                     state_id=state_id,
                     topology=topology[state_id],
@@ -529,15 +640,8 @@ class ClosedLoopTaskModel:
                         for name, values in record["relation_priors"].items()
                     },
                     mode_priors=skill.mode_priors,
-                    selected_frames=tuple(skill.selected_frames),
-                    mode_selected_frames=tuple(
-                        tuple(
-                            name
-                            for name, stream in skill.streams.items()
-                            if stream.is_selected(mode)
-                        )
-                        for mode in range(len(skill.mode_priors))
-                    ),
+                    selected_frames=selected_frames,
+                    mode_selected_frames=mode_selected_frames,
                     gripper_commands=skill.gripper[:, state_id.local_index],
                     scene_factor_models=scene_factors,
                 )

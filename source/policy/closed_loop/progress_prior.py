@@ -24,7 +24,7 @@ def _normalize(values: Mapping[StateId, float]) -> dict[StateId, float]:
 @dataclass(frozen=True)
 class ProgressPriorConfig:
     incomplete_weight: float = 0.20
-    normal_successor_weight: float = 0.65
+    normal_completion_weight: float = 0.65
     early_completion_weight: float = 0.15
     local_backward_radius: int = 1
     local_forward_radius: int = 2
@@ -33,7 +33,7 @@ class ProgressPriorConfig:
         weights = np.asarray(
             [
                 self.incomplete_weight,
-                self.normal_successor_weight,
+                self.normal_completion_weight,
                 self.early_completion_weight,
             ],
             dtype=np.float64,
@@ -101,6 +101,7 @@ class ProgressPriorBuilder:
         previous_posterior: Mapping[StateId, float],
         *,
         executed_reference_state: StateId | None = None,
+        action_executed: bool = True,
         permitted_boundaries: frozenset[BoundaryId] = frozenset(),
     ) -> ProgressPrior:
         unknown = set(previous_posterior).difference(self.task_model.states)
@@ -114,13 +115,20 @@ class ProgressPriorBuilder:
             raise KeyError(f"动作引用状态不存在：{executed_reference_state}")
 
         raw: dict[StateId, float] = {}
-        if executed_reference_state is None:
+        if not action_executed:
+            if executed_reference_state is not None:
+                raise ValueError("未执行动作时不能提供动作引用状态")
+            # The reset observation (and an environment-rejected command) has
+            # no preceding task action.  It may correct the current belief but
+            # must not create an action-after successor transition.
+            raw.update(posterior)
+        elif executed_reference_state is None:
             # Phase-two can still be exercised as a standalone sidecar.  In
             # that case the posterior itself supplies the only available
             # action-state approximation.
             transitions = (
                 (0, self.config.incomplete_weight),
-                (1, self.config.normal_successor_weight),
+                (1, self.config.normal_completion_weight),
                 (2, self.config.early_completion_weight),
             )
             for source, probability in posterior.items():
@@ -128,19 +136,19 @@ class ProgressPriorBuilder:
                     target = self._advance(source, steps, permitted_boundaries)
                     raw[target] = raw.get(target, 0.0) + probability * weight
         else:
-            # In the integrated loop, ``reference_state`` identifies the
-            # policy action actually queried at t-1.  It anchors the normal
-            # and slightly-early action outcomes, while beta_{t-1} is still
-            # retained for the incomplete-action branch.  This implements
-            # P_prog(s | s', a_{t-1}) beta_{t-1}(s') without either ignoring
-            # the action or replacing the posterior by a one-hot cursor.
+            # In the integrated loop, ``reference_state`` is the target
+            # configuration actually queried at t-1.  Normal completion
+            # therefore reaches that state; reaching its direct successor is
+            # the slightly-early branch.  beta_{t-1} remains the incomplete
+            # branch, so the action anchor never replaces the posterior by a
+            # one-hot cursor.
             for source, probability in posterior.items():
                 raw[source] = raw.get(source, 0.0) + (
                     probability * self.config.incomplete_weight
                 )
             for steps, weight in (
-                (1, self.config.normal_successor_weight),
-                (2, self.config.early_completion_weight),
+                (0, self.config.normal_completion_weight),
+                (1, self.config.early_completion_weight),
             ):
                 target = self._advance(
                     executed_reference_state,

@@ -2682,6 +2682,14 @@ class DynaMAC:
         return self._complete
 
     @property
+    def selected_mode_path(self) -> tuple[int, ...]:
+        """Return the read-only episode MiDiGaP mode path selected by reset."""
+
+        if not self._episode_initialized:
+            raise RuntimeError("DynaMAC 尚未 reset，不能读取 episode 模态路径")
+        return tuple(self._mode_path)
+
+    @property
     def selection_semantics_id(self) -> str:
         """Config-specific model identity; V1/V2 checkpoints keep their ID."""
 

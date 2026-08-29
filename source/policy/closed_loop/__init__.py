@@ -27,9 +27,12 @@ from .belief_updater import (
     CandidateExpansionConfig,
     ClosedLoopBelief,
 )
+from .config import ClosedLoopPolicyConfig
+from .diagnostics import DiagnosticRecorder, json_ready
 from .execution_controller import (
     ClosedLoopExecutionConfig,
     ClosedLoopExecutionController,
+    ControlEquivalenceAssessment,
     ExecutionCycleResult,
 )
 from .execution_cursor import ClosedLoopCursor, ExecutionDecision
@@ -63,6 +66,7 @@ from .progress_filter import (
     ProgressStatus,
 )
 from .progress_prior import ProgressPrior, ProgressPriorBuilder, ProgressPriorConfig
+from .policy import ClosedLoopMultiStreamPolicy
 from .recovery import (
     ClosedLoopRecoveryConfig,
     ClosedLoopRecoveryManager,
@@ -125,6 +129,7 @@ from .state_evaluator import (
     StateEvaluatorConfig,
 )
 from .state_index import StateId, StateTopology, build_state_topology
+from .state import ArmCommand, ArmCycleResult, PolicyCycleResult, PolicyLifecycle
 from .task_model import ClosedLoopTaskModel, StateNode
 from .task_model_builder import ClosedLoopTaskModelBuilder, ClosedLoopTaskModelConfig
 from .transition_transaction import (
@@ -147,21 +152,27 @@ __all__ = [
     "BoundaryCycleResult",
     "BeliefUpdater",
     "BeliefUpdaterConfig",
+    "ArmCommand",
+    "ArmCycleResult",
     "AuxiliaryAction",
     "CandidateExpansionConfig",
     "CandidateScore",
     "ClosedLoopCursor",
     "ClosedLoopExecutionConfig",
     "ClosedLoopExecutionController",
+    "ControlEquivalenceAssessment",
     "ClosedLoopRecoveryConfig",
     "ClosedLoopRecoveryManager",
     "ClosedLoopBelief",
+    "ClosedLoopMultiStreamPolicy",
+    "ClosedLoopPolicyConfig",
     "ClosedLoopTaskModel",
     "ClosedLoopTaskModelBuilder",
     "ClosedLoopTaskModelConfig",
     "ConditionId",
     "ConditionKind",
     "ConditionResult",
+    "DiagnosticRecorder",
     "EntryGuard",
     "EpisodeLinkAnchorRegistry",
     "ExecutionMode",
@@ -195,6 +206,8 @@ __all__ = [
     "ProgressPriorBuilder",
     "ProgressPriorConfig",
     "ProgressStatus",
+    "PolicyCycleResult",
+    "PolicyLifecycle",
     "ProbeExitReason",
     "RecoveryConfig",
     "RecoveryCycleResult",
@@ -251,4 +264,5 @@ __all__ = [
     "WeightedPoEResult",
     "build_state_topology",
     "weighted_product_of_experts",
+    "json_ready",
 ]

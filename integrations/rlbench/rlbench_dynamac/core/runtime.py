@@ -16,10 +16,20 @@ from typing import Any, Callable, Literal, Protocol
 
 import numpy as np
 
-from integrations.rlbench.rlbench_dynamac.core.pytracik_dependency import pytracik_dependency_identity
-from integrations.rlbench.rlbench_dynamac.core.task_specs import TaskSpec, get_task_spec, unwrap_task_low_dim_state
-from integrations.rlbench.rlbench_dynamac.core.task_specs import wxyz_to_xyzw as _wxyz_to_xyzw
-from integrations.rlbench.rlbench_dynamac.core.task_specs import xyzw_to_wxyz as _xyzw_to_wxyz
+from integrations.rlbench.rlbench_dynamac.core.pytracik_dependency import (
+    pytracik_dependency_identity,
+)
+from integrations.rlbench.rlbench_dynamac.core.task_specs import (
+    TaskSpec,
+    get_task_spec,
+    unwrap_task_low_dim_state,
+)
+from integrations.rlbench.rlbench_dynamac.core.task_specs import (
+    wxyz_to_xyzw as _wxyz_to_xyzw,
+)
+from integrations.rlbench.rlbench_dynamac.core.task_specs import (
+    xyzw_to_wxyz as _xyzw_to_wxyz,
+)
 
 Array = np.ndarray
 
@@ -61,9 +71,7 @@ SOURCE_RECONSTRUCTION_TRANSLATION_TOLERANCE_M = 1.0e-6
 SOURCE_RECONSTRUCTION_ROTATION_TOLERANCE_RAD = 1.0e-6
 SOURCE_RECONSTRUCTION_SCALAR_TOLERANCE = 1.0e-6
 SOURCE_RECONSTRUCTION_JOINT_TOLERANCE = 1.0e-6
-TASK_SEMANTIC_SIGNATURE_SCHEMA = (
-    "dynamac-rlbench-task-semantic-signature-v2"
-)
+TASK_SEMANTIC_SIGNATURE_SCHEMA = "dynamac-rlbench-task-semantic-signature-v2"
 TASK_TREE_STATE_SCHEMA = "rlbench-task-tree-dual-frame-state-v1"
 CROSS_INITIALIZATION_REPRODUCIBILITY_SCHEMA = (
     "rlbench-cross-initialization-reproducibility-audit-v1"
@@ -78,12 +86,8 @@ CROSS_INITIALIZATION_TRANSLATION_TOLERANCE_M = 2.0e-5
 CROSS_INITIALIZATION_ROTATION_TOLERANCE_RAD = 2.0e-4
 CROSS_INITIALIZATION_SCALAR_TOLERANCE = 1.0e-4
 CROSS_INITIALIZATION_JOINT_TOLERANCE = 1.0e-4
-QUATERNION_ROTATION_METRIC = (
-    "sign_invariant_normalized_chord_4asin_half_chord"
-)
-FINAL_SETTLING_PROTOCOL_ID = (
-    "rlbench-hold-final-command-up-to-10-raw-physics-steps-v3"
-)
+QUATERNION_ROTATION_METRIC = "sign_invariant_normalized_chord_4asin_half_chord"
+FINAL_SETTLING_PROTOCOL_ID = "rlbench-hold-final-command-up-to-10-raw-physics-steps-v3"
 DEFAULT_FINAL_SETTLING_PHYSICS_STEPS = 10
 LOW_DIM_STATE_ROUNDTRIP_ATOL = 1.0e-6
 LOW_DIM_POSE_TRANSLATION_TOLERANCE_M = 1.0e-6
@@ -368,9 +372,7 @@ def _validate_fresh_task_generation_evidence(
                     evidence.get("reset_robot_collision_check_count"), int
                 )
                 or evidence.get("reset_robot_collision_check_count") < 0
-                or not isinstance(
-                    evidence.get("reset_random_placement_expected"), bool
-                )
+                or not isinstance(evidence.get("reset_random_placement_expected"), bool)
                 or not isinstance(
                     evidence.get("reset_robot_collision_check_results"), list
                 )
@@ -381,11 +383,7 @@ def _validate_fresh_task_generation_evidence(
                 or evidence["reset_robot_collision_check_count"]
                 != len(evidence["reset_robot_collision_check_results"])
                 or evidence["reset_robot_collision_check_results"]
-                != (
-                    [False]
-                    if evidence["reset_random_placement_expected"]
-                    else []
-                )
+                != ([False] if evidence["reset_random_placement_expected"] else [])
             )
         )
         or evidence.get("fingerprint") != _canonical_json_fingerprint(body)
@@ -413,6 +411,7 @@ IK_SAMPLING_MAX_CONFIGS = 5
 IK_SAMPLING_MAX_TIME_MS = 10
 IK_JOINT_LIMIT_ATOL = 1.0e-9
 GLOBAL_IK_CONTROLLER_PROFILE = "global_pseudo_trac_sampling_path_formal_v1"
+STAGE6_IK_CONTROLLER_PROFILE = "stage6_hybrid_cartesian_executor_v10"
 FROZEN_V4_CONTROLLER_PROFILE = "v4_frozen_legacy_replay"
 FROZEN_V4_IK_RESOLUTION_METHOD = "pseudo_inverse"
 FROZEN_V4_IK_MAX_ITERATIONS = 6
@@ -505,12 +504,8 @@ class GlobalIKControllerConfig:
             "external_solver_bounded_cartesian_api_required": True,
             "trac_ik_timeout_s": self.trac_ik_timeout_s,
             "trac_ik_epsilon": self.trac_ik_epsilon,
-            "trac_ik_translation_tolerance_m": (
-                self.trac_ik_translation_tolerance_m
-            ),
-            "trac_ik_rotation_tolerance_rad": (
-                self.trac_ik_rotation_tolerance_rad
-            ),
+            "trac_ik_translation_tolerance_m": (self.trac_ik_translation_tolerance_m),
+            "trac_ik_rotation_tolerance_rad": (self.trac_ik_rotation_tolerance_rad),
             "trac_ik_joint_window_rad": self.trac_ik_joint_window_rad,
             "trac_ik_fk_translation_max_m": self.trac_ik_fk_translation_max_m,
             "trac_ik_fk_rotation_max_rad": self.trac_ik_fk_rotation_max_rad,
@@ -549,6 +544,187 @@ class GlobalIKControllerConfig:
         }
 
 
+@dataclass(frozen=True)
+class Stage6IKControllerConfig(GlobalIKControllerConfig):
+    """RLBench integration profile with physical Cartesian feedback.
+
+    The frozen V4 executor accepts a joint controller ``stopped`` return as a
+    completed primary action.  That is adequate for reproducing its clock but
+    not for a closed-loop policy whose StateId must remain at an unreached
+    target.  Stage six therefore verifies physical Cartesian progress while
+    keeping solver failure separate from a physically stalled but valid motor
+    command.  The latter is reported to the closed-loop policy without hidden
+    extra motion, so progress and recovery remain observation-driven.
+    """
+
+    # A policy target is complete only inside the same physical Cartesian
+    # envelope used by post-execution verification.  The envelope is tighter
+    # than the minimum learned pose-factor scale, so a legal solver endpoint
+    # cannot consume the entire support margin of a hard boundary condition.
+    # TRAC remains free to use the wider FK/model-alignment audit below, but its
+    # requested bounded solution and the executed-pose completion decision
+    # share one precision.  These values are global integration settings; they
+    # do not depend on a task name, StateId, or boundary identity.
+    trac_ik_timeout_s: float = 0.05
+    trac_ik_translation_tolerance_m: float = 0.0005
+    trac_ik_rotation_tolerance_rad: float = math.radians(0.05)
+    trac_ik_fk_translation_max_m: float = 0.002
+    trac_ik_fk_rotation_max_rad: float = math.radians(1.0)
+    physical_completion_translation_tolerance_m: float = 0.0005
+    physical_completion_rotation_tolerance_rad: float = math.radians(0.05)
+    control_acceptance_translation_tolerance_m: float = 0.0005
+    control_acceptance_rotation_tolerance_rad: float = math.radians(0.05)
+    cartesian_continuation_translation_step_m: float = 0.005
+    cartesian_continuation_rotation_step_rad: float = math.radians(2.0)
+    cartesian_continuation_backoff_factors: tuple[float, ...] = (
+        1.0,
+        0.5,
+        0.25,
+        0.125,
+    )
+    cartesian_continuation_max_segments: int = 96
+    linear_path_steps: int = 50
+    allow_collision_relaxed_linear_path: bool = True
+    allow_collision_relaxed_sampling: bool = True
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        for name in (
+            "physical_completion_translation_tolerance_m",
+            "physical_completion_rotation_tolerance_rad",
+            "control_acceptance_translation_tolerance_m",
+            "control_acceptance_rotation_tolerance_rad",
+            "cartesian_continuation_translation_step_m",
+            "cartesian_continuation_rotation_step_rad",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+            object.__setattr__(self, name, value)
+        factors = tuple(
+            float(value) for value in self.cartesian_continuation_backoff_factors
+        )
+        if (
+            not factors
+            or any(
+                not math.isfinite(value) or not 0.0 < value <= 1.0 for value in factors
+            )
+            or any(left <= right for left, right in zip(factors, factors[1:]))
+        ):
+            raise ValueError(
+                "cartesian continuation backoff factors must be finite, "
+                "positive, at most one, and strictly descending"
+            )
+        object.__setattr__(self, "cartesian_continuation_backoff_factors", factors)
+        if (
+            isinstance(self.cartesian_continuation_max_segments, bool)
+            or not isinstance(self.cartesian_continuation_max_segments, int)
+            or self.cartesian_continuation_max_segments < 1
+        ):
+            raise ValueError("cartesian_continuation_max_segments must be positive")
+        if (
+            isinstance(self.linear_path_steps, bool)
+            or not isinstance(self.linear_path_steps, int)
+            or self.linear_path_steps < 2
+        ):
+            raise ValueError("linear_path_steps must be an integer of at least two")
+        if not isinstance(self.allow_collision_relaxed_linear_path, bool):
+            raise TypeError("allow_collision_relaxed_linear_path must be boolean")
+        if not isinstance(self.allow_collision_relaxed_sampling, bool):
+            raise TypeError("allow_collision_relaxed_sampling must be boolean")
+
+    @property
+    def protocol_id(self) -> str:
+        return "rlbench-stage6-hybrid-cartesian-continuation-v12"
+
+    def metadata(self) -> dict[str, Any]:
+        value = super().metadata()
+        value.update(
+            {
+                "profile": STAGE6_IK_CONTROLLER_PROFILE,
+                "protocol_id": self.protocol_id,
+                "formal_default": False,
+                "ik_order": (
+                    "current_seeded_continuous_pseudo_inverse_then_"
+                    "bounded_trac_ik_distance_"
+                    "then_bounded_cartesian_continuation_"
+                    "then_collision_aware_or_relaxed_sampling_"
+                    "then_linear_or_far_nonlinear_path"
+                ),
+                "primary_resolution_method": (
+                    "current_seeded_coppeliasim_pseudo_inverse"
+                ),
+                "external_fallback_entry_condition": ("pseudo_inverse_exhausted"),
+                "pseudo_inverse_continuity_gate": True,
+                "post_execution_cartesian_verification": True,
+                "cartesian_translation_tolerance_m": (
+                    self.physical_completion_translation_tolerance_m
+                ),
+                "cartesian_rotation_tolerance_rad": (
+                    self.physical_completion_rotation_tolerance_rad
+                ),
+                "control_acceptance_translation_tolerance_m": (
+                    self.control_acceptance_translation_tolerance_m
+                ),
+                "control_acceptance_rotation_tolerance_rad": (
+                    self.control_acceptance_rotation_tolerance_rad
+                ),
+                "cartesian_continuation": {
+                    "entry_condition": "full_target_local_ik_exhausted",
+                    "translation_step_m": (
+                        self.cartesian_continuation_translation_step_m
+                    ),
+                    "rotation_step_rad": (
+                        self.cartesian_continuation_rotation_step_rad
+                    ),
+                    "backoff_factors": list(
+                        self.cartesian_continuation_backoff_factors
+                    ),
+                    "max_segments_per_policy_action": (
+                        self.cartesian_continuation_max_segments
+                    ),
+                    "interpolation": "linear_translation_shortest_xyzw_slerp",
+                    "progress_feedback": ("physical_pose_reobserved_between_segments"),
+                    "commit_semantics": (
+                        "finish_original_policy_target_or_report_measured_stall"
+                    ),
+                    "task_specific": False,
+                },
+                "path_fallback": {
+                    "order": (
+                        "collision_aware_linear_then_collision_relaxed_linear_"
+                        "then_far_only_collision_aware_rrt_connect"
+                    ),
+                    "linear_steps": self.linear_path_steps,
+                    "collision_relaxed_linear_enabled": (
+                        self.allow_collision_relaxed_linear_path
+                    ),
+                    "nonlinear_minimum_translation_m": (
+                        self.far_translation_threshold_m
+                    ),
+                    "task_specific": False,
+                },
+                "sampling_collision_policy": (
+                    "collision_aware_then_collision_relaxed"
+                    if self.allow_collision_relaxed_sampling
+                    else "collision_aware_only"
+                ),
+                "stopped_resolution": "report_observed_stall_to_closed_loop",
+                "fallback_collision_policy": (
+                    "collision_aware_first_then_bounded_relaxation"
+                ),
+                "same_target_alternate_solver_after_primary_stall": False,
+                "unreported_hidden_motion_after_physical_stall": False,
+                "joint_target_execution": (
+                    "shared_clock_joint_target_until_reached_or_stopped"
+                ),
+                "same_target_ik_solution_cache": False,
+                "task_specific_controller_branches": False,
+            }
+        )
+        return value
+
+
 FORMAL_CONTROLLER_METADATA_SCHEMA = "dynamac-global-absolute-ee-controller-v1"
 
 
@@ -558,13 +734,17 @@ def global_ik_controller_metadata(
     """Return the exact controller/clock identity shared by every evaluator."""
 
     config = config or GlobalIKControllerConfig()
-    return {
+    metadata = {
         "schema": FORMAL_CONTROLLER_METADATA_SCHEMA,
-        "profile": GLOBAL_IK_CONTROLLER_PROFILE,
+        "profile": (
+            STAGE6_IK_CONTROLLER_PROFILE
+            if isinstance(config, Stage6IKControllerConfig)
+            else GLOBAL_IK_CONTROLLER_PROFILE
+        ),
         "protocol_id": config.protocol_id,
         "command": "absolute_world_end_effector_pose",
         "ik_order": config.metadata()["ik_order"],
-        "primary_ik": "current_seeded_coppeliasim_pseudo_inverse",
+        "primary_ik": config.metadata()["primary_resolution_method"],
         "primary_ik_parameters": {
             "max_iterations": FROZEN_V4_IK_MAX_ITERATIONS,
             "damping": FROZEN_V4_IK_DAMPING,
@@ -576,13 +756,9 @@ def global_ik_controller_metadata(
             "cartesian_translation_tolerance_m": (
                 config.trac_ik_translation_tolerance_m
             ),
-            "cartesian_rotation_tolerance_rad": (
-                config.trac_ik_rotation_tolerance_rad
-            ),
+            "cartesian_rotation_tolerance_rad": (config.trac_ik_rotation_tolerance_rad),
             "joint_window_rad": config.trac_ik_joint_window_rad,
-            "fk_translation_residual_max_m": (
-                config.trac_ik_fk_translation_max_m
-            ),
+            "fk_translation_residual_max_m": (config.trac_ik_fk_translation_max_m),
             "fk_rotation_residual_max_rad": config.trac_ik_fk_rotation_max_rad,
             "exact_live_coppeliasim_chain_required": True,
             "exact_live_chain_schema": "coppeliasim-moving-frame-panda-chain-v1",
@@ -621,6 +797,40 @@ def global_ik_controller_metadata(
         "task_specific_controller_branches": False,
         "legacy_v4_frozen_profile_used": False,
     }
+    if isinstance(config, Stage6IKControllerConfig):
+        metadata.update(
+            {
+                "post_execution_cartesian_verification": True,
+                "cartesian_translation_tolerance_m": (
+                    config.physical_completion_translation_tolerance_m
+                ),
+                "cartesian_rotation_tolerance_rad": (
+                    config.physical_completion_rotation_tolerance_rad
+                ),
+                "control_acceptance_translation_tolerance_m": (
+                    config.control_acceptance_translation_tolerance_m
+                ),
+                "control_acceptance_rotation_tolerance_rad": (
+                    config.control_acceptance_rotation_tolerance_rad
+                ),
+                "stopped_resolution": "report_observed_stall_to_closed_loop",
+                "fallback_collision_policy": (
+                    "collision_aware_first_then_bounded_relaxation"
+                ),
+                "cartesian_continuation": config.metadata()["cartesian_continuation"],
+                "path_fallback": config.metadata()["path_fallback"],
+                "sampling_collision_policy": config.metadata()[
+                    "sampling_collision_policy"
+                ],
+                "same_target_alternate_solver_after_primary_stall": False,
+                "unreported_hidden_motion_after_physical_stall": False,
+                "joint_target_execution": (
+                    "shared_clock_joint_target_until_reached_or_stopped"
+                ),
+                "same_target_ik_solution_cache": False,
+            }
+        )
+    return metadata
 
 
 @dataclass(frozen=True)
@@ -749,8 +959,10 @@ def step_current_joint_hold_noop(
         if not callable(get_positions) or not callable(set_targets):
             raise RuntimeError("robot component lacks joint-hold APIs")
         positions = np.asarray(get_positions(), dtype=np.float64)
-        if positions.ndim != 1 or positions.size == 0 or not np.all(
-            np.isfinite(positions)
+        if (
+            positions.ndim != 1
+            or positions.size == 0
+            or not np.all(np.isfinite(positions))
         ):
             raise RuntimeError("robot component returned invalid joint positions")
         snapshots.append((component, positions.copy()))
@@ -766,7 +978,9 @@ def step_current_joint_hold_noop(
     if bool(getattr(task_environment, "_shaped_rewards", False)):
         reward_fn = getattr(task, "reward", None)
         if not callable(reward_fn):
-            raise RuntimeError("shaped rewards requested but task.reward is unavailable")
+            raise RuntimeError(
+                "shaped rewards requested but task.reward is unavailable"
+            )
         reward = reward_fn()
         if reward is None:
             raise RuntimeError(
@@ -790,14 +1004,16 @@ def commit_joint_hold_after_primary_failure(
     """
 
     try:
-        observation, reward, terminate = step_current_joint_hold_noop(
-            task_environment
-        )
+        observation, reward, terminate = step_current_joint_hold_noop(task_environment)
     except Exception:
         worker.request("abort", transaction_id=transaction_id)
         raise
     try:
-        commit = worker.request("commit", transaction_id=transaction_id)
+        commit = worker.request(
+            "commit",
+            transaction_id=transaction_id,
+            primary_action_succeeded=False,
+        )
     except Exception:
         # The raw physics step cannot be rolled back. Best-effort resolution
         # prevents a locally known pending transaction from being reused.
@@ -810,9 +1026,7 @@ def commit_joint_hold_after_primary_failure(
 
 
 # Legacy name retained for replay tooling.
-commit_joint_hold_noop_after_retry_exhaustion = (
-    commit_joint_hold_after_primary_failure
-)
+commit_joint_hold_noop_after_retry_exhaustion = commit_joint_hold_after_primary_failure
 
 
 def initialize_ik_solver_diagnostics() -> dict[str, Any]:
@@ -837,54 +1051,90 @@ def initialize_global_ik_controller_diagnostics() -> dict[str, Any]:
     """Counters for the global pseudo/TRAC/sampling/path controller."""
 
     diagnostics = initialize_ik_solver_diagnostics()
-    diagnostics.update({
-        "selected_joint_delta_abs_max": 0.0,
-        "target_pose_count": 0,
-        "target_translation_m_max": 0.0,
-        "target_rotation_rad_max": 0.0,
-        "pseudo_inverse_ik_attempts": 0,
-        "pseudo_inverse_ik_successes": 0,
-        "pseudo_inverse_ik_failures": 0,
-        "pseudo_inverse_ik_candidate_rejections": 0,
-        "selected_via_pseudo_inverse": 0,
-        "trac_ik_distance_attempts": 0,
-        "trac_ik_distance_successes": 0,
-        "trac_ik_distance_failures": 0,
-        "trac_ik_distance_factory_failures": 0,
-        "trac_ik_distance_candidate_rejections": 0,
-        "trac_ik_distance_solve_time_ms_total": 0.0,
-        "trac_ik_distance_solve_time_ms_max": 0.0,
-        "trac_ik_distance_reported_solve_time_ms_total": 0.0,
-        "trac_ik_distance_reported_solve_time_ms_max": 0.0,
-        "trac_ik_distance_chain_sources": [],
-        "trac_ik_distance_chain_schemas": [],
-        "trac_ik_distance_chain_source_missing": 0,
-        "trac_ik_distance_chain_schema_missing": 0,
-        "trac_ik_distance_bounded_cartesian_api_uses": 0,
-        "trac_ik_distance_unbounded_cartesian_api_uses": 0,
-        "trac_ik_distance_result_metadata_missing": 0,
-        "trac_ik_distance_fk_translation_error_m_max": 0.0,
-        "trac_ik_distance_fk_rotation_error_rad_max": 0.0,
-        "trac_ik_distance_exhaustions": 0,
-        "sampling_after_trac_attempts": 0,
-        "sampling_after_trac_successes": 0,
-        "sampling_after_trac_failures": 0,
-        "candidate_rejections_joint_delta_abs": 0,
-        "candidate_rejections_joint_delta_l2": 0,
-        "selected_via_trac_ik_distance": 0,
-        "all_ik_exhaustions": 0,
-        "path_after_all_ik_exhaustion": 0,
-        "far_target_planner_attempts": 0,
-        "far_target_planner_successes": 0,
-        "far_target_planner_failures": 0,
-        "commands_prepared_before_physics": 0,
-        "ik_group_baseline_restore_attempts": 0,
-        "ik_group_baseline_restore_failures": 0,
-        "trac_ik_distance_controller_invalid_actions": 0,
-        "trac_ik_distance_controller_actions": 0,
-        "trac_ik_distance_controller_raw_physics_steps": 0,
-        "trac_ik_distance_controller_raw_physics_steps_max": 0,
-    })
+    diagnostics.update(
+        {
+            "selected_joint_delta_abs_max": 0.0,
+            "target_pose_count": 0,
+            "target_translation_m_max": 0.0,
+            "target_rotation_rad_max": 0.0,
+            "pseudo_inverse_ik_attempts": 0,
+            "pseudo_inverse_ik_successes": 0,
+            "pseudo_inverse_ik_failures": 0,
+            "pseudo_inverse_ik_candidate_rejections": 0,
+            "selected_via_pseudo_inverse": 0,
+            "trac_ik_distance_attempts": 0,
+            "trac_ik_distance_successes": 0,
+            "trac_ik_distance_failures": 0,
+            "trac_ik_distance_factory_failures": 0,
+            "trac_ik_distance_candidate_rejections": 0,
+            "trac_ik_distance_solve_time_ms_total": 0.0,
+            "trac_ik_distance_solve_time_ms_max": 0.0,
+            "trac_ik_distance_reported_solve_time_ms_total": 0.0,
+            "trac_ik_distance_reported_solve_time_ms_max": 0.0,
+            "trac_ik_distance_chain_sources": [],
+            "trac_ik_distance_chain_schemas": [],
+            "trac_ik_distance_chain_source_missing": 0,
+            "trac_ik_distance_chain_schema_missing": 0,
+            "trac_ik_distance_bounded_cartesian_api_uses": 0,
+            "trac_ik_distance_unbounded_cartesian_api_uses": 0,
+            "trac_ik_distance_result_metadata_missing": 0,
+            "trac_ik_distance_fk_translation_error_m_max": 0.0,
+            "trac_ik_distance_fk_rotation_error_rad_max": 0.0,
+            "trac_ik_distance_exhaustions": 0,
+            "sampling_after_trac_attempts": 0,
+            "sampling_after_trac_successes": 0,
+            "sampling_after_trac_failures": 0,
+            "sampling_collision_relaxed_attempts": 0,
+            "sampling_collision_relaxed_successes": 0,
+            "sampling_collision_relaxed_failures": 0,
+            "selected_via_collision_relaxed_sampling": 0,
+            "candidate_rejections_joint_delta_abs": 0,
+            "candidate_rejections_joint_delta_l2": 0,
+            "selected_via_trac_ik_distance": 0,
+            "all_ik_exhaustions": 0,
+            "path_after_all_ik_exhaustion": 0,
+            "far_target_planner_attempts": 0,
+            "far_target_planner_successes": 0,
+            "far_target_planner_failures": 0,
+            "linear_path_attempts": 0,
+            "linear_path_collision_aware_successes": 0,
+            "linear_path_collision_aware_failures": 0,
+            "linear_path_collision_relaxed_attempts": 0,
+            "linear_path_collision_relaxed_successes": 0,
+            "linear_path_collision_relaxed_failures": 0,
+            "near_target_nonlinear_planner_skips": 0,
+            "commands_prepared_before_physics": 0,
+            "ik_group_baseline_restore_attempts": 0,
+            "ik_group_baseline_restore_failures": 0,
+            "trac_ik_distance_controller_invalid_actions": 0,
+            "trac_ik_distance_controller_actions": 0,
+            "trac_ik_distance_controller_raw_physics_steps": 0,
+            "trac_ik_distance_controller_raw_physics_steps_max": 0,
+            "cartesian_verification_checks": 0,
+            "cartesian_verification_failures": 0,
+            "cartesian_post_translation_error_m_max": 0.0,
+            "cartesian_post_rotation_error_rad_max": 0.0,
+            "stopped_with_cartesian_residual": 0,
+            "reached_joint_target_with_cartesian_residual": 0,
+            "controller_raw_physics_budget_exhaustions": 0,
+            "cartesian_direct_goal_attempts": 0,
+            "cartesian_direct_goal_reaches": 0,
+            "cartesian_direct_goal_control_accepts": 0,
+            "cartesian_direct_goal_progress_accepts": 0,
+            "cartesian_direct_goal_stalls": 0,
+            "cartesian_goal_directed_progress_accepts": 0,
+            "cartesian_partial_arm_progress_accepts": 0,
+            "cartesian_continuation_attempts": 0,
+            "cartesian_continuation_successes": 0,
+            "cartesian_continuation_failures": 0,
+            "selected_via_cartesian_continuation": 0,
+            "cartesian_continuation_fraction_min": 1.0,
+            "cartesian_multi_pass_followup_passes": 0,
+            "cartesian_multi_pass_goals_completed": 0,
+            "cartesian_multi_pass_limit_exhaustions": 0,
+            "cartesian_multi_pass_solver_exhaustions_after_progress": 0,
+        }
+    )
     return diagnostics
 
 
@@ -908,18 +1158,16 @@ def _record_solver_duration_ms(
     total_key = f"{prefix}_solve_time_ms_total"
     max_key = f"{prefix}_solve_time_ms_max"
     diagnostics[total_key] = float(diagnostics.get(total_key, 0.0)) + duration_ms
-    diagnostics[max_key] = max(
-        float(diagnostics.get(max_key, 0.0)), duration_ms
-    )
+    diagnostics[max_key] = max(float(diagnostics.get(max_key, 0.0)), duration_ms)
 
 
-def _record_ik_candidate_rejection(
-    diagnostics: dict[str, Any], reason: str
-) -> None:
+def _record_ik_candidate_rejection(diagnostics: dict[str, Any], reason: str) -> None:
     _increment_ik_diagnostic(diagnostics, f"candidate_rejections_{reason}")
 
 
-def end_effector_pose_distance(current_pose: Any, target_pose: Any) -> tuple[float, float]:
+def end_effector_pose_distance(
+    current_pose: Any, target_pose: Any
+) -> tuple[float, float]:
     """Return translation and sign-invariant quaternion angular distance."""
 
     current = np.asarray(current_pose, dtype=np.float64)
@@ -1231,9 +1479,15 @@ class DiscreteGripperProtocol:
     actuation_velocity: float = DEMONSTRATION_GRIPPER_ACTUATION_VELOCITY
     attach_grasped_objects: bool = True
     detach_before_open: bool = True
+    ownership_transfer_requires_receiver_detection: bool = True
 
     def __post_init__(self) -> None:
-        for name in ("bimanual", "attach_grasped_objects", "detach_before_open"):
+        for name in (
+            "bimanual",
+            "attach_grasped_objects",
+            "detach_before_open",
+            "ownership_transfer_requires_receiver_detection",
+        ):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be a bool")
         velocity = float(self.actuation_velocity)
@@ -1249,7 +1503,9 @@ class DiscreteGripperProtocol:
         detach = int(self.detach_before_open)
         return (
             f"rlbench-discrete-gripper-{layout}-velocity{velocity}"
-            f"-attach{attach}-detach-before-open{detach}-v1"
+            f"-attach{attach}-detach-before-open{detach}"
+            f"-transfer-detect{int(self.ownership_transfer_requires_receiver_detection)}"
+            "-retry-pending-close1-v3"
         )
 
     def extend_evaluation_protocol_id(self, base_protocol_id: str) -> str:
@@ -1282,7 +1538,19 @@ class DiscreteGripperProtocol:
             ),
             "attach_grasped_objects": self.attach_grasped_objects,
             "detach_before_open": self.detach_before_open,
-            "implementation": "project_subclass_preserving_vendor_action_semantics",
+            "ownership_transfer_requires_receiver_detection": (
+                self.ownership_transfer_requires_receiver_detection
+            ),
+            "delayed_attachment_retry": True,
+            "delayed_attachment_retry_scope": (
+                "unresolved_open_to_closed_command_until_attach_or_reopen"
+            ),
+            "implementation": (
+                "project_subclass_with_pending_close_attachment_retry_and_"
+                "receiver_proximity_checked_bimanual_transfer"
+                if self.bimanual and self.ownership_transfer_requires_receiver_detection
+                else "project_subclass_with_pending_close_attachment_retry"
+            ),
         }
 
     def make_action_mode(self) -> Any:
@@ -1318,6 +1586,139 @@ def _make_discrete_gripper_action_mode(protocol: DiscreteGripperProtocol) -> Any
         class ProtocolBimanualDiscrete(BimanualDiscrete):
             dynamac_protocol = protocol
 
+            @staticmethod
+            def _receiver_detects(receiver: Any, obj: Any) -> bool:
+                sensor = getattr(receiver, "_proximity_sensor", None)
+                detects = getattr(sensor, "is_detected", None)
+                if not callable(detects):
+                    raise RuntimeError(
+                        "RLBench 双臂附着转移要求夹爪 proximity 检测接口"
+                    )
+                return bool(detects(obj))
+
+            def _grasp_with_ownership(
+                self,
+                receiver: Any,
+                donor: Any,
+                obj: Any,
+            ) -> bool:
+                donor_objects = donor.get_grasped_objects()
+                if obj in donor_objects:
+                    if (
+                        protocol.ownership_transfer_requires_receiver_detection
+                        and not self._receiver_detects(receiver, obj)
+                    ):
+                        return False
+                    donor.release()
+                return bool(receiver.grasp(obj))
+
+            def _pending_close(self) -> dict[str, bool]:
+                pending = getattr(self, "_dynamac_pending_close_attachment", None)
+                if pending is None:
+                    pending = {"right": False, "left": False}
+                    self._dynamac_pending_close_attachment = pending
+                return pending
+
+            def _attempt_pending_close(
+                self,
+                scene: Any,
+                *,
+                arm_id: str,
+            ) -> None:
+                pending = self._pending_close()
+                if not pending[arm_id] or not self._attach_grasped_objects:
+                    return
+                if arm_id == "right":
+                    receiver = scene.robot.right_gripper
+                    donor = scene.robot.left_gripper
+                else:
+                    receiver = scene.robot.left_gripper
+                    donor = scene.robot.right_gripper
+                if receiver.get_grasped_objects():
+                    pending[arm_id] = False
+                    return
+                attached = any(
+                    self._grasp_with_ownership(receiver, donor, obj)
+                    for obj in scene.task.get_graspable_objects()
+                )
+                if attached:
+                    pending[arm_id] = False
+
+            def action(self, scene: Any, action: Array) -> None:
+                """Vendor-compatible discrete actuation with safe ownership transfer.
+
+                The pinned vendor mode releases an object from the opposite arm
+                before checking whether the closing receiver can detect it.  An
+                asynchronous close can therefore drop a remotely held object.
+                Keep every other vendor timing/attachment rule, but require the
+                receiver's existing attachment proximity sensor to confirm an
+                actual handover before releasing the donor.
+                """
+
+                expected_shape = self.action_shape(scene.robot)
+                if np.shape(action) != expected_shape:
+                    raise ValueError(
+                        f"双臂夹爪动作维度应为 {expected_shape}，实际为 {np.shape(action)}"
+                    )
+                values = np.asarray(action, dtype=np.float64)
+                if (
+                    not np.all(np.isfinite(values))
+                    or np.any(values < 0.0)
+                    or np.any(values > 1.0)
+                ):
+                    raise ValueError(
+                        "Gripper action expected to be finite within 0 and 1."
+                    )
+
+                right_current = float(
+                    all(
+                        value > 0.9
+                        for value in scene.robot.right_gripper.get_open_amount()
+                    )
+                )
+                left_current = float(
+                    all(
+                        value > 0.9
+                        for value in scene.robot.left_gripper.get_open_amount()
+                    )
+                )
+                right_action = float(values[0] > 0.5)
+                left_action = float(values[1] > 0.5)
+                changed = right_current != right_action or left_current != left_action
+                pending = self._pending_close()
+                if right_current != right_action:
+                    pending["right"] = right_action == 0.0
+                if left_current != left_action:
+                    pending["left"] = left_action == 0.0
+                if changed and not self._detach_before_open:
+                    self._actuate(scene, values)
+
+                if right_current != right_action:
+                    if right_action == 1.0:
+                        scene.robot.right_gripper.release()
+                if left_current != left_action:
+                    if left_action == 1.0:
+                        scene.robot.left_gripper.release()
+
+                # A Cartesian controller may close just before the arm enters
+                # the attachment proximity volume.  Preserve that unresolved
+                # close event and retry it on later closed-command cycles.
+                # Only the arm whose close event is pending may claim an
+                # object, preventing an already-closed donor from stealing it
+                # back during the same bimanual call.
+                self._attempt_pending_close(scene, arm_id="right")
+                self._attempt_pending_close(scene, arm_id="left")
+
+                if changed:
+                    if self._detach_before_open:
+                        self._actuate(scene, values)
+                        self._attempt_pending_close(scene, arm_id="right")
+                        self._attempt_pending_close(scene, arm_id="left")
+                    if right_action == 1.0 or left_action == 1.0:
+                        for _ in range(10):
+                            scene.pyrep.step()
+                            scene.task.step()
+
             def _actuate(self, scene: Any, action: Array) -> None:
                 right_action = action[0]
                 left_action = action[1]
@@ -1342,6 +1743,58 @@ def _make_discrete_gripper_action_mode(protocol: DiscreteGripperProtocol) -> Any
 
         class ProtocolDiscrete(Discrete):
             dynamac_protocol = protocol
+
+            def _pending_close(self) -> bool:
+                return bool(getattr(self, "_dynamac_pending_close_attachment", False))
+
+            def _attempt_pending_close(self, scene: Any) -> None:
+                if not self._pending_close() or not self._attach_grasped_objects:
+                    return
+                gripper = scene.robot.gripper
+                if gripper.get_grasped_objects():
+                    self._dynamac_pending_close_attachment = False
+                    return
+                attached = any(
+                    bool(gripper.grasp(obj))
+                    for obj in scene.task.get_graspable_objects()
+                )
+                if attached:
+                    self._dynamac_pending_close_attachment = False
+
+            def action(self, scene: Any, action: Array) -> None:
+                if np.shape(action) != (1,):
+                    raise ValueError(
+                        f"单臂夹爪动作维度应为 (1,)，实际为 {np.shape(action)}"
+                    )
+                values = np.asarray(action, dtype=np.float64)
+                if (
+                    not np.all(np.isfinite(values))
+                    or np.any(values < 0.0)
+                    or np.any(values > 1.0)
+                ):
+                    raise ValueError(
+                        "Gripper action expected to be finite within 0 and 1."
+                    )
+                gripper = scene.robot.gripper
+                current = float(all(value > 0.9 for value in gripper.get_open_amount()))
+                requested = float(values[0] > 0.5)
+                changed = current != requested
+                if changed:
+                    self._dynamac_pending_close_attachment = requested == 0.0
+                    if not self._detach_before_open:
+                        self._actuate(scene, requested)
+                    if requested == 1.0:
+                        gripper.release()
+
+                self._attempt_pending_close(scene)
+                if changed:
+                    if self._detach_before_open:
+                        self._actuate(scene, requested)
+                        self._attempt_pending_close(scene)
+                    if requested == 1.0:
+                        for _ in range(10):
+                            scene.pyrep.step()
+                            scene.task.step()
 
             def _actuate(self, scene: Any, action: Array | float) -> None:
                 done = False
@@ -1431,6 +1884,62 @@ def _arm_tip_pose(arm: Any) -> Array:
     return pose
 
 
+def _normalized_xyzw_quaternion(value: Any) -> Array:
+    quaternion = np.asarray(value, dtype=np.float64)
+    if quaternion.shape != (4,) or not np.all(np.isfinite(quaternion)):
+        raise ValueError("quaternion must be a finite xyzw vector")
+    norm = float(np.linalg.norm(quaternion))
+    if norm <= 1.0e-12:
+        raise ValueError("quaternion norm must be positive")
+    return quaternion / norm
+
+
+def _shortest_xyzw_slerp(left: Any, right: Any, fraction: float) -> Array:
+    if not math.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+        raise ValueError("SLERP fraction must lie in [0, 1]")
+    source = _normalized_xyzw_quaternion(left)
+    target = _normalized_xyzw_quaternion(right)
+    dot = float(np.dot(source, target))
+    if dot < 0.0:
+        target = -target
+        dot = -dot
+    dot = float(np.clip(dot, -1.0, 1.0))
+    if dot > 0.9995:
+        return _normalized_xyzw_quaternion(source + fraction * (target - source))
+    angle = math.acos(dot)
+    denominator = math.sin(angle)
+    return _normalized_xyzw_quaternion(
+        math.sin((1.0 - fraction) * angle) / denominator * source
+        + math.sin(fraction * angle) / denominator * target
+    )
+
+
+def _cartesian_continuation_subgoal(
+    current_pose: Any,
+    target_pose: Any,
+    *,
+    translation_step_m: float,
+    rotation_step_rad: float,
+) -> tuple[Array, float] | None:
+    """Return one bounded SE(3) step when the full target is not local."""
+
+    current = np.asarray(current_pose, dtype=np.float64)
+    target = np.asarray(target_pose, dtype=np.float64)
+    translation, rotation = end_effector_pose_distance(current, target)
+    fractions = [1.0]
+    if translation > translation_step_m:
+        fractions.append(translation_step_m / translation)
+    if rotation > rotation_step_rad:
+        fractions.append(rotation_step_rad / rotation)
+    fraction = float(min(fractions))
+    if fraction >= 1.0 - 1.0e-12:
+        return None
+    subgoal = np.empty(7, dtype=np.float64)
+    subgoal[:3] = current[:3] + fraction * (target[:3] - current[:3])
+    subgoal[3:] = _shortest_xyzw_slerp(current[3:], target[3:], fraction)
+    return subgoal, fraction
+
+
 def _execute_prepared_ee_commands(
     scene: Any,
     commands: tuple[PreparedEECommand, ...],
@@ -1441,6 +1950,7 @@ def _execute_prepared_ee_commands(
     reached_atol: float = 0.01,
     stopped_atol: float = 0.001,
     step_counter: dict[str, int] | None = None,
+    budget_exhaustion_is_stopped: bool = False,
 ) -> Literal["reached", "stopped"]:
     """Advance fully prepared commands on one shared physics clock."""
 
@@ -1483,30 +1993,46 @@ def _execute_prepared_ee_commands(
             np.asarray(command.arm.get_joint_positions(), dtype=np.float64)
             for command in commands
         )
-        if any(
-            value.ndim != 1 or not np.all(np.isfinite(value))
-            for value in current
-        ):
+        if any(value.ndim != 1 or not np.all(np.isfinite(value)) for value in current):
             raise invalid_action_error(error_message)
         targets = tuple(
-            command.target_joints
-            if command.mode == "joint_target"
-            else path_targets[index]
+            (
+                command.target_joints
+                if command.mode == "joint_target"
+                else path_targets[index]
+            )
             for index, command in enumerate(commands)
         )
         if all(path_done) and any(target is None for target in targets):
             raise invalid_action_error(error_message)
-        if all(path_done) and all(
-            np.allclose(value, target, atol=reached_atol)
-            for value, target in zip(current, targets)
+        if (
+            not budget_exhaustion_is_stopped
+            and all(path_done)
+            and all(
+                np.allclose(value, target, atol=reached_atol)
+                for value, target in zip(current, targets)
+            )
         ):
             return "reached"
-        if all(path_done) and previous is not None and all(
-            np.allclose(value, prior, atol=stopped_atol)
-            for value, prior in zip(current, previous)
+        # Two nearly identical joint samples terminate one high-level action
+        # as ``stopped``.  The caller classifies the measured Cartesian result
+        # separately, so a valid but physically blocked command is observable
+        # instead of being mistaken for an IK failure.
+        if (
+            not budget_exhaustion_is_stopped
+            and all(path_done)
+            and previous is not None
+            and all(
+                np.allclose(value, prior, atol=stopped_atol)
+                for value, prior in zip(current, previous)
+            )
         ):
             return "stopped"
         previous = current
+    if budget_exhaustion_is_stopped:
+        if step_counter is not None:
+            step_counter["budget_exhausted"] = 1
+        return "stopped"
     raise invalid_action_error(error_message)
 
 
@@ -1600,25 +2126,19 @@ def _prepare_trac_ik_distance_command(
         if chain_source not in sources:
             sources.append(chain_source)
     else:
-        _increment_ik_diagnostic(
-            diagnostics, "trac_ik_distance_chain_source_missing"
-        )
+        _increment_ik_diagnostic(diagnostics, "trac_ik_distance_chain_source_missing")
     if isinstance(chain_schema, str) and chain_schema:
         schemas = diagnostics.setdefault("trac_ik_distance_chain_schemas", [])
         if chain_schema not in schemas:
             schemas.append(chain_schema)
     else:
-        _increment_ik_diagnostic(
-            diagnostics, "trac_ik_distance_chain_schema_missing"
-        )
+        _increment_ik_diagnostic(diagnostics, "trac_ik_distance_chain_schema_missing")
 
     started_at = time.perf_counter()
     try:
         result = solver.solve(target.copy())
     except Exception:
-        _record_solver_duration_ms(
-            diagnostics, "trac_ik_distance", started_at
-        )
+        _record_solver_duration_ms(diagnostics, "trac_ik_distance", started_at)
         _increment_ik_diagnostic(diagnostics, "trac_ik_distance_failures")
         _increment_ik_diagnostic(diagnostics, "trac_ik_distance_exhaustions")
         return None
@@ -1658,19 +2178,11 @@ def _prepare_trac_ik_distance_command(
         _increment_ik_diagnostic(diagnostics, "trac_ik_distance_exhaustions")
         return None
     diagnostics["trac_ik_distance_fk_translation_error_m_max"] = max(
-        float(
-            diagnostics.get(
-                "trac_ik_distance_fk_translation_error_m_max", 0.0
-            )
-        ),
+        float(diagnostics.get("trac_ik_distance_fk_translation_error_m_max", 0.0)),
         fk_translation_error,
     )
     diagnostics["trac_ik_distance_fk_rotation_error_rad_max"] = max(
-        float(
-            diagnostics.get(
-                "trac_ik_distance_fk_rotation_error_rad_max", 0.0
-            )
-        ),
+        float(diagnostics.get("trac_ik_distance_fk_rotation_error_rad_max", 0.0)),
         fk_rotation_error,
     )
     reported_elapsed_ms = getattr(result, "elapsed_ms", None)
@@ -1681,15 +2193,11 @@ def _prepare_trac_ik_distance_command(
             reported_elapsed_ms = None
         if reported_elapsed_ms is not None and math.isfinite(reported_elapsed_ms):
             diagnostics["trac_ik_distance_reported_solve_time_ms_total"] = float(
-                diagnostics.get(
-                    "trac_ik_distance_reported_solve_time_ms_total", 0.0
-                )
+                diagnostics.get("trac_ik_distance_reported_solve_time_ms_total", 0.0)
             ) + max(0.0, reported_elapsed_ms)
             diagnostics["trac_ik_distance_reported_solve_time_ms_max"] = max(
                 float(
-                    diagnostics.get(
-                        "trac_ik_distance_reported_solve_time_ms_max", 0.0
-                    )
+                    diagnostics.get("trac_ik_distance_reported_solve_time_ms_max", 0.0)
                 ),
                 max(0.0, reported_elapsed_ms),
             )
@@ -1701,9 +2209,7 @@ def _prepare_trac_ik_distance_command(
         config=config,
     )
     if candidate is None:
-        _increment_ik_diagnostic(
-            diagnostics, "trac_ik_distance_candidate_rejections"
-        )
+        _increment_ik_diagnostic(diagnostics, "trac_ik_distance_candidate_rejections")
         _record_ik_candidate_rejection(diagnostics, str(rejection))
         _increment_ik_diagnostic(diagnostics, "trac_ik_distance_failures")
         _increment_ik_diagnostic(diagnostics, "trac_ik_distance_exhaustions")
@@ -1728,79 +2234,93 @@ def _prepare_sampling_after_trac_command(
     limits: tuple[tuple[bool, float, float], ...],
     diagnostics: dict[str, Any],
     configuration_error: type[Exception],
+    allow_collision_relaxed: bool = False,
 ) -> PreparedEECommand | None:
-    """Run the exact frozen-V4 collision-aware sampling fallback parameters."""
+    """Sample alternate IK branches, optionally relaxing collision filtering."""
 
     _increment_ik_diagnostic(diagnostics, "sampling_after_trac_attempts")
-    try:
-        sampling_result = arm.solve_ik_via_sampling(
-            target[:3],
-            quaternion=target[3:],
-            ignore_collisions=False,
-            trials=IK_SAMPLING_TRIALS,
-            max_configs=IK_SAMPLING_MAX_CONFIGS,
-            max_time_ms=IK_SAMPLING_MAX_TIME_MS,
-            relative_to=None,
-        )
-    except configuration_error:
-        _increment_ik_diagnostic(diagnostics, "sampling_fallback_failures")
-        _increment_ik_diagnostic(diagnostics, "sampling_after_trac_failures")
-        _increment_ik_diagnostic(diagnostics, "all_ik_exhaustions")
-        return None
-
-    if isinstance(sampling_result, np.ndarray):
-        if sampling_result.ndim == 2:
-            candidates = tuple(sampling_result)
-        elif sampling_result.ndim == 1 and sampling_result.size:
-            candidates = (sampling_result,)
-        elif sampling_result.size == 0:
-            candidates = ()
-        else:
-            candidates = (sampling_result,)
-    else:
+    for ignore_collisions in (False, True) if allow_collision_relaxed else (False,):
+        if ignore_collisions:
+            _increment_ik_diagnostic(diagnostics, "sampling_collision_relaxed_attempts")
         try:
-            values = tuple(sampling_result)
-        except TypeError:
-            candidates = (sampling_result,)
-        else:
-            if values and all(np.asarray(value).ndim == 0 for value in values):
-                candidates = (values,)
-            else:
-                candidates = values
-
-    valid_candidates = []
-    for raw_candidate in candidates:
-        _increment_ik_diagnostic(diagnostics, "sampling_candidates_evaluated")
-        candidate, rejection = _validated_ik_candidate(
-            raw_candidate,
-            current_joints=current,
-            limits=limits,
-        )
-        if candidate is None:
-            _record_ik_candidate_rejection(diagnostics, str(rejection))
+            sampling_result = arm.solve_ik_via_sampling(
+                target[:3],
+                quaternion=target[3:],
+                ignore_collisions=ignore_collisions,
+                trials=IK_SAMPLING_TRIALS,
+                max_configs=IK_SAMPLING_MAX_CONFIGS,
+                max_time_ms=IK_SAMPLING_MAX_TIME_MS,
+                relative_to=None,
+            )
+        except configuration_error:
+            if ignore_collisions:
+                _increment_ik_diagnostic(
+                    diagnostics, "sampling_collision_relaxed_failures"
+                )
             continue
-        valid_candidates.append(candidate)
 
-    if not valid_candidates:
-        _increment_ik_diagnostic(diagnostics, "sampling_fallback_failures")
-        _increment_ik_diagnostic(diagnostics, "sampling_after_trac_failures")
-        _increment_ik_diagnostic(diagnostics, "all_ik_exhaustions")
-        return None
+        if isinstance(sampling_result, np.ndarray):
+            if sampling_result.ndim == 2:
+                candidates = tuple(sampling_result)
+            elif sampling_result.ndim == 1 and sampling_result.size:
+                candidates = (sampling_result,)
+            elif sampling_result.size == 0:
+                candidates = ()
+            else:
+                candidates = (sampling_result,)
+        else:
+            try:
+                values = tuple(sampling_result)
+            except TypeError:
+                candidates = (sampling_result,)
+            else:
+                if values and all(np.asarray(value).ndim == 0 for value in values):
+                    candidates = (values,)
+                else:
+                    candidates = values
 
-    selected = min(
-        valid_candidates,
-        key=lambda candidate: float(np.linalg.norm(candidate - current)),
-    )
-    _increment_ik_diagnostic(diagnostics, "sampling_fallback_successes")
-    _increment_ik_diagnostic(diagnostics, "sampling_after_trac_successes")
-    _increment_ik_diagnostic(diagnostics, "selected_via_sampling")
-    _record_selected_joint_delta(diagnostics, current, selected)
-    return PreparedEECommand(
-        arm=arm,
-        target_pose=target,
-        mode="joint_target",
-        target_joints=selected,
-    )
+        valid_candidates = []
+        for raw_candidate in candidates:
+            _increment_ik_diagnostic(diagnostics, "sampling_candidates_evaluated")
+            candidate, rejection = _validated_ik_candidate(
+                raw_candidate,
+                current_joints=current,
+                limits=limits,
+            )
+            if candidate is None:
+                _record_ik_candidate_rejection(diagnostics, str(rejection))
+                continue
+            valid_candidates.append(candidate)
+
+        if valid_candidates:
+            selected = min(
+                valid_candidates,
+                key=lambda candidate: float(np.linalg.norm(candidate - current)),
+            )
+            _increment_ik_diagnostic(diagnostics, "sampling_fallback_successes")
+            _increment_ik_diagnostic(diagnostics, "sampling_after_trac_successes")
+            _increment_ik_diagnostic(diagnostics, "selected_via_sampling")
+            if ignore_collisions:
+                _increment_ik_diagnostic(
+                    diagnostics, "sampling_collision_relaxed_successes"
+                )
+                _increment_ik_diagnostic(
+                    diagnostics, "selected_via_collision_relaxed_sampling"
+                )
+            _record_selected_joint_delta(diagnostics, current, selected)
+            return PreparedEECommand(
+                arm=arm,
+                target_pose=target,
+                mode="joint_target",
+                target_joints=selected,
+            )
+        if ignore_collisions:
+            _increment_ik_diagnostic(diagnostics, "sampling_collision_relaxed_failures")
+
+    _increment_ik_diagnostic(diagnostics, "sampling_fallback_failures")
+    _increment_ik_diagnostic(diagnostics, "sampling_after_trac_failures")
+    _increment_ik_diagnostic(diagnostics, "all_ik_exhaustions")
+    return None
 
 
 def _prepare_pseudo_trac_sampling_command(
@@ -1825,44 +2345,21 @@ def _prepare_pseudo_trac_sampling_command(
     except (TypeError, ValueError) as exc:
         raise invalid_action_error(error_message) from exc
 
-    _set_ik_group_properties(
+    pseudo_command = _prepare_pseudo_inverse_command(
         arm,
-        resolution_method=FROZEN_V4_IK_RESOLUTION_METHOD,
-        max_iterations=FROZEN_V4_IK_MAX_ITERATIONS,
-        damping=FROZEN_V4_IK_DAMPING,
+        target,
+        current=current,
+        limits=limits,
+        diagnostics=diagnostics,
+        ik_error=ik_error,
         invalid_action_error=invalid_action_error,
         error_message=error_message,
+        continuity_config=(
+            config if isinstance(config, Stage6IKControllerConfig) else None
+        ),
     )
-    _increment_ik_diagnostic(diagnostics, "pseudo_inverse_ik_attempts")
-    try:
-        raw_pseudo_candidate = arm.solve_ik_via_jacobian(
-            target[:3], quaternion=target[3:], relative_to=None
-        )
-    except ik_error:
-        _increment_ik_diagnostic(diagnostics, "pseudo_inverse_ik_failures")
-        _increment_ik_diagnostic(diagnostics, "jacobian_failures")
-    else:
-        pseudo_candidate, rejection = _validated_ik_candidate(
-            raw_pseudo_candidate,
-            current_joints=current,
-            limits=limits,
-        )
-        if pseudo_candidate is not None:
-            _increment_ik_diagnostic(diagnostics, "pseudo_inverse_ik_successes")
-            _increment_ik_diagnostic(diagnostics, "selected_via_pseudo_inverse")
-            _increment_ik_diagnostic(diagnostics, "selected_via_jacobian")
-            _record_selected_joint_delta(diagnostics, current, pseudo_candidate)
-            return PreparedEECommand(
-                arm=arm,
-                target_pose=target,
-                mode="joint_target",
-                target_joints=pseudo_candidate,
-            )
-        _increment_ik_diagnostic(
-            diagnostics, "pseudo_inverse_ik_candidate_rejections"
-        )
-        _increment_ik_diagnostic(diagnostics, "jacobian_candidate_rejections")
-        _record_ik_candidate_rejection(diagnostics, str(rejection))
+    if pseudo_command is not None:
+        return pseudo_command
 
     trac_command = _prepare_trac_ik_distance_command(
         arm,
@@ -1882,6 +2379,183 @@ def _prepare_pseudo_trac_sampling_command(
         limits=limits,
         diagnostics=diagnostics,
         configuration_error=configuration_error,
+        allow_collision_relaxed=(
+            isinstance(config, Stage6IKControllerConfig)
+            and config.allow_collision_relaxed_sampling
+        ),
+    )
+
+
+def _prepare_pseudo_inverse_command(
+    arm: Any,
+    target: Array,
+    *,
+    current: Array,
+    limits: tuple[tuple[bool, float, float], ...],
+    diagnostics: dict[str, Any],
+    ik_error: type[Exception],
+    invalid_action_error: type[Exception],
+    error_message: str,
+    continuity_config: GlobalIKControllerConfig | None = None,
+) -> PreparedEECommand | None:
+    """Try the legacy current-seeded local pseudo-inverse once."""
+
+    _set_ik_group_properties(
+        arm,
+        resolution_method=FROZEN_V4_IK_RESOLUTION_METHOD,
+        max_iterations=FROZEN_V4_IK_MAX_ITERATIONS,
+        damping=FROZEN_V4_IK_DAMPING,
+        invalid_action_error=invalid_action_error,
+        error_message=error_message,
+    )
+    _increment_ik_diagnostic(diagnostics, "pseudo_inverse_ik_attempts")
+    try:
+        raw_pseudo_candidate = arm.solve_ik_via_jacobian(
+            target[:3], quaternion=target[3:], relative_to=None
+        )
+    except ik_error:
+        _increment_ik_diagnostic(diagnostics, "pseudo_inverse_ik_failures")
+        _increment_ik_diagnostic(diagnostics, "jacobian_failures")
+    else:
+        pseudo_candidate, rejection = (
+            _validated_ik_candidate(
+                raw_pseudo_candidate,
+                current_joints=current,
+                limits=limits,
+            )
+            if continuity_config is None
+            else _validated_continuous_ik_candidate(
+                raw_pseudo_candidate,
+                current_joints=current,
+                limits=limits,
+                config=continuity_config,
+            )
+        )
+        if pseudo_candidate is not None:
+            _increment_ik_diagnostic(diagnostics, "pseudo_inverse_ik_successes")
+            _increment_ik_diagnostic(diagnostics, "selected_via_pseudo_inverse")
+            _increment_ik_diagnostic(diagnostics, "selected_via_jacobian")
+            _record_selected_joint_delta(diagnostics, current, pseudo_candidate)
+            return PreparedEECommand(
+                arm=arm,
+                target_pose=target,
+                mode="joint_target",
+                target_joints=pseudo_candidate,
+            )
+        _increment_ik_diagnostic(diagnostics, "pseudo_inverse_ik_candidate_rejections")
+        _increment_ik_diagnostic(diagnostics, "jacobian_candidate_rejections")
+        _record_ik_candidate_rejection(diagnostics, str(rejection))
+    return None
+
+
+def _prepare_stage6_hybrid_command(
+    arm: Any,
+    target: Array,
+    *,
+    config: GlobalIKControllerConfig,
+    diagnostics: dict[str, Any],
+    external_solver_factory: TracIKDistanceSolverFactory,
+    ik_error: type[Exception],
+    configuration_error: type[Exception],
+    invalid_action_error: type[Exception],
+    error_message: str,
+) -> PreparedEECommand | None:
+    """Use simulator-native IK first, then bounded solver diversity."""
+
+    current = np.asarray(arm.get_joint_positions(), dtype=np.float64)
+    if current.ndim != 1 or not np.all(np.isfinite(current)):
+        raise invalid_action_error(error_message)
+    try:
+        limits = _joint_limit_specification(arm, current)
+    except (TypeError, ValueError) as exc:
+        raise invalid_action_error(error_message) from exc
+
+    pseudo_command = _prepare_pseudo_inverse_command(
+        arm,
+        target,
+        current=current,
+        limits=limits,
+        diagnostics=diagnostics,
+        ik_error=ik_error,
+        invalid_action_error=invalid_action_error,
+        error_message=error_message,
+        continuity_config=config,
+    )
+    if pseudo_command is not None:
+        return pseudo_command
+    trac_command = _prepare_trac_ik_distance_command(
+        arm,
+        target,
+        current=current,
+        limits=limits,
+        config=config,
+        diagnostics=diagnostics,
+        external_solver_factory=external_solver_factory,
+    )
+    if trac_command is not None:
+        return trac_command
+    if isinstance(config, Stage6IKControllerConfig):
+        current_pose = _arm_tip_pose(arm)
+        continuation_available = False
+        for backoff in config.cartesian_continuation_backoff_factors:
+            continuation = _cartesian_continuation_subgoal(
+                current_pose,
+                target,
+                translation_step_m=(
+                    backoff * config.cartesian_continuation_translation_step_m
+                ),
+                rotation_step_rad=(
+                    backoff * config.cartesian_continuation_rotation_step_rad
+                ),
+            )
+            if continuation is None:
+                continue
+            continuation_available = True
+            subgoal, fraction = continuation
+            _increment_ik_diagnostic(diagnostics, "cartesian_continuation_attempts")
+            diagnostics["cartesian_continuation_fraction_min"] = min(
+                float(diagnostics.get("cartesian_continuation_fraction_min", 1.0)),
+                fraction,
+            )
+            continuation_command = _prepare_pseudo_inverse_command(
+                arm,
+                subgoal,
+                current=current,
+                limits=limits,
+                diagnostics=diagnostics,
+                ik_error=ik_error,
+                invalid_action_error=invalid_action_error,
+                error_message=error_message,
+                continuity_config=config,
+            )
+            if continuation_command is None:
+                continuation_command = _prepare_trac_ik_distance_command(
+                    arm,
+                    subgoal,
+                    current=current,
+                    limits=limits,
+                    config=config,
+                    diagnostics=diagnostics,
+                    external_solver_factory=external_solver_factory,
+                )
+            if continuation_command is not None:
+                _increment_ik_diagnostic(
+                    diagnostics, "cartesian_continuation_successes"
+                )
+                _increment_ik_diagnostic(
+                    diagnostics, "selected_via_cartesian_continuation"
+                )
+                return continuation_command
+        if continuation_available:
+            _increment_ik_diagnostic(diagnostics, "cartesian_continuation_failures")
+    return _prepare_sampling_after_trac_command(
+        arm,
+        target,
+        current=current,
+        limits=limits,
+        diagnostics=diagnostics,
+        configuration_error=configuration_error,
+        allow_collision_relaxed=config.allow_collision_relaxed_sampling,
     )
 
 
@@ -1895,7 +2569,7 @@ def _prepare_collision_aware_path_command(
     invalid_action_error: type[Exception],
     path_algorithm: Any,
     error_message: str,
-) -> PreparedEECommand:
+) -> PreparedEECommand | None:
     _set_ik_group_properties(
         arm,
         resolution_method=FROZEN_V4_IK_RESOLUTION_METHOD,
@@ -1904,6 +2578,65 @@ def _prepare_collision_aware_path_command(
         invalid_action_error=invalid_action_error,
         error_message=error_message,
     )
+    if isinstance(config, Stage6IKControllerConfig):
+        linear_path = getattr(arm, "get_linear_path", None)
+        if callable(linear_path):
+            _increment_ik_diagnostic(diagnostics, "linear_path_attempts")
+            try:
+                path = linear_path(
+                    target[:3],
+                    quaternion=target[3:],
+                    steps=config.linear_path_steps,
+                    ignore_collisions=False,
+                    relative_to=None,
+                )
+            except configuration_path_error:
+                _increment_ik_diagnostic(
+                    diagnostics, "linear_path_collision_aware_failures"
+                )
+            else:
+                _increment_ik_diagnostic(
+                    diagnostics, "linear_path_collision_aware_successes"
+                )
+                return PreparedEECommand(
+                    arm=arm,
+                    target_pose=target,
+                    mode="planned_path",
+                    path=path,
+                )
+
+            if config.allow_collision_relaxed_linear_path:
+                _increment_ik_diagnostic(
+                    diagnostics, "linear_path_collision_relaxed_attempts"
+                )
+                try:
+                    path = linear_path(
+                        target[:3],
+                        quaternion=target[3:],
+                        steps=config.linear_path_steps,
+                        ignore_collisions=True,
+                        relative_to=None,
+                    )
+                except configuration_path_error:
+                    _increment_ik_diagnostic(
+                        diagnostics, "linear_path_collision_relaxed_failures"
+                    )
+                else:
+                    _increment_ik_diagnostic(
+                        diagnostics, "linear_path_collision_relaxed_successes"
+                    )
+                    return PreparedEECommand(
+                        arm=arm,
+                        target_pose=target,
+                        mode="planned_path",
+                        path=path,
+                    )
+
+        translation, _rotation = end_effector_pose_distance(_arm_tip_pose(arm), target)
+        if translation <= config.far_translation_threshold_m:
+            _increment_ik_diagnostic(diagnostics, "near_target_nonlinear_planner_skips")
+            return None
+
     _increment_ik_diagnostic(diagnostics, "far_target_planner_attempts")
     try:
         path = arm.get_path(
@@ -1943,6 +2676,8 @@ def execute_global_ik_ee_control(
     path_algorithm: Any,
     error_message: str,
     max_steps: int = 200,
+    budget_exhaustion_is_stopped: bool = False,
+    use_stage6_hybrid_solver_order: bool = False,
 ) -> Literal["reached", "stopped"]:
     """Run the global formal pseudo/TRAC/sampling/path controller."""
 
@@ -1967,7 +2702,12 @@ def execute_global_ik_ee_control(
     prepared: list[PreparedEECommand] = []
     try:
         for (arm, target), translation in zip(normalized, translations):
-            command = _prepare_pseudo_trac_sampling_command(
+            prepare = (
+                _prepare_stage6_hybrid_command
+                if use_stage6_hybrid_solver_order
+                else _prepare_pseudo_trac_sampling_command
+            )
+            command = prepare(
                 arm,
                 target,
                 config=config,
@@ -1978,10 +2718,11 @@ def execute_global_ik_ee_control(
                 invalid_action_error=invalid_action_error,
                 error_message=error_message,
             )
-            if command is None and translation > config.far_translation_threshold_m:
-                _increment_ik_diagnostic(
-                    diagnostics, "path_after_all_ik_exhaustion"
-                )
+            if command is None and (
+                isinstance(config, Stage6IKControllerConfig)
+                or translation > config.far_translation_threshold_m
+            ):
+                _increment_ik_diagnostic(diagnostics, "path_after_all_ik_exhaustion")
                 command = _prepare_collision_aware_path_command(
                     arm,
                     target,
@@ -2001,9 +2742,7 @@ def execute_global_ik_ee_control(
     finally:
         restore_error: Exception | None = None
         for arm, _target in normalized:
-            _increment_ik_diagnostic(
-                diagnostics, "ik_group_baseline_restore_attempts"
-            )
+            _increment_ik_diagnostic(diagnostics, "ik_group_baseline_restore_attempts")
             try:
                 _set_ik_group_properties(
                     arm,
@@ -2030,25 +2769,256 @@ def execute_global_ik_ee_control(
             error_message=error_message,
             max_steps=max_steps,
             step_counter=counter,
+            budget_exhaustion_is_stopped=budget_exhaustion_is_stopped,
         )
     finally:
         steps = int(counter["steps"])
-        _increment_ik_diagnostic(
-            diagnostics, "trac_ik_distance_controller_actions"
-        )
-        diagnostics["trac_ik_distance_controller_raw_physics_steps"] = int(
-            diagnostics.get(
-                "trac_ik_distance_controller_raw_physics_steps", 0
+        if int(counter.get("budget_exhausted", 0)):
+            _increment_ik_diagnostic(
+                diagnostics, "controller_raw_physics_budget_exhaustions"
             )
-        ) + steps
+        _increment_ik_diagnostic(diagnostics, "trac_ik_distance_controller_actions")
+        diagnostics["trac_ik_distance_controller_raw_physics_steps"] = (
+            int(diagnostics.get("trac_ik_distance_controller_raw_physics_steps", 0))
+            + steps
+        )
         diagnostics["trac_ik_distance_controller_raw_physics_steps_max"] = max(
             int(
-                diagnostics.get(
-                    "trac_ik_distance_controller_raw_physics_steps_max", 0
-                )
+                diagnostics.get("trac_ik_distance_controller_raw_physics_steps_max", 0)
             ),
             steps,
         )
+
+
+def _cartesian_unresolved_targets(
+    arm_targets: tuple[tuple[Any, Array], ...],
+    *,
+    config: Stage6IKControllerConfig,
+    diagnostics: dict[str, Any],
+) -> tuple[tuple[Any, Array], ...]:
+    """Return arms whose physical tips still miss their commanded poses."""
+
+    unresolved = []
+    for arm, target in arm_targets:
+        translation, rotation = end_effector_pose_distance(_arm_tip_pose(arm), target)
+        _increment_ik_diagnostic(diagnostics, "cartesian_verification_checks")
+        diagnostics["cartesian_post_translation_error_m_max"] = max(
+            float(diagnostics.get("cartesian_post_translation_error_m_max", 0.0)),
+            translation,
+        )
+        diagnostics["cartesian_post_rotation_error_rad_max"] = max(
+            float(diagnostics.get("cartesian_post_rotation_error_rad_max", 0.0)),
+            rotation,
+        )
+        if (
+            translation > config.physical_completion_translation_tolerance_m
+            or rotation > config.physical_completion_rotation_tolerance_rad
+        ):
+            _increment_ik_diagnostic(diagnostics, "cartesian_verification_failures")
+            unresolved.append((arm, target))
+    return tuple(unresolved)
+
+
+def _cartesian_residual_score(
+    arm: Any,
+    target: Array,
+    *,
+    config: Stage6IKControllerConfig,
+) -> float:
+    translation, rotation = end_effector_pose_distance(_arm_tip_pose(arm), target)
+    return math.hypot(
+        translation / config.physical_completion_translation_tolerance_m,
+        rotation / config.physical_completion_rotation_tolerance_rad,
+    )
+
+
+def _cartesian_targets_within_tolerance(
+    arm_targets: tuple[tuple[Any, Array], ...],
+    *,
+    translation_tolerance_m: float,
+    rotation_tolerance_rad: float,
+) -> bool:
+    return all(
+        translation <= translation_tolerance_m and rotation <= rotation_tolerance_rad
+        for translation, rotation in (
+            end_effector_pose_distance(_arm_tip_pose(arm), target)
+            for arm, target in arm_targets
+        )
+    )
+
+
+def _cartesian_vector_made_progress(
+    before_scores: dict[int, float],
+    after_scores: dict[int, float],
+) -> tuple[bool, bool]:
+    """Apply a non-compensatory progress test to a multi-arm command.
+
+    A bimanual servo step is useful when at least one unresolved arm moves
+    closer and no unresolved arm moves farther away.  Requiring every arm to
+    improve on every raw step incorrectly rejects valid asynchronous motor
+    responses; summing both residuals would instead allow one arm's large
+    improvement to hide regression of the other.  This Pareto test permits a
+    stationary arm but never compensates one arm's regression with another's
+    progress.
+    """
+
+    if before_scores.keys() != after_scores.keys():
+        raise ValueError("Cartesian progress scores must describe the same arms")
+    numerical_tolerance = 1.0e-6
+    no_arm_regressed = all(
+        after_scores[key] <= before_scores[key] + numerical_tolerance
+        for key in before_scores
+    )
+    improved = [
+        key
+        for key in before_scores
+        if after_scores[key] < before_scores[key] - numerical_tolerance
+    ]
+    return no_arm_regressed and bool(improved), len(improved) < len(before_scores)
+
+
+def execute_stage6_ik_ee_control(
+    scene: Any,
+    arm_targets: tuple[tuple[Any, Array], ...],
+    *,
+    config: Stage6IKControllerConfig,
+    diagnostics: dict[str, Any],
+    external_solver_factory: TracIKDistanceSolverFactory,
+    ik_error: type[Exception],
+    configuration_error: type[Exception],
+    configuration_path_error: type[Exception],
+    invalid_action_error: type[Exception],
+    path_algorithm: Any,
+    error_message: str,
+    max_steps: int = 200,
+) -> Literal["reached", "progressed", "stopped"]:
+    """Reach one policy target with bounded Cartesian continuation.
+
+    A bounded continuation command is an executor-internal decomposition of
+    the *same* absolute policy target, not a completed policy action.  The
+    physical tip is therefore re-observed and the local IK chain is rebuilt
+    after every segment until the original target is reached, motion stalls,
+    or the fixed segment budget is exhausted.  This keeps the policy commit
+    aligned with the pose that was actually requested.  Collision-aware
+    sampling/path search is attempted first; a bounded collision-relaxed
+    fallback is available for contact-rich RLBench poses, and nonlinear
+    RRTConnect is reserved for genuinely far targets.
+    """
+
+    if not arm_targets:
+        raise ValueError("at least one arm target is required")
+    normalized = tuple(
+        (arm, np.asarray(target, dtype=np.float64).copy())
+        for arm, target in arm_targets
+    )
+    original_scores = {
+        id(arm): _cartesian_residual_score(arm, target, config=config)
+        for arm, target in normalized
+    }
+    before_scores = dict(original_scores)
+    made_any_progress = False
+    for segment_index in range(config.cartesian_continuation_max_segments):
+        _increment_ik_diagnostic(diagnostics, "cartesian_direct_goal_attempts")
+        try:
+            direct_status = execute_global_ik_ee_control(
+                scene,
+                normalized,
+                config=config,
+                diagnostics=diagnostics,
+                external_solver_factory=external_solver_factory,
+                ik_error=ik_error,
+                configuration_error=configuration_error,
+                configuration_path_error=configuration_path_error,
+                invalid_action_error=invalid_action_error,
+                path_algorithm=path_algorithm,
+                error_message=error_message,
+                max_steps=max_steps,
+                budget_exhaustion_is_stopped=False,
+                use_stage6_hybrid_solver_order=True,
+            )
+        except invalid_action_error:
+            if not made_any_progress:
+                raise
+            _increment_ik_diagnostic(
+                diagnostics,
+                "cartesian_multi_pass_solver_exhaustions_after_progress",
+            )
+            return "progressed"
+
+        if segment_index > 0:
+            _increment_ik_diagnostic(
+                diagnostics, "cartesian_multi_pass_followup_passes"
+            )
+        unresolved_after_direct = _cartesian_unresolved_targets(
+            normalized,
+            config=config,
+            diagnostics=diagnostics,
+        )
+        if not unresolved_after_direct:
+            _increment_ik_diagnostic(diagnostics, "cartesian_direct_goal_reaches")
+            if segment_index > 0:
+                _increment_ik_diagnostic(
+                    diagnostics, "cartesian_multi_pass_goals_completed"
+                )
+            return "reached"
+        if _cartesian_targets_within_tolerance(
+            normalized,
+            translation_tolerance_m=(config.control_acceptance_translation_tolerance_m),
+            rotation_tolerance_rad=config.control_acceptance_rotation_tolerance_rad,
+        ):
+            _increment_ik_diagnostic(
+                diagnostics, "cartesian_direct_goal_control_accepts"
+            )
+            if segment_index > 0:
+                _increment_ik_diagnostic(
+                    diagnostics, "cartesian_multi_pass_goals_completed"
+                )
+            return "reached"
+
+        direct_scores = {
+            id(arm): _cartesian_residual_score(arm, target, config=config)
+            for arm, target in normalized
+        }
+        direct_progressed, direct_partial = _cartesian_vector_made_progress(
+            before_scores,
+            direct_scores,
+        )
+        if direct_progressed:
+            made_any_progress = True
+            _increment_ik_diagnostic(
+                diagnostics, "cartesian_direct_goal_progress_accepts"
+            )
+            _increment_ik_diagnostic(
+                diagnostics, "cartesian_goal_directed_progress_accepts"
+            )
+            if direct_partial:
+                _increment_ik_diagnostic(
+                    diagnostics, "cartesian_partial_arm_progress_accepts"
+                )
+            before_scores = direct_scores
+            continue
+
+        _increment_ik_diagnostic(diagnostics, "cartesian_direct_goal_stalls")
+        _increment_ik_diagnostic(
+            diagnostics,
+            (
+                "stopped_with_cartesian_residual"
+                if direct_status == "stopped"
+                else "reached_joint_target_with_cartesian_residual"
+            ),
+        )
+        return "progressed" if made_any_progress else "stopped"
+
+    _increment_ik_diagnostic(diagnostics, "cartesian_multi_pass_limit_exhaustions")
+    final_scores = {
+        id(arm): _cartesian_residual_score(arm, target, config=config)
+        for arm, target in normalized
+    }
+    overall_progressed, _partial = _cartesian_vector_made_progress(
+        original_scores,
+        final_scores,
+    )
+    return "progressed" if overall_progressed else "stopped"
 
 
 def xyzw_to_wxyz(pose: Array) -> Array:
@@ -2109,11 +3079,15 @@ def _gripper_to_rlbench(value: Array | float) -> float:
     return float(scalar > 0.0)
 
 
-def unimanual_action_to_rlbench(action: Any, *, ignore_collisions: bool = False) -> Array:
+def unimanual_action_to_rlbench(
+    action: Any, *, ignore_collisions: bool = False
+) -> Array:
     """Return the fork's 9D ``pose, gripper, ignore`` action."""
 
     pose = wxyz_to_xyzw(np.asarray(action.pose, dtype=np.float64))
-    return np.concatenate((pose, [_gripper_to_rlbench(action.gripper), float(ignore_collisions)]))
+    return np.concatenate(
+        (pose, [_gripper_to_rlbench(action.gripper), float(ignore_collisions)])
+    )
 
 
 @dataclass(frozen=True)
@@ -2205,10 +3179,7 @@ def _instance_reference_snapshot(task: Any) -> dict[str, tuple[Any, ...]]:
         "_fail_conditions",
         "_graspable_objects",
     )
-    return {
-        name: tuple(getattr(task, name, ()))
-        for name in attributes
-    }
+    return {name: tuple(getattr(task, name, ())) for name in attributes}
 
 
 def _same_instance_references(
@@ -2232,12 +3203,7 @@ def _source_seed(episode_seed: int, variation: int, attempt: int) -> int:
     if attempt == 1:
         return int(episode_seed)
     return int(
-        (
-            episode_seed * 1_000_003
-            + variation * 9_176
-            + attempt * 104_729
-        )
-        % (2**32 - 1)
+        (episode_seed * 1_000_003 + variation * 9_176 + attempt * 104_729) % (2**32 - 1)
     )
 
 
@@ -2542,10 +3508,7 @@ def _semantic_reference_value(value: Any, *, depth: int = 0) -> Any:
             for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
         }
     if isinstance(value, (list, tuple)):
-        return [
-            _semantic_reference_value(item, depth=depth + 1)
-            for item in value
-        ]
+        return [_semantic_reference_value(item, depth=depth + 1) for item in value]
     get_handle = getattr(value, "get_handle", None)
     get_name = getattr(value, "get_name", None)
     if callable(get_handle):
@@ -2638,9 +3601,7 @@ def _task_tree_relative_state(task: Any) -> list[dict[str, Any]]:
         row = {
             "name": str(get_name()),
             "type": str(get_type()),
-            "parent": (
-                str(parent_name_fn()) if callable(parent_name_fn) else None
-            ),
+            "parent": (str(parent_name_fn()) if callable(parent_name_fn) else None),
             "in_boundary_root_subtree": stable_key(value) in root_subtree_keys,
             "world_pose": np.asarray(
                 get_pose(),
@@ -2693,9 +3654,7 @@ def _task_tree_velocity_summary(task: Any) -> dict[str, Any]:
                 "name": str(get_name()),
                 "type": str(get_type()),
                 "finite": finite,
-                "linear_speed_m_s": (
-                    float(np.linalg.norm(linear)) if finite else None
-                ),
+                "linear_speed_m_s": (float(np.linalg.norm(linear)) if finite else None),
                 "angular_speed_rad_s": (
                     float(np.linalg.norm(angular)) if finite else None
                 ),
@@ -2766,9 +3725,8 @@ def _compare_task_tree_relative_state(
             all_matched = False
             continue
         parent_matched = left.get("parent") == right.get("parent")
-        subtree_membership_matched = (
-            left.get("in_boundary_root_subtree")
-            == right.get("in_boundary_root_subtree")
+        subtree_membership_matched = left.get("in_boundary_root_subtree") == right.get(
+            "in_boundary_root_subtree"
         )
         world_pose_metrics = _root_motion_metrics(
             np.asarray(left["world_pose"], dtype=np.float64),
@@ -2779,17 +3737,12 @@ def _compare_task_tree_relative_state(
             np.asarray(right["pose_relative_to_boundary_root"], dtype=np.float64),
         )
         compare_relative = bool(
-            boundary_root_may_move
-            and left.get("in_boundary_root_subtree") is True
+            boundary_root_may_move and left.get("in_boundary_root_subtree") is True
         )
-        pose_metrics = (
-            relative_pose_metrics if compare_relative else world_pose_metrics
-        )
+        pose_metrics = relative_pose_metrics if compare_relative else world_pose_metrics
         pose_matched = bool(
-            pose_metrics["planned_root_translation_m"]
-            <= translation_tolerance_m
-            and pose_metrics["planned_root_rotation_rad"]
-            <= rotation_tolerance_rad
+            pose_metrics["planned_root_translation_m"] <= translation_tolerance_m
+            and pose_metrics["planned_root_rotation_rad"] <= rotation_tolerance_rad
         )
         joint_left = left.get("joint_position")
         joint_right = right.get("joint_position")
@@ -2798,8 +3751,7 @@ def _compare_task_tree_relative_state(
             and joint_right is None
             or joint_left is not None
             and joint_right is not None
-            and abs(float(joint_left) - float(joint_right))
-            <= joint_tolerance
+            and abs(float(joint_left) - float(joint_right)) <= joint_tolerance
         )
         matched = (
             parent_matched
@@ -2815,18 +3767,12 @@ def _compare_task_tree_relative_state(
                 "matched": matched,
                 "parent_matched": parent_matched,
                 "subtree_membership_matched": subtree_membership_matched,
-                "in_boundary_root_subtree": left.get(
-                    "in_boundary_root_subtree"
-                ),
+                "in_boundary_root_subtree": left.get("in_boundary_root_subtree"),
                 "pose_comparison_frame": (
                     "boundary_root" if compare_relative else "world"
                 ),
-                "translation_error_m": pose_metrics[
-                    "planned_root_translation_m"
-                ],
-                "rotation_error_rad": pose_metrics[
-                    "planned_root_rotation_rad"
-                ],
+                "translation_error_m": pose_metrics["planned_root_translation_m"],
+                "rotation_error_rad": pose_metrics["planned_root_rotation_rad"],
                 "world_translation_error_m": world_pose_metrics[
                     "planned_root_translation_m"
                 ],
@@ -2885,9 +3831,7 @@ def _compact_task_tree_comparison(
         "translation_tolerance_m": comparison.get("translation_tolerance_m"),
         "rotation_tolerance_rad": comparison.get("rotation_tolerance_rad"),
         "joint_tolerance": comparison.get("joint_tolerance"),
-        "quaternion_rotation_metric": comparison.get(
-            "quaternion_rotation_metric"
-        ),
+        "quaternion_rotation_metric": comparison.get("quaternion_rotation_metric"),
         "all_parents_matched": all(
             row.get("parent_matched") is True for row in comparable
         ),
@@ -3056,10 +4000,12 @@ def _grasp_state_snapshot(task: Any, robot: Any) -> dict[str, Any]:
     """Capture gripper membership and object parents without changing them."""
 
     grippers = (
-        ("right_gripper", robot.right_gripper),
-        ("left_gripper", robot.left_gripper),
-    ) if bool(getattr(robot, "is_bimanual", False)) else (
-        ("gripper", robot.gripper),
+        (
+            ("right_gripper", robot.right_gripper),
+            ("left_gripper", robot.left_gripper),
+        )
+        if bool(getattr(robot, "is_bimanual", False))
+        else (("gripper", robot.gripper),)
     )
     tracked_objects = list(getattr(task, "_graspable_objects", ()))
     gripper_rows = []
@@ -3301,7 +4247,9 @@ def _workspace_source_placement_succeeded(scene: Any, task: Any) -> bool:
     return _workspace_boundary_contains_root(scene, task.boundary_root())
 
 
-def _authenticate_motion_source_root(task: Any, profile: dict[str, Any]) -> dict[str, str]:
+def _authenticate_motion_source_root(
+    task: Any, profile: dict[str, Any]
+) -> dict[str, str]:
     root = task.boundary_root()
     get_name = getattr(root, "get_name", None)
     get_type = getattr(root, "get_type", None)
@@ -3432,9 +4380,7 @@ def _low_dim_roundtrip_metrics(
     else:
         max_translation = None
         max_rotation = None
-        preserved = bool(
-            raw_finite and raw_max_abs <= scalar_tolerance
-        )
+        preserved = bool(raw_finite and raw_max_abs <= scalar_tolerance)
         comparison_mode = "scalar_max_abs"
         chunk_count = 0
     return {
@@ -4042,7 +4988,10 @@ def _validate_staged_motion_plan_validation(
 ) -> None:
     """Fail closed on a re-signed but internally inconsistent V3.4 plan."""
 
-    from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import load_v3_motion_source_protocol, motion_source_profile
+    from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
+        load_v3_motion_source_protocol,
+        motion_source_profile,
+    )
 
     motion_protocol = load_v3_motion_source_protocol()
     profile = motion_source_profile(task_name, motion_protocol)
@@ -4058,8 +5007,7 @@ def _validate_staged_motion_plan_validation(
         validation.get("schema") != STAGED_MOTION_PLAN_VALIDATION_SCHEMA
         or validation.get("fresh_task_generation_protocol_id")
         != DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
-        or validation.get("motion_source_protocol_schema")
-        != motion_protocol["schema"]
+        or validation.get("motion_source_protocol_schema") != motion_protocol["schema"]
         or validation.get("motion_source_protocol_fingerprint")
         != motion_protocol["fingerprint"]
         or validation.get("motion_source_profile") != profile
@@ -4075,18 +5023,17 @@ def _validate_staged_motion_plan_validation(
         or goal_certification.get("waypoint_cache_before")
         != {"state": "none", "waypoints": []}
         or not isinstance(goal_certification.get("waypoint_cache_after"), dict)
-        or goal_certification["waypoint_cache_after"].get("state")
-        != "materialized"
+        or goal_certification["waypoint_cache_after"].get("state") != "materialized"
         or not goal_certification["waypoint_cache_after"].get("waypoints")
         or goal_certification.get("state_audit", {}).get("passed") is not True
-        or goal_certification.get(
-            "condition_fail_grasp_registry_identity_preserved"
-        )
+        or goal_certification.get("condition_fail_grasp_registry_identity_preserved")
         is not True
         or goal_certification.get("grasp_membership_and_parentage_preserved")
         is not True
         or goal_certification.get("passed") is not True
-        or validation.get("source_certification_and_exported_source_different_generations")
+        or validation.get(
+            "source_certification_and_exported_source_different_generations"
+        )
         is not True
         or validation.get("accepted_candidate_reconstructed_A_and_B_same_instance")
         is not True
@@ -4101,8 +5048,7 @@ def _validate_staged_motion_plan_validation(
         or source_seed < 0
         or isinstance(sampling_attempts, bool)
         or not isinstance(sampling_attempts, int)
-        or not 1 <= sampling_attempts
-        <= validation.get("goal_sampling_max_attempts", 0)
+        or not 1 <= sampling_attempts <= validation.get("goal_sampling_max_attempts", 0)
     ):
         raise ValueError("staged deterministic-source validation header is invalid")
     if (
@@ -4126,8 +5072,7 @@ def _validate_staged_motion_plan_validation(
         if (
             not isinstance(row, dict)
             or row.get("source_seed") != expected_seed
-            or row.get("resolved_spatial_root")
-            != validation["resolved_spatial_root"]
+            or row.get("resolved_spatial_root") != validation["resolved_spatial_root"]
             or row.get("accepted") is not accepted
             or (row.get("certification_ref") is not None) is not accepted
             or (row.get("rejection_type") is None) is not accepted
@@ -4192,8 +5137,7 @@ def _validate_staged_motion_plan_validation(
         raise ValueError("selected or candidate source reconstruction is invalid")
     for index, row in enumerate(goal_attempts, 1):
         expected_candidate_seed = int(
-            (episode_seed * 1_000_003 + variation * 9_176 + index * 7_919)
-            % (2**32 - 1)
+            (episode_seed * 1_000_003 + variation * 9_176 + index * 7_919) % (2**32 - 1)
         )
         accepted = index == sampling_attempts
         reconstruction = row.get("source_reconstruction")
@@ -4221,10 +5165,8 @@ def _validate_staged_motion_plan_validation(
             or (
                 accepted
                 and (
-                    row.get("goal_certification_ref")
-                    != "validation.goal_certification"
-                    or
-                    not isinstance(row.get("goal_waypoint_cache"), dict)
+                    row.get("goal_certification_ref") != "validation.goal_certification"
+                    or not isinstance(row.get("goal_waypoint_cache"), dict)
                     or row["goal_waypoint_cache"].get("state") != "materialized"
                     or not row["goal_waypoint_cache"].get("waypoints")
                 )
@@ -4242,8 +5184,7 @@ def _validate_staged_motion_plan_validation(
         except RuntimeError as error:
             raise ValueError("goal-candidate reset evidence is invalid") from error
     if (
-        validation.get("selected_candidate_seed")
-        != goal_attempts[-1]["candidate_seed"]
+        validation.get("selected_candidate_seed") != goal_attempts[-1]["candidate_seed"]
         or validation.get("placement_rejections")
         != sum(row["outcome"] == "placement_rejected" for row in goal_attempts)
         or validation.get("waypoint_rejections")
@@ -4252,16 +5193,14 @@ def _validate_staged_motion_plan_validation(
         != sum(row["outcome"] == "collision_rejected" for row in goal_attempts)
     ):
         raise ValueError("staged goal rejection accounting is invalid")
-    generation_evidence = [
-        row["fresh_task_generation"] for row in source_attempts
-    ] + [validation["selected_source_fresh_task_generation"]] + [
-        row["fresh_task_generation"] for row in goal_attempts
-    ]
-    if (
-        any(
-            left["generation_index"] + 1 != right["generation_index"]
-            for left, right in zip(generation_evidence, generation_evidence[1:])
-        )
+    generation_evidence = (
+        [row["fresh_task_generation"] for row in source_attempts]
+        + [validation["selected_source_fresh_task_generation"]]
+        + [row["fresh_task_generation"] for row in goal_attempts]
+    )
+    if any(
+        left["generation_index"] + 1 != right["generation_index"]
+        for left, right in zip(generation_evidence, generation_evidence[1:])
     ):
         raise ValueError("staged fresh-generation ledger is invalid")
     if (
@@ -4313,7 +5252,9 @@ class StagedMotionPlan:
             raise ValueError("staged motion poses must be finite")
         if not np.all(np.isfinite(low_dim)):
             raise ValueError("staged source low-dimensional state must be finite")
-        if isinstance(self.episode_seed, bool) or not isinstance(self.episode_seed, int):
+        if isinstance(self.episode_seed, bool) or not isinstance(
+            self.episode_seed, int
+        ):
             raise TypeError("staged episode seed must be an integer")
         if self.episode_seed < 0:
             raise ValueError("staged episode seed must be non-negative")
@@ -4474,14 +5415,12 @@ def load_staged_motion_plan_batch(payload: dict[str, Any]) -> list[StagedMotionP
             ]
         )
     ]
-    if (
-        [row["generation_index"] for row in generation_evidence]
-        != list(range(1, len(generation_evidence) + 1))
-        or any(
-            row.get("previous_task_present") is not (index > 0)
-            or row.get("physics_running_before_stop") is not (index > 0)
-            for index, row in enumerate(generation_evidence)
-        )
+    if [row["generation_index"] for row in generation_evidence] != list(
+        range(1, len(generation_evidence) + 1)
+    ) or any(
+        row.get("previous_task_present") is not (index > 0)
+        or row.get("physics_running_before_stop") is not (index > 0)
+        for index, row in enumerate(generation_evidence)
     ):
         raise ValueError("staged plan batch fresh-generation ledger is invalid")
     expected_payload = staged_motion_plan_batch(
@@ -4524,9 +5463,21 @@ class StagedSourcePlan:
         ):
             raise ValueError("staged source plan identity or numeric state is invalid")
         validation = self.validation
-        selection = validation.get("source_seed_selection") if isinstance(validation, dict) else None
-        reconstruction = validation.get("selected_source_reconstruction") if isinstance(validation, dict) else None
-        certification = validation.get("source_certification") if isinstance(validation, dict) else None
+        selection = (
+            validation.get("source_seed_selection")
+            if isinstance(validation, dict)
+            else None
+        )
+        reconstruction = (
+            validation.get("selected_source_reconstruction")
+            if isinstance(validation, dict)
+            else None
+        )
+        certification = (
+            validation.get("source_certification")
+            if isinstance(validation, dict)
+            else None
+        )
         if (
             validation.get("schema") != STAGED_SOURCE_VALIDATION_SCHEMA
             or validation.get("fresh_task_generation_protocol_id")
@@ -4546,16 +5497,12 @@ class StagedSourcePlan:
             or certification.get("waypoint_cache_before")
             != {"state": "none", "waypoints": []}
             or not isinstance(certification.get("waypoint_cache_after"), dict)
-            or certification["waypoint_cache_after"].get("state")
-            != "materialized"
+            or certification["waypoint_cache_after"].get("state") != "materialized"
             or not certification["waypoint_cache_after"].get("waypoints")
             or certification.get("state_audit", {}).get("passed") is not True
-            or certification.get(
-                "condition_fail_grasp_registry_identity_preserved"
-            )
+            or certification.get("condition_fail_grasp_registry_identity_preserved")
             is not True
-            or certification.get("grasp_membership_and_parentage_preserved")
-            is not True
+            or certification.get("grasp_membership_and_parentage_preserved") is not True
             or certification.get("passed") is not True
             or not isinstance(reconstruction, dict)
             or reconstruction.get("schema") != SOURCE_RECONSTRUCTION_SCHEMA
@@ -4742,9 +5689,10 @@ def stage_source_plan(
     )
     selected = _source_state_snapshot(task_environment._scene, descriptions)
     reconstruction = _source_reconstruction_audit(certified, selected)
-    if not reconstruction["passed"] or _waypoint_cache_evidence(
-        task_environment._scene.task
-    )["state"] != "none":
+    if (
+        not reconstruction["passed"]
+        or _waypoint_cache_evidence(task_environment._scene.task)["state"] != "none"
+    ):
         raise RuntimeError("selected coordination A did not reconstruct cleanly")
     selection = {
         "schema": SOURCE_SEED_SELECTION_SCHEMA,
@@ -4891,9 +5839,10 @@ def bind_staged_source_plan(
     # Velocity magnitudes are diagnostic, not source identity.
     selected["velocity_summary"] = actual["velocity_summary"]
     audit = _source_reconstruction_audit(selected, actual)
-    if not audit["passed"] or _waypoint_cache_evidence(
-        task_environment._scene.task
-    )["state"] != "none":
+    if (
+        not audit["passed"]
+        or _waypoint_cache_evidence(task_environment._scene.task)["state"] != "none"
+    ):
         raise RuntimeError("formal coordination source A binding failed")
     return {
         "schema": "dynamac-rlbench-formal-source-a-binding-v1",
@@ -4928,12 +5877,14 @@ def stage_scenario_motion_plan(
         raise ValueError("source selection max attempts differ from frozen protocol")
     if goal_candidate_sampler is not None and not callable(goal_candidate_sampler):
         raise TypeError("goal candidate sampler must be callable or None")
-    from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import load_v3_motion_source_protocol, motion_source_profile
+    from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
+        load_v3_motion_source_protocol,
+        motion_source_profile,
+    )
 
     motion_source_protocol = load_v3_motion_source_protocol()
     if (
-        motion_source_protocol["source_selection_max_attempts"]
-        != source_max_attempts
+        motion_source_protocol["source_selection_max_attempts"] != source_max_attempts
         or motion_source_protocol["goal_sampling_max_attempts"] != max_attempts
     ):
         raise RuntimeError("motion-source staging budgets are inconsistent")
@@ -4972,7 +5923,9 @@ def stage_scenario_motion_plan(
         if task is None:
             raise RuntimeError("RLBench source-certification task is unavailable")
         get_name = getattr(task, "get_name", None)
-        actual_task_name = str(get_name()) if callable(get_name) else type(task).__name__
+        actual_task_name = (
+            str(get_name()) if callable(get_name) else type(task).__name__
+        )
         if resolved_task_name is None:
             resolved_task_name = actual_task_name
         elif resolved_task_name != actual_task_name:
@@ -5103,7 +6056,9 @@ def stage_scenario_motion_plan(
         workspace_boundary = getattr(scene, "_workspace_boundary", None)
         robot = getattr(scene, "robot", None)
         if task is None or workspace_boundary is None or robot is None:
-            raise RuntimeError("RLBench staging scene placement internals are unavailable")
+            raise RuntimeError(
+                "RLBench staging scene placement internals are unavailable"
+            )
         resolved_candidate_root = _authenticate_motion_source_root(
             task,
             spatial_profile,
@@ -5219,10 +6174,7 @@ def stage_scenario_motion_plan(
                 )
                 continue
             candidate_collisions = _robot_external_collision_pairs(scene, robot)
-            if (
-                frozenset(candidate_collisions)
-                - frozenset(current_source_collisions)
-            ):
+            if frozenset(candidate_collisions) - frozenset(current_source_collisions):
                 collision_rejections += 1
                 last_error = "sampled goal introduces new robot collision pairs"
                 goal_attempt_rows.append(
@@ -5274,10 +6226,7 @@ def stage_scenario_motion_plan(
                 )
                 continue
             candidate_collisions = _robot_external_collision_pairs(scene, robot)
-            if (
-                frozenset(candidate_collisions)
-                - frozenset(current_source_collisions)
-            ):
+            if frozenset(candidate_collisions) - frozenset(current_source_collisions):
                 collision_rejections += 1
                 last_error = (
                     "waypoint validation leaves new robot collision pairs at goal"
@@ -5298,12 +6247,10 @@ def stage_scenario_motion_plan(
             goal_waypoint_cache = _waypoint_cache_evidence(task)
             if goal_waypoint_cache["state"] != "materialized":
                 raise RuntimeError("B validation did not materialize waypoints")
-            goal_waypoint_validation_task_tree = (
-                _compare_task_tree_relative_state(
-                    candidate_tree_pre_validation,
-                    candidate_tree_post_validation,
-                    boundary_root_may_move=False,
-                )
+            goal_waypoint_validation_task_tree = _compare_task_tree_relative_state(
+                candidate_tree_pre_validation,
+                candidate_tree_post_validation,
+                boundary_root_may_move=False,
             )
             if not goal_waypoint_validation_task_tree["matched"]:
                 raise RuntimeError(
@@ -5329,9 +6276,7 @@ def stage_scenario_motion_plan(
                 current_source_low_dim,
                 candidate_low_dim,
             )
-            if not rigid_motion[
-                "all_pose_chunks_follow_boundary_root_rigid_transform"
-            ]:
+            if not rigid_motion["all_pose_chunks_follow_boundary_root_rigid_transform"]:
                 raise RuntimeError(
                     "staged boundary-root motion does not rigidly move every task frame"
                 )
@@ -5381,7 +6326,9 @@ def stage_scenario_motion_plan(
             f"{_goal_sampling_failure_diagnostic(goal_attempt_rows)}"
         )
     selected_source_collision_set = frozenset(accepted_source_collision_pairs)
-    new_pairs = tuple(sorted(frozenset(goal_collision_pairs) - selected_source_collision_set))
+    new_pairs = tuple(
+        sorted(frozenset(goal_collision_pairs) - selected_source_collision_set)
+    )
     if new_pairs:
         raise RuntimeError("staged goal contains an unvalidated collision pair")
     source_seed_selection = {
@@ -5397,9 +6344,7 @@ def stage_scenario_motion_plan(
         "schema": STAGED_MOTION_PLAN_VALIDATION_SCHEMA,
         "environment_role": "independent_disposable_staging",
         "fresh_task_generation_protocol_id": DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
-        "selected_source_fresh_task_generation": (
-            selected_source_generation_evidence
-        ),
+        "selected_source_fresh_task_generation": (selected_source_generation_evidence),
         "source_certification_fresh_task_generation": certification_generation_evidence,
         "source_seed": int(selected_source_seed),
         "motion_source_protocol_schema": motion_source_protocol["schema"],
@@ -5457,7 +6402,9 @@ def stage_scenario_motion_plan(
         "goal_robot_external_collision_pairs": _stable_collision_pair_records(
             goal_collision_pairs
         ),
-        "goal_new_robot_external_collision_pairs": _stable_collision_pair_records(new_pairs),
+        "goal_new_robot_external_collision_pairs": _stable_collision_pair_records(
+            new_pairs
+        ),
         "sampling_attempts": attempts_used,
         "goal_sampling_max_attempts": int(max_attempts),
         "selected_candidate_seed": candidate_seed,
@@ -5572,7 +6519,9 @@ def _sample_preserving_instance_goal(
                 )
                 candidate = np.asarray(root.get_pose(), dtype=np.float64).copy()
                 if candidate.shape != (7,) or not np.all(np.isfinite(candidate)):
-                    raise RuntimeError("workspace sampler returned an invalid root pose")
+                    raise RuntimeError(
+                        "workspace sampler returned an invalid root pose"
+                    )
                 if not _root_motion_metrics(source_pose, candidate)[
                     "planned_root_motion"
                 ]:
@@ -5584,8 +6533,7 @@ def _sample_preserving_instance_goal(
                 )
                 new_collision_pairs = tuple(
                     sorted(
-                        frozenset(candidate_collision_pairs)
-                        - source_collision_pair_set
+                        frozenset(candidate_collision_pairs) - source_collision_pair_set
                     )
                 )
                 if new_collision_pairs:
@@ -5672,16 +6620,10 @@ def _sample_preserving_instance_goal(
         "low_dim_state_roundtrip_chunk_count": roundtrip["chunk_count"],
         "low_dim_state_roundtrip_l2": roundtrip["raw_l2"],
         "low_dim_state_roundtrip_max_abs": roundtrip["raw_max_abs"],
-        "low_dim_state_roundtrip_max_translation_m": roundtrip[
-            "max_translation_m"
-        ],
-        "low_dim_state_roundtrip_max_rotation_rad": roundtrip[
-            "max_rotation_rad"
-        ],
+        "low_dim_state_roundtrip_max_translation_m": roundtrip["max_translation_m"],
+        "low_dim_state_roundtrip_max_rotation_rad": roundtrip["max_rotation_rad"],
         "condition_and_grasp_registry_identity_preserved": references_preserved,
-        "gripper_grasp_membership_and_parentage_preserved": (
-            grasp_state_preserved
-        ),
+        "gripper_grasp_membership_and_parentage_preserved": (grasp_state_preserved),
         "configuration_tree_rollback": "task_only_after_each_attempt_and_outer_finally",
         "task_configuration_tree_restored": True,
         "live_robot_state_untouched": True,
@@ -5794,7 +6736,9 @@ class ScenarioController:
                 else None
             )
             if v4_lift is not None:
-                from integrations.rlbench.rlbench_dynamac.protocols.v4_dynamic_protocol import V4_LIFT_MOTION_PROTOCOL_ID
+                from integrations.rlbench.rlbench_dynamac.protocols.v4_dynamic_protocol import (
+                    V4_LIFT_MOTION_PROTOCOL_ID,
+                )
 
                 return {
                     "protocol_id": V4_LIFT_MOTION_PROTOCOL_ID,
@@ -5929,9 +6873,7 @@ class ScenarioController:
             "low_dim_state_roundtrip_comparison": (
                 "valid_pose_chunks_sign_invariant_else_scalar_max_abs"
             ),
-            "low_dim_state_roundtrip_scalar_tolerance": (
-                LOW_DIM_STATE_ROUNDTRIP_ATOL
-            ),
+            "low_dim_state_roundtrip_scalar_tolerance": (LOW_DIM_STATE_ROUNDTRIP_ATOL),
             "low_dim_state_roundtrip_pose_translation_tolerance_m": (
                 LOW_DIM_POSE_TRANSLATION_TOLERANCE_M
             ),
@@ -5958,9 +6900,7 @@ class ScenarioController:
                 "resets task dynamics; live robot trees remain untouched; the "
                 "subsequent root-motion intervention resets moved task dynamics"
             ),
-            "goal_validation": (
-                "workspace_fit_no_new_robot_external_collision_pairs"
-            ),
+            "goal_validation": ("workspace_fit_no_new_robot_external_collision_pairs"),
             "calls_task_init_episode": False,
             "calls_scene_kidnap": False,
             "calls_scene_move_task_smoothly": False,
@@ -6003,18 +6943,21 @@ class ScenarioController:
             raise RuntimeError("formal RLBench scene task is unavailable")
         get_name = getattr(task, "get_name", None)
         formal_task_name = (
-            str(get_name())
-            if callable(get_name)
-            else type(task).__name__
+            str(get_name()) if callable(get_name) else type(task).__name__
         )
         if formal_task_name != self.motion_plan.task_name:
             raise RuntimeError("formal task identity does not match staged motion plan")
         validation = self.motion_plan.validation
         if validation.get("v4_lift_tray") is not None:
-            from integrations.rlbench.rlbench_dynamac.protocols.v4_dynamic_protocol import validate_v4_lift_motion_plan
+            from integrations.rlbench.rlbench_dynamac.protocols.v4_dynamic_protocol import (
+                validate_v4_lift_motion_plan,
+            )
 
             validate_v4_lift_motion_plan(self.motion_plan)
-        from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import load_v3_motion_source_protocol, motion_source_profile
+        from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
+            load_v3_motion_source_protocol,
+            motion_source_profile,
+        )
 
         motion_source_protocol = load_v3_motion_source_protocol()
         spatial_profile = motion_source_profile(
@@ -6031,9 +6974,10 @@ class ScenarioController:
             != _authenticate_motion_source_root(task, spatial_profile)
         ):
             raise RuntimeError("staged spatial motion-source profile is invalid")
-        if validation.get(
-            "fresh_task_generation_protocol_id"
-        ) != DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID:
+        if (
+            validation.get("fresh_task_generation_protocol_id")
+            != DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
+        ):
             raise RuntimeError("staged fresh task-generation protocol is invalid")
         source_seed = validation.get("source_seed")
         if isinstance(source_seed, bool) or not isinstance(source_seed, int):
@@ -6069,11 +7013,15 @@ class ScenarioController:
             raise RuntimeError("staged source certification proof is invalid")
         expected_descriptions = validation.get("task_descriptions")
         if descriptions is None or list(descriptions) != expected_descriptions:
-            raise RuntimeError("formal task descriptions do not match staged motion plan")
+            raise RuntimeError(
+                "formal task descriptions do not match staged motion plan"
+            )
         if validation.get("task_tree_state_schema") != TASK_TREE_STATE_SCHEMA:
             raise RuntimeError("staged task-tree state schema is invalid")
         if _waypoint_cache_evidence(task)["state"] != "none":
-            raise RuntimeError("formal reset(false) unexpectedly materialized waypoints")
+            raise RuntimeError(
+                "formal reset(false) unexpectedly materialized waypoints"
+            )
         expected_source = {
             "task_name": self.motion_plan.task_name,
             "root_pose": np.asarray(self.motion_plan.source_pose, dtype=np.float64),
@@ -6084,7 +7032,9 @@ class ScenarioController:
             "task_tree": validation.get("source_task_tree_relative_state"),
             "task_semantics": validation.get("task_semantic_signature"),
             "descriptions": expected_descriptions,
-            "robot_numeric_state": validation.get("selected_source_robot_numeric_state"),
+            "robot_numeric_state": validation.get(
+                "selected_source_robot_numeric_state"
+            ),
             "stable_grasp_state": validation.get("selected_source_stable_grasp_state"),
             "robot_external_collision_pairs": validation.get(
                 "source_robot_external_collision_pairs"
@@ -6141,16 +7091,18 @@ class ScenarioController:
             "fresh_task_generation_protocol_id": (
                 DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID
             ),
-            "selected_source_fresh_task_generation": (
-                selected_generation_evidence
-            ),
+            "selected_source_fresh_task_generation": (selected_generation_evidence),
             "formal_source_fresh_task_generation": formal_generation_evidence,
             "task_name": formal_task_name,
-            "task_semantics_matched": formal_reconstruction["exact_matches"]["task_semantics"],
+            "task_semantics_matched": formal_reconstruction["exact_matches"][
+                "task_semantics"
+            ],
             "task_tree_matched": formal_reconstruction["task_tree"]["matched"],
             "task_tree_state_schema": TASK_TREE_STATE_SCHEMA,
             "task_tree_match": formal_reconstruction["task_tree"],
-            "task_descriptions_matched": formal_reconstruction["exact_matches"]["descriptions"],
+            "task_descriptions_matched": formal_reconstruction["exact_matches"][
+                "descriptions"
+            ],
             "robot_external_collision_pairs_matched": (
                 formal_reconstruction["exact_matches"]["robot_external_collision_pairs"]
             ),
@@ -6170,7 +7122,9 @@ class ScenarioController:
         self._motion_goal_pose = goal
         self._instance_preservation = preservation
 
-    def apply(self, task_environment: Any, *, step: int, horizon: int) -> dict[str, Any]:
+    def apply(
+        self, task_environment: Any, *, step: int, horizon: int
+    ) -> dict[str, Any]:
         if horizon < 1:
             raise ValueError("horizon must be positive")
         if isinstance(step, bool) or not isinstance(step, int) or step < 0:
@@ -6307,8 +7261,7 @@ class ScenarioController:
                     "smooth_call": self._smooth_calls,
                     "complete": self._smooth_complete,
                     "endpoint_applied": bool(
-                        self._smooth_complete
-                        and goal_reached["goal_root_pose_reached"]
+                        self._smooth_complete and goal_reached["goal_root_pose_reached"]
                     ),
                     "endpoint_fraction": fraction,
                 }

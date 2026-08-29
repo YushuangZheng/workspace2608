@@ -231,11 +231,11 @@ class RelationVerificationController:
             raise RuntimeError("已有主动关系验证尚未结束")
         if request.pending_event_id != candidate.event_id:
             raise ValueError("主动验证请求与 Pending 候选不一致")
-        if relation_state != RelationDecision.UNKNOWN:
-            raise ValueError("VERIFY_LINK 只能从 Unknown 关系开始")
-        signature = VerificationAttemptSignature(
-            relation_state=relation_state,
+        if relation_state == RelationDecision.LINKED:
+            raise ValueError("VERIFY_LINK 不能从已经确认的 linked 关系开始")
+        signature = self.attempt_signature(
             task_state=task_state,
+            relation_state=relation_state,
             grasp_event=grasp_event,
         )
         if not self.attempts.can_attempt(candidate.event_id, signature):
@@ -255,6 +255,38 @@ class RelationVerificationController:
         self._probe_path = [self._entry_pose.copy()]
         self.phase = VerificationPhase.PROBE
         self.attempts.record(candidate.event_id, signature)
+
+    @staticmethod
+    def attempt_signature(
+        *,
+        task_state: StateId,
+        relation_state: RelationDecision,
+        grasp_event: Hashable,
+    ) -> VerificationAttemptSignature:
+        """Return the context whose change is required before retrying."""
+
+        return VerificationAttemptSignature(
+            relation_state=relation_state,
+            task_state=task_state,
+            grasp_event=grasp_event,
+        )
+
+    def can_attempt(
+        self,
+        candidate: LinkPendingCandidate,
+        *,
+        task_state: StateId,
+        relation_state: RelationDecision,
+        grasp_event: Hashable,
+    ) -> bool:
+        """Whether this Pending occurrence is re-armed in the current context."""
+
+        signature = self.attempt_signature(
+            task_state=task_state,
+            relation_state=relation_state,
+            grasp_event=grasp_event,
+        )
+        return self.attempts.can_attempt(candidate.event_id, signature)
 
     def _action(self, pose: Array, source: str) -> AuxiliaryAction:
         assert self._gripper_command is not None

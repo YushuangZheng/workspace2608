@@ -43,7 +43,10 @@ from integrations.rlbench.rlbench_dynamac.core.gripper_timing import (
     GLOBAL_GRIPPER_TIMING_PROTOCOL_ID,
     global_gripper_timing_metadata,
 )
-from integrations.rlbench.rlbench_dynamac.core.records import atomic_json, reserve_output
+from integrations.rlbench.rlbench_dynamac.core.records import (
+    atomic_json,
+    reserve_output,
+)
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
     DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
@@ -53,11 +56,14 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     FORMAL_PRIMARY_RETRY_EXHAUSTION_MODE,
     FROZEN_V4_CONTROLLER_PROFILE,
     GLOBAL_IK_CONTROLLER_PROFILE,
+    STAGE6_IK_CONTROLLER_PROFILE,
     GlobalIKControllerConfig,
+    Stage6IKControllerConfig,
     PrimaryActionRetryBudget,
     ScenarioController,
     commit_joint_hold_after_primary_failure,
     execute_global_ik_ee_control,
+    execute_stage6_ik_ee_control,
     execute_joint_target_control,
     final_settling_metadata,
     global_ik_controller_metadata,
@@ -79,8 +85,10 @@ from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
 
 from integrations.rlbench.rlbench_dynamac.core.paths import REPOSITORY_ROOT
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
+
 DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
 DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v3"
+CLOSED_LOOP_MODELS_DIR = INTEGRATION_ROOT / "models" / "closed_loop_v1"
 DEFAULT_POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", "python3.10"))
 TASKS = {
     "stack_wine": ("rlbench.tasks.stack_wine", "StackWine"),
@@ -99,9 +107,7 @@ DYNAMIC_EPISODE_ACCOUNTING_SCHEMA = (
 )
 POLICY_CLOCK_SEMANTICS_ID = FORMAL_POLICY_CLOCK_SEMANTICS_ID
 GRIPPER_PROTOCOL = DiscreteGripperProtocol(bimanual=False)
-LOW_DIM_HEADLESS_SCENE_PROTOCOL_ID = (
-    "rlbench-prestep-explicit-base-vision-sensors-v1"
-)
+LOW_DIM_HEADLESS_SCENE_PROTOCOL_ID = "rlbench-prestep-explicit-base-vision-sensors-v1"
 EXPECTED_UNIMANUAL_BASE_SCENE_SHA256 = (
     "66e1cfa0a6ee5a5e635917d23ce1b5f8ba7159ee1a5326588d798030b972306a"
 )
@@ -133,15 +139,31 @@ def legacy_v3_evaluation_protocol_id(max_primary_action_attempts):
     )
 
 
-def evaluation_protocol_id(max_primary_action_attempts):
+def evaluation_protocol_id(
+    max_primary_action_attempts,
+    controller_profile=GLOBAL_IK_CONTROLLER_PROFILE,
+):
     attempts = PrimaryActionRetryBudget(max_primary_action_attempts).max_attempts
     if attempts != 1:
-        raise ValueError("formal global controller requires one request per policy tick")
+        raise ValueError(
+            "formal global controller requires one request per policy tick"
+        )
+    if controller_profile == STAGE6_IK_CONTROLLER_PROFILE:
+        controller = (
+            "rlbench-stage6-current-seeded-pseudo6-then-bounded-trac-distance-"
+            "then-cartesian-continuation-collision-aware-or-relaxed-sampling-path-"
+            "converged-joint-target-cartesian-feedback-"
+        )
+    elif controller_profile == GLOBAL_IK_CONTROLLER_PROFILE:
+        controller = (
+            "rlbench-absolute-ee-pseudo6-then-bounded-trac-distance-"
+            "then-collision-aware-sampling5-nearest-current-q-"
+            "then-far10cm-collision-aware-path-timeout200-"
+        )
+    else:
+        raise ValueError("unsupported evaluation controller profile")
     return GRIPPER_PROTOCOL.extend_evaluation_protocol_id(
-        "rlbench-absolute-ee-pseudo6-then-bounded-trac-distance-"
-        "then-collision-aware-sampling5-nearest-current-q-"
-        "then-far10cm-collision-aware-path-timeout200-"
-        f"{GLOBAL_GRIPPER_TIMING_PROTOCOL_ID}-"
+        controller + f"{GLOBAL_GRIPPER_TIMING_PROTOCOL_ID}-"
         "single-primary-request-raw-joint-hold-same-transaction-"
         f"primary-attempt{attempts}-committed-shared-clock-"
         "final-settle-up-to-raw10-staged34-deterministic-source-reset1-"
@@ -149,22 +171,43 @@ def evaluation_protocol_id(max_primary_action_attempts):
     )
 
 
-LEGACY_V3_EVALUATION_PROTOCOL_ID = legacy_v3_evaluation_protocol_id(
-    3
-)
-EVALUATION_PROTOCOL_ID = evaluation_protocol_id(
-    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
-)
+LEGACY_V3_EVALUATION_PROTOCOL_ID = legacy_v3_evaluation_protocol_id(3)
+EVALUATION_PROTOCOL_ID = evaluation_protocol_id(DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS)
 
 
 def _validate_formal_execution_args(args):
-    if getattr(
-        args,
-        "max_primary_action_attempts",
-        DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
-    ) != 1:
+    if (
+        getattr(
+            args,
+            "max_primary_action_attempts",
+            DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+        )
+        != 1
+    ):
         raise RuntimeError("formal evaluation requires one primary request per tick")
-    return global_ik_controller_metadata()
+    profile = _resolved_controller_profile(args)
+    return global_ik_controller_metadata(_controller_config(profile))
+
+
+def _resolved_controller_profile(args):
+    requested = getattr(args, "controller_profile", "auto")
+    if requested == "auto":
+        return (
+            STAGE6_IK_CONTROLLER_PROFILE
+            if getattr(args, "policy_type", "dynamac") == "closed_loop_multistream"
+            else GLOBAL_IK_CONTROLLER_PROFILE
+        )
+    return requested
+
+
+def _controller_config(controller_profile):
+    if controller_profile == STAGE6_IK_CONTROLLER_PROFILE:
+        return Stage6IKControllerConfig()
+    if controller_profile == GLOBAL_IK_CONTROLLER_PROFILE:
+        return GlobalIKControllerConfig()
+    if controller_profile == FROZEN_V4_CONTROLLER_PROFILE:
+        return None
+    raise ValueError("unsupported unimanual controller profile")
 
 
 def _validate_v3_protocol_budgets(args):
@@ -202,7 +245,9 @@ def _authenticated_v3_dynamic_trigger(args, worker):
             "command-line trigger step differs from authenticated V3 preregistration"
         )
     if authenticated_step >= worker.policy_steps:
-        raise RuntimeError("authenticated V3 trigger lies outside the loaded policy clock")
+        raise RuntimeError(
+            "authenticated V3 trigger lies outside the loaded policy clock"
+        )
     return protocol, authentication
 
 
@@ -280,13 +325,10 @@ def _prepare_low_dim_headless_scene(
             object_type=ObjectType.VISION_SENSOR
         )
         if not vision_sensors:
-            raise RuntimeError(
-                f"no base-scene vision sensors found in {source}"
-            )
+            raise RuntimeError(f"no base-scene vision sensors found in {source}")
         if len(vision_sensors) != EXPECTED_UNIMANUAL_BASE_VISION_SENSOR_COUNT:
             raise RuntimeError(
-                "unexpected base-scene vision-sensor count: "
-                f"{len(vision_sensors)}"
+                "unexpected base-scene vision-sensor count: " f"{len(vision_sensors)}"
             )
         handling = []
         for sensor in vision_sensors:
@@ -343,12 +385,16 @@ def _make_action_mode(
 ):
     if controller_profile not in {
         GLOBAL_IK_CONTROLLER_PROFILE,
+        STAGE6_IK_CONTROLLER_PROFILE,
         FROZEN_V4_CONTROLLER_PROFILE,
     }:
         raise ValueError("unsupported unimanual controller profile")
-    if controller_profile == GLOBAL_IK_CONTROLLER_PROFILE:
+    if controller_profile in {
+        GLOBAL_IK_CONTROLLER_PROFILE,
+        STAGE6_IK_CONTROLLER_PROFILE,
+    }:
         if controller_config is None:
-            controller_config = GlobalIKControllerConfig()
+            controller_config = _controller_config(controller_profile)
         if not isinstance(controller_config, GlobalIKControllerConfig):
             raise ValueError("global IK controller requires its formal config")
         if external_solver_factory is not None and not callable(
@@ -376,7 +422,10 @@ def _make_action_mode(
             self._controller_config = controller_config
             self._external_solver_factory = external_solver_factory
             self._external_solvers = {}
-            if controller_profile == GLOBAL_IK_CONTROLLER_PROFILE:
+            if controller_profile in {
+                GLOBAL_IK_CONTROLLER_PROFILE,
+                STAGE6_IK_CONTROLLER_PROFILE,
+            }:
                 self._execution_diagnostics = (
                     initialize_global_ik_controller_diagnostics()
                 )
@@ -385,11 +434,15 @@ def _make_action_mode(
             self._execution_diagnostics.update(
                 {
                     "joint_target_reached": 0,
+                    "joint_target_progressed": 0,
                     "joint_target_stopped": 0,
                     "joint_target_timeouts": 0,
                 }
             )
-            if controller_profile == GLOBAL_IK_CONTROLLER_PROFILE:
+            if controller_profile in {
+                GLOBAL_IK_CONTROLLER_PROFILE,
+                STAGE6_IK_CONTROLLER_PROFILE,
+            }:
                 self._execution_diagnostics.update(
                     {
                         "controller_profile": controller_profile,
@@ -433,9 +486,7 @@ def _make_action_mode(
                             self._controller_config.trac_ik_fk_rotation_max_rad
                         ),
                     )
-                    solver = AlignedTracIKDistanceSolver(
-                        arm, config=solver_config
-                    )
+                    solver = AlignedTracIKDistanceSolver(arm, config=solver_config)
                 else:
                     solver = factory(arm)
                 if not callable(getattr(solver, "solve", None)):
@@ -459,9 +510,17 @@ def _make_action_mode(
             assert_action_shape(action, (7,))
             target = np.asarray(action, dtype=np.float64)
             assert_unit_quaternion(target[3:])
-            if self._controller_profile == GLOBAL_IK_CONTROLLER_PROFILE:
+            if self._controller_profile in {
+                GLOBAL_IK_CONTROLLER_PROFILE,
+                STAGE6_IK_CONTROLLER_PROFILE,
+            }:
                 try:
-                    status = execute_global_ik_ee_control(
+                    executor = (
+                        execute_stage6_ik_ee_control
+                        if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
+                        else execute_global_ik_ee_control
+                    )
+                    status = executor(
                         scene,
                         ((scene.robot.arm, target),),
                         config=self._controller_config,
@@ -520,6 +579,7 @@ def _observation_payload(observation):
         state = state[0]
     return {
         "gripper_pose": np.asarray(observation.gripper_pose).tolist(),
+        "gripper_open": float(observation.gripper_open),
         "task_low_dim_state": np.asarray(state).reshape(-1).tolist(),
     }
 
@@ -621,9 +681,7 @@ def _finalize_episode_intervention_status(
         raise RuntimeError(
             "dynamic episode reached its trigger without an effective intervention"
         )
-    if any(
-        event.get("trigger_step") != trigger_step for event in applied
-    ):
+    if any(event.get("trigger_step") != trigger_step for event in applied):
         raise RuntimeError("dynamic intervention trigger evidence is inconsistent")
 
     complete = True
@@ -680,18 +738,49 @@ def _finalize_episode_intervention_status(
 
 
 class PolicyProcess:
-    def __init__(self, python, task, models_dir, timeout=120.0):
+    def __init__(
+        self,
+        python,
+        task,
+        models_dir,
+        timeout=120.0,
+        *,
+        policy_type="dynamac",
+        closed_loop_models_dir=CLOSED_LOOP_MODELS_DIR,
+        diagnostics_dir=None,
+    ):
         self.timeout = float(timeout)
-        command = [
-            str(python),
-            "-m",
-            "integrations.rlbench.rlbench_dynamac.data.direct_policy",
-            "serve",
-            "--task",
-            task,
-            "--models-dir",
-            str(Path(models_dir).resolve()),
-        ]
+        if policy_type not in {"dynamac", "closed_loop_multistream"}:
+            raise ValueError("policy_type must be dynamac or closed_loop_multistream")
+        self.policy_type = policy_type
+        if policy_type == "dynamac":
+            command = [
+                str(python),
+                "-m",
+                "integrations.rlbench.rlbench_dynamac.data.direct_policy",
+                "serve",
+                "--task",
+                task,
+                "--models-dir",
+                str(Path(models_dir).resolve()),
+            ]
+        else:
+            command = [
+                str(python),
+                "-m",
+                "integrations.rlbench.rlbench_closed_loop.policy_server",
+                "serve",
+                "--task",
+                task,
+                "--models-dir",
+                str(Path(closed_loop_models_dir).resolve()),
+                "--base-models-dir",
+                str(Path(models_dir).resolve()),
+            ]
+            if diagnostics_dir is not None:
+                command.extend(
+                    ["--diagnostics-dir", str(Path(diagnostics_dir).resolve())]
+                )
         self.process = subprocess.Popen(
             command,
             cwd=str(REPOSITORY_ROOT),
@@ -703,23 +792,39 @@ class PolicyProcess:
         try:
             response = self.request("ping")
             if not response.get("ready") or response.get("bimanual"):
-                raise RuntimeError("policy worker did not report a ready unimanual model")
+                raise RuntimeError(
+                    "policy worker did not report a ready unimanual model"
+                )
             if response.get("task") != task:
-                raise RuntimeError("policy worker identity does not match the requested task")
+                raise RuntimeError(
+                    "policy worker identity does not match the requested task"
+                )
             self.policy_steps = int(response["policy_steps"])
             if self.policy_steps < 1:
                 raise RuntimeError("policy worker reported an empty trajectory")
             self.model_identity = response.get("model_identity")
             if not isinstance(self.model_identity, dict):
                 raise RuntimeError("policy worker did not report model identity")
-            self.policy_clock_semantics_id = response.get(
-                "policy_clock_semantics_id"
-            )
+            self.policy_clock_semantics_id = response.get("policy_clock_semantics_id")
             if self.policy_clock_semantics_id != POLICY_CLOCK_SEMANTICS_ID:
-                raise RuntimeError("policy worker clock semantics do not match evaluator")
+                raise RuntimeError(
+                    "policy worker clock semantics do not match evaluator"
+                )
             self.gripper_timing = response.get("gripper_timing")
-            if self.gripper_timing != global_gripper_timing_metadata():
-                raise RuntimeError("policy worker gripper timing does not match evaluator")
+            if self.policy_type == "dynamac":
+                if self.gripper_timing != global_gripper_timing_metadata():
+                    raise RuntimeError(
+                        "policy worker gripper timing does not match evaluator"
+                    )
+            elif (
+                not isinstance(self.gripper_timing, dict)
+                or self.gripper_timing.get("protocol_id")
+                != GLOBAL_GRIPPER_TIMING_PROTOCOL_ID
+                or self.gripper_timing.get("rule")
+                != "committed_reference_state_command"
+                or response.get("policy_type") != self.policy_type
+            ):
+                raise RuntimeError("closed-loop policy worker timing identity mismatch")
         except Exception:
             if self.process.poll() is None:
                 self.process.terminate()
@@ -776,15 +881,22 @@ def _run_episode(
     )
     if retry_exhaustion_mode != FORMAL_PRIMARY_RETRY_EXHAUSTION_MODE:
         raise ValueError("formal evaluation requires the global joint-hold clock")
-    if getattr(
-        args,
-        "max_primary_action_attempts",
-        DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
-    ) != 1:
+    if (
+        getattr(
+            args,
+            "max_primary_action_attempts",
+            DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
+        )
+        != 1
+    ):
         raise ValueError("formal evaluation requests each policy tick exactly once")
-    if descriptions is None or observation is None or not isinstance(
-        fresh_task_generation,
-        dict,
+    if (
+        descriptions is None
+        or observation is None
+        or not isinstance(
+            fresh_task_generation,
+            dict,
+        )
     ):
         raise RuntimeError("formal episode requires fresh task-generation input")
     controller = ScenarioController(
@@ -837,9 +949,7 @@ def _run_episode(
 
     def finish(row):
         row.setdefault("primary_failure_joint_hold_commits", joint_hold_commits)
-        row.setdefault(
-            "policy_clock_semantics_id", FORMAL_POLICY_CLOCK_SEMANTICS_ID
-        )
+        row.setdefault("policy_clock_semantics_id", FORMAL_POLICY_CLOCK_SEMANTICS_ID)
         row.setdefault(
             "final_settling",
             {
@@ -879,16 +989,12 @@ def _run_episode(
                     "formal_rollout_sample_or_restore": motion_plan.validation.get(
                         "formal_rollout_sample_or_restore"
                     ),
-                    "formal_source_bound": source_binding.get(
-                        "formal_source_bound"
-                    ),
+                    "formal_source_bound": source_binding.get("formal_source_bound"),
                     "formal_task_name_bound": source_binding.get("task_name"),
                     "formal_task_semantics_matched": source_binding.get(
                         "task_semantics_matched"
                     ),
-                    "formal_task_tree_matched": source_binding.get(
-                        "task_tree_matched"
-                    ),
+                    "formal_task_tree_matched": source_binding.get("task_tree_matched"),
                     "formal_deterministic_source_reconstruction_passed": (
                         source_binding.get(
                             "deterministic_source_reconstruction", {}
@@ -901,9 +1007,7 @@ def _run_episode(
                         "formal_observation_refreshed_after_binding"
                     ),
                     "formal_robot_external_collision_pairs_matched": (
-                        source_binding.get(
-                            "robot_external_collision_pairs_matched"
-                        )
+                        source_binding.get("robot_external_collision_pairs_matched")
                     ),
                     "selected_source_fingerprint": source_binding.get(
                         "selected_source_fingerprint"
@@ -938,7 +1042,9 @@ def _run_episode(
             )
             last_scenario_policy_step = committed_policy_steps
             if event.get("trigger_step") != trigger_step and args.scenario != "static":
-                raise RuntimeError("scenario controller returned an inconsistent trigger")
+                raise RuntimeError(
+                    "scenario controller returned an inconsistent trigger"
+                )
             if event.get("applied"):
                 if trigger_step is None or committed_policy_steps < trigger_step:
                     raise RuntimeError("scenario controller applied before the trigger")
@@ -947,6 +1053,30 @@ def _run_episode(
                 events.append(event)
         response = worker.request("act", observation)
         action = response.get("action")
+        if response.get("policy_failed") is True:
+            transaction_id = response.get("transaction_id")
+            if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
+                raise RuntimeError(
+                    "failed closed-loop policy cycle did not return a transaction id"
+                )
+            worker.request(
+                "commit",
+                transaction_id=transaction_id,
+                primary_action_succeeded=False,
+            )
+            committed_policy_steps += 1
+            return finish(
+                {
+                    "episode": episode,
+                    "success": False,
+                    "steps": control_attempts,
+                    "control_attempts": control_attempts,
+                    "reason": "policy_structured_failure",
+                    "policy_failure_reasons": response.get("failure_reasons", {}),
+                    "invalid_actions": invalid_actions,
+                    "interventions": events,
+                }
+            )
         if action is None:
             settling = run_final_settling(
                 task_environment,
@@ -960,16 +1090,18 @@ def _run_episode(
                 reason = "policy_complete_after_final_settling"
             else:
                 reason = "policy_complete"
-            return finish({
-                "episode": episode,
-                "success": bool(settling["success"]),
-                "steps": control_attempts,
-                "control_attempts": control_attempts,
-                "reason": reason,
-                "invalid_actions": invalid_actions,
-                "interventions": events,
-                "final_settling": settling,
-            })
+            return finish(
+                {
+                    "episode": episode,
+                    "success": bool(settling["success"]),
+                    "steps": control_attempts,
+                    "control_attempts": control_attempts,
+                    "reason": reason,
+                    "invalid_actions": invalid_actions,
+                    "interventions": events,
+                    "final_settling": settling,
+                }
+            )
         transaction_id = response.get("transaction_id")
         if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
             raise RuntimeError("policy worker did not return an action transaction id")
@@ -991,15 +1123,17 @@ def _run_episode(
                     )
                 )
             except InvalidActionError:
-                return finish({
-                    "episode": episode,
-                    "success": False,
-                    "steps": control_attempts,
-                    "control_attempts": control_attempts,
-                    "reason": "joint_hold_failed",
-                    "invalid_actions": invalid_actions,
-                    "interventions": events,
-                })
+                return finish(
+                    {
+                        "episode": episode,
+                        "success": False,
+                        "steps": control_attempts,
+                        "control_attempts": control_attempts,
+                        "reason": "joint_hold_failed",
+                        "invalid_actions": invalid_actions,
+                        "interventions": events,
+                    }
+                )
             joint_hold_commits += 1
             committed_policy_steps += 1
         except Exception:
@@ -1029,25 +1163,29 @@ def _run_episode(
                 reason = "policy_complete"
         else:
             continue
-        return finish({
+        return finish(
+            {
+                "episode": episode,
+                "success": bool(reward > 0.0 or (settling or {}).get("success")),
+                "steps": control_attempts,
+                "control_attempts": control_attempts,
+                "reason": reason,
+                "invalid_actions": invalid_actions,
+                "interventions": events,
+                **({"final_settling": settling} if settling is not None else {}),
+            }
+        )
+    return finish(
+        {
             "episode": episode,
-            "success": bool(reward > 0.0 or (settling or {}).get("success")),
+            "success": False,
             "steps": control_attempts,
             "control_attempts": control_attempts,
-            "reason": reason,
+            "reason": "horizon",
             "invalid_actions": invalid_actions,
             "interventions": events,
-            **({"final_settling": settling} if settling is not None else {}),
-        })
-    return finish({
-        "episode": episode,
-        "success": False,
-        "steps": control_attempts,
-        "control_attempts": control_attempts,
-        "reason": "horizon",
-        "invalid_actions": invalid_actions,
-        "interventions": events,
-    })
+        }
+    )
 
 
 def _stage_motion_plan_batch(args, task_class):
@@ -1115,8 +1253,12 @@ def _stage_motion_plan_batch(args, task_class):
 def _motion_plan_cache_path(args):
     if getattr(args, "motion_plans", None) is not None:
         return Path(args.motion_plans)
-    return DEFAULT_RESULTS_DIR / "motion_plans" / (
-        f"{args.task}_variation{args.variation}_seed{args.seed}_n{args.episodes}_v34.json"
+    return (
+        DEFAULT_RESULTS_DIR
+        / "motion_plans"
+        / (
+            f"{args.task}_variation{args.variation}_seed{args.seed}_n{args.episodes}_v34.json"
+        )
     )
 
 
@@ -1137,8 +1279,7 @@ def _load_fixed_motion_plans(args):
     if payload.get("variation_schedule") != [args.variation] * args.episodes:
         raise RuntimeError("fixed eval-set variation schedule does not match")
     if any(
-        plan.validation.get("goal_sampling_max_attempts")
-        != args.intervention_attempts
+        plan.validation.get("goal_sampling_max_attempts") != args.intervention_attempts
         for plan in plans
     ):
         raise RuntimeError("fixed eval-set goal-sampling budget is inconsistent")
@@ -1174,9 +1315,7 @@ def _evaluate_reserved(args):
     observation_config.gripper_open = True
     observation_config.gripper_pose = True
     observation_config.task_low_dim_state = True
-    video_capture_config = (
-        LightweightCaptureConfig() if video_capture_enabled else None
-    )
+    video_capture_config = LightweightCaptureConfig() if video_capture_enabled else None
     video_cell_dir = None
     video_cell_key = None
     episode_videos = []
@@ -1201,7 +1340,9 @@ def _evaluate_reserved(args):
             args.scenario,
         )
         video_cell_dir = _prepare_v4_video_cell(video_cell_dir)
-    action_mode = _make_action_mode()
+    controller_profile = _resolved_controller_profile(args)
+    controller_config = _controller_config(controller_profile)
+    action_mode = _make_action_mode(controller_profile, controller_config)
     environment = environment_module.Environment(
         action_mode=action_mode,
         obs_config=observation_config,
@@ -1221,6 +1362,11 @@ def _evaluate_reserved(args):
             args.task,
             args.models_dir,
             timeout=args.policy_timeout,
+            policy_type=getattr(args, "policy_type", "dynamac"),
+            closed_loop_models_dir=getattr(
+                args, "closed_loop_models_dir", CLOSED_LOOP_MODELS_DIR
+            ),
+            diagnostics_dir=getattr(args, "policy_diagnostics_dir", None),
         )
         intervention_registry, trigger_authentication = (
             _authenticated_v3_dynamic_trigger(args, worker)
@@ -1239,9 +1385,7 @@ def _evaluate_reserved(args):
         if args.variation >= variation_count:
             raise ValueError("variation is outside task variation count")
         for episode in range(args.episodes):
-            episode_motion_plan = (
-                motion_plans[episode]
-            )
+            episode_motion_plan = motion_plans[episode]
             reset_seed = (
                 episode_motion_plan.validation["source_seed"]
                 if episode_motion_plan is not None
@@ -1259,6 +1403,7 @@ def _evaluate_reserved(args):
                 variation=args.variation,
                 verify_instance=False,
             )
+
             def run_formal_episode(formal_task_environment):
                 return _run_episode(
                     formal_task_environment,
@@ -1303,17 +1448,14 @@ def _evaluate_reserved(args):
 
     successes = sum(item["success"] for item in results)
     applied_by_episode = [
-        any(event["applied"] for event in item["interventions"])
-        for item in results
+        any(event["applied"] for event in item["interventions"]) for item in results
     ]
     effective_by_episode = [item["intervention_effective"] is True for item in results]
     eligible_by_episode = [item["intervention_eligible"] is True for item in results]
     preterminal_by_episode = [
         item["pre_intervention_terminal"] is True for item in results
     ]
-    complete_by_episode = [
-        item["intervention_complete"] is True for item in results
-    ]
+    complete_by_episode = [item["intervention_complete"] is True for item in results]
     complete_results = [
         item for item in results if item["intervention_complete"] is True
     ]
@@ -1346,6 +1488,7 @@ def _evaluate_reserved(args):
             else "dynamac-table-i-evaluation-v3"
         ),
         **({"release": "v4"} if release == "v4" else {}),
+        "policy_type": getattr(args, "policy_type", "dynamac"),
         "protocol_label": PROTOCOL_LABEL,
         "paper_comparable": False,
         "task": args.task,
@@ -1359,30 +1502,29 @@ def _evaluate_reserved(args):
         "variation_schedule": [args.variation] * args.episodes,
         "horizon": args.horizon,
         "evaluation_protocol_id": evaluation_protocol_id(
-            args.max_primary_action_attempts
+            args.max_primary_action_attempts,
+            controller_profile,
         ),
         "fixed_eval_set": {
             "evaluation_set_id": eval_set["payload"]["evaluation_set_id"],
             "manifest_sha256": eval_set["manifest_sha256"],
             "spec_sha256": eval_set["payload"]["spec"]["sha256"],
-            "selected_batch_sha256": eval_set["payload"][
-                "environment_plan_batches"
-            ][args.task]["sha256"],
+            "selected_batch_sha256": eval_set["payload"]["environment_plan_batches"][
+                args.task
+            ]["sha256"],
             "selected_batch_fingerprint": selected_motion_plan_payload[
                 "batch_fingerprint"
             ],
             "formal_access": "canonical_id_read_only_no_generation",
         },
         "controller": {
-            **global_ik_controller_metadata(),
+            **global_ik_controller_metadata(controller_config),
             "worker_clock_handshake_id": worker.policy_clock_semantics_id,
             "worker_gripper_timing_handshake": worker.gripper_timing,
             "formal_episode_initialization": DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
-            "final_settling": final_settling_metadata(
-                args.final_settling_steps
-            ),
+            "final_settling": final_settling_metadata(args.final_settling_steps),
             "gripper_protocol": GRIPPER_PROTOCOL.metadata(),
-            "gripper_timing": global_gripper_timing_metadata(),
+            "gripper_timing": worker.gripper_timing,
             "scene_launch": scene_launch,
             "rlbench_commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
             "pyrep_commit": "b8bd1d7a3182adcd570d001649c0849047ebf197",
@@ -1401,8 +1543,7 @@ def _evaluate_reserved(args):
             ),
             "intervention_complete_count": sum(complete_by_episode),
             "dynamic_condition_unexercised_count": sum(
-                item.get("dynamic_condition_unexercised") is True
-                for item in results
+                item.get("dynamic_condition_unexercised") is True for item in results
             ),
             "pre_trigger_success_count": sum(
                 item.get("pre_intervention_terminal") is True
@@ -1430,9 +1571,7 @@ def _evaluate_reserved(args):
             "dynamic_method": SCENARIOS[args.scenario],
             "motion_protocol": motion_protocol,
             "legacy_trigger_fraction_ignored": args.trigger_fraction,
-            "trigger_reference_domain": (
-                "successfully_committed_policy_ticks"
-            ),
+            "trigger_reference_domain": ("successfully_committed_policy_ticks"),
             "fitted_policy_steps": worker.policy_steps,
             "trigger_policy_step": args.trigger_step,
             "trigger_authentication": trigger_authentication,
@@ -1440,9 +1579,7 @@ def _evaluate_reserved(args):
             "intervention_registry_fingerprint": intervention_registry["fingerprint"],
             "smooth_motion_calls": args.smooth_steps,
             "intervention_max_attempts": args.intervention_attempts,
-            "dynamic_episode_accounting_schema": (
-                DYNAMIC_EPISODE_ACCOUNTING_SCHEMA
-            ),
+            "dynamic_episode_accounting_schema": (DYNAMIC_EPISODE_ACCOUNTING_SCHEMA),
             "pre_intervention_failure_policy": (
                 "retain_failure_with_null_intervention_effectiveness"
             ),
@@ -1455,8 +1592,7 @@ def _evaluate_reserved(args):
             "episodes_intervention_eligible": sum(eligible_by_episode),
             "episodes_pre_intervention_terminal": sum(preterminal_by_episode),
             "episodes_dynamic_condition_unexercised": sum(
-                item.get("dynamic_condition_unexercised") is True
-                for item in results
+                item.get("dynamic_condition_unexercised") is True for item in results
             ),
             "pre_trigger_successes": sum(
                 item.get("pre_intervention_terminal") is True
@@ -1491,9 +1627,7 @@ def _evaluate_reserved(args):
                 all(eligible_effective) if args.scenario != "static" else None
             ),
             "protocol_valid": (
-                True
-                if args.scenario == "static"
-                else all(covered_by_episode)
+                True if args.scenario == "static" else all(covered_by_episode)
             ),
             "source": (
                 "frozen V3 task-specific trigger plus independently staged "
@@ -1520,9 +1654,7 @@ def _evaluate_reserved(args):
                         "task": args.task,
                         "base_seed": args.seed,
                         "episodes": args.episodes,
-                        "variation_schedule": motion_plan_payload[
-                            "variation_schedule"
-                        ],
+                        "variation_schedule": motion_plan_payload["variation_schedule"],
                     },
                     "formal_access": "canonical_eval_set_read_only",
                     "staging_shutdown_before_formal_launch": True,
@@ -1543,14 +1675,11 @@ def _evaluate_reserved(args):
         "fresh_task_generation": {
             "required_per_formal_episode": True,
             "all_episodes_recorded": all(
-                isinstance(item.get("fresh_task_generation"), dict)
-                for item in results
+                isinstance(item.get("fresh_task_generation"), dict) for item in results
             ),
             "evidence": [item["fresh_task_generation"] for item in results],
         },
-        "final_settling_protocol": final_settling_metadata(
-            args.final_settling_steps
-        ),
+        "final_settling_protocol": final_settling_metadata(args.final_settling_steps),
         "motion_plan_batch_fingerprint": (
             selected_motion_plan_payload["batch_fingerprint"]
             if selected_motion_plan_payload is not None
@@ -1564,9 +1693,7 @@ def _evaluate_reserved(args):
             "cell_dir": str(video_cell_dir),
             "episodes_recorded": len(episode_videos),
             "capture_config": dict(video_capture_config.audit()),
-            "paper_success_rate": V4_VIDEO_PAPER_TARGETS[
-                (args.task, args.scenario)
-            ],
+            "paper_success_rate": V4_VIDEO_PAPER_TARGETS[(args.task, args.scenario)],
         }
 
         def finalize_videos():
@@ -1576,9 +1703,7 @@ def _evaluate_reserved(args):
                 cell_key=video_cell_key,
                 successes=successes,
                 episodes=args.episodes,
-                paper_success_rate=V4_VIDEO_PAPER_TARGETS[
-                    (args.task, args.scenario)
-                ],
+                paper_success_rate=V4_VIDEO_PAPER_TARGETS[(args.task, args.scenario)],
                 cell_metadata={
                     "evaluator": "unimanual_evaluate",
                     "task": args.task,
@@ -1587,6 +1712,7 @@ def _evaluate_reserved(args):
                     "formal_result": str(args.output),
                 },
             )
+
     else:
         video_capture_metadata = None
         finalize_videos = None
@@ -1606,6 +1732,30 @@ def build_parser():
     parser.add_argument("--task", required=True, choices=sorted(TASKS))
     parser.add_argument("--scenario", required=True, choices=sorted(SCENARIOS))
     parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
+    parser.add_argument(
+        "--policy-type",
+        choices=("dynamac", "closed_loop_multistream"),
+        default="dynamac",
+    )
+    parser.add_argument(
+        "--closed-loop-models-dir",
+        type=Path,
+        default=CLOSED_LOOP_MODELS_DIR,
+    )
+    parser.add_argument("--policy-diagnostics-dir", type=Path, default=None)
+    parser.add_argument(
+        "--controller-profile",
+        choices=(
+            "auto",
+            GLOBAL_IK_CONTROLLER_PROFILE,
+            STAGE6_IK_CONTROLLER_PROFILE,
+        ),
+        default="auto",
+        help=(
+            "IK executor profile; auto preserves the V4 controller for DynaMAC "
+            "and enables Cartesian-verified execution for the closed-loop policy."
+        ),
+    )
     parser.add_argument("--policy-python", type=Path, default=DEFAULT_POLICY_PYTHON)
     parser.add_argument("--episodes", type=int, default=200)
     parser.add_argument("--seed", type=int, default=GLOBAL_EVAL_SEED_START)
@@ -1719,9 +1869,13 @@ def main(argv=None):
         raise ValueError("trigger fraction must lie in [0, 1]")
     if args.output is None:
         family = "table_i" if args.scenario == "static" else "table_i_dynamic"
-        args.output = DEFAULT_RESULTS_DIR / family / (
-            f"{args.task}_{args.scenario}_variation{args.variation}_"
-            f"seed{args.seed}_n{args.episodes}_h{args.horizon}.json"
+        args.output = (
+            DEFAULT_RESULTS_DIR
+            / family
+            / (
+                f"{args.task}_{args.scenario}_variation{args.variation}_"
+                f"seed{args.seed}_n{args.episodes}_h{args.horizon}.json"
+            )
         )
     return evaluate(args)
 

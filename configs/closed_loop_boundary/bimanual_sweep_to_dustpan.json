@@ -5,7 +5,7 @@
   "minimum_information_weight": 0.1,
   "calibrations": {
     "left:0->1": {
-      "local_score_threshold": 0.03473042797393167,
+      "local_score_threshold": 0.49609681288406016,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     },
@@ -20,12 +20,12 @@
       "relation_thresholds": {}
     },
     "left:3->4": {
-      "local_score_threshold": 0.2571969429438917,
+      "local_score_threshold": 0.25719367324489095,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     },
     "right:0->1": {
-      "local_score_threshold": 0.0015303566788137633,
+      "local_score_threshold": 0.00730226106556535,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     },
@@ -40,7 +40,7 @@
       "relation_thresholds": {}
     },
     "right:3->4": {
-      "local_score_threshold": 0.3883092069873491,
+      "local_score_threshold": 0.38830921097330756,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     }

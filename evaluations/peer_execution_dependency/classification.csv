@@ -1,0 +1,7 @@
+task,arm,skill,mode,peer_frame,ordinary_physical_frames,relation_path_frames,eligible,reason
+bimanual_put_bottle_in_fridge,left,1,0,right_ee,fridge,,0,redundant_with_physical_task_reference
+bimanual_handover_item,left,3,0,right_ee,,item0,1,shared_or_transfer_relation
+bimanual_handover_item,left,4,0,right_ee,,item0,1,shared_or_transfer_relation
+bimanual_lift_tray,left,0,0,right_ee,tray,,0,redundant_with_physical_task_reference
+bimanual_sweep_to_dustpan,left,0,0,right_ee,broom|dustpan,,0,redundant_with_physical_task_reference
+bimanual_sweep_to_dustpan,right,0,0,left_ee,broom|dustpan,,0,redundant_with_physical_task_reference

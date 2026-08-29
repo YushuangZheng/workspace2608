@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
 
@@ -44,7 +46,7 @@ class StateTopology:
     has_cross_skill_successor: bool
 
 
-def build_state_topology(policy: object) -> dict[StateId, StateTopology]:
+def build_state_topology(policy: Any) -> dict[StateId, StateTopology]:
     """Build the only task-state graph consumed by later closed-loop modules."""
 
     if not policy.fitted:

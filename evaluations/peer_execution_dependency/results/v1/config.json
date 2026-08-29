@@ -1,0 +1,16 @@
+{
+  "schema": "essay2608-peer-execution-dependency-validation-v1",
+  "normal_demonstrations_per_task": 5,
+  "fault_data_used": false,
+  "tasks": [
+    "bimanual_put_bottle_in_fridge",
+    "bimanual_handover_item",
+    "bimanual_lift_tray",
+    "bimanual_sweep_to_dustpan"
+  ],
+  "retention_evidence": [
+    "shared_or_transfer_relation",
+    "exclusive_relative_geometry_target"
+  ],
+  "task_name_branches": false
+}

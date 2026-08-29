@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 
 import numpy as np
@@ -23,15 +22,9 @@ from .progress_filter import ProgressStatus
 from .relation_filter import RelationDecision, RelationEstimate
 from .runtime_features import RuntimeFeatures
 from .scene_factors import FactorId
+from .state_evaluator import joint_peak_normalized_pose_support
 from .state_index import StateId
 from .task_model import ClosedLoopTaskModel
-
-
-def _geometric_mean(values: list[float]) -> float:
-    if not values:
-        return 1.0
-    floor = np.finfo(np.float64).tiny
-    return float(math.exp(np.mean(np.log(np.maximum(values, floor)))))
 
 
 def _factor_observation(
@@ -39,10 +32,30 @@ def _factor_observation(
     features_by_arm: Mapping[str, RuntimeFeatures],
     preferred_arm: str,
 ) -> tuple[np.ndarray | None, float]:
+    def frame_observation(
+        arm: str,
+        features: RuntimeFeatures,
+        frame: str,
+    ) -> tuple[np.ndarray, bool, float] | None:
+        # Each arm-local observation stores the controlled end effector in the
+        # dedicated ee_pose field and only task/peer frames in frame_poses.
+        # Treating ``<arm>_ee`` as an ordinary resolvable scene entity makes a
+        # cross-arm edge observable without requiring the benchmark adapter to
+        # duplicate the robot state under an artificial frame alias.
+        if frame == f"{arm}_ee":
+            return features.ee_pose, True, 1.0
+        value = features.frame_poses.get(frame)
+        if value is None:
+            return None
+        visible = features.frame_visibility.get(frame, False)
+        reliability = features.tracking_reliability.get(frame, 0.0)
+        return value, visible, reliability
+
     ordered = [preferred_arm, *(arm for arm in features_by_arm if arm != preferred_arm)]
     for arm in ordered:
         features = features_by_arm[arm]
         if factor.kind == "node":
+            assert factor.feature is not None
             value = features.entity_configurations.get(factor.source, {}).get(
                 factor.feature
             )
@@ -55,22 +68,18 @@ def _factor_observation(
             return value, float(features.tracking_reliability.get(factor.source, 0.0))
 
         assert factor.target is not None
-        if (
-            factor.source not in features.frame_poses
-            or factor.target not in features.frame_poses
-        ):
+        source = frame_observation(arm, features, factor.source)
+        target = frame_observation(arm, features, factor.target)
+        if source is None or target is None:
             continue
-        if not features.frame_visibility.get(
-            factor.source, False
-        ) or not features.frame_visibility.get(factor.target, False):
+        source_pose, source_visible, source_reliability = source
+        target_pose, target_visible, target_reliability = target
+        if not source_visible or not target_visible:
             return None, 0.0
-        reliability = min(
-            features.tracking_reliability.get(factor.source, 0.0),
-            features.tracking_reliability.get(factor.target, 0.0),
-        )
+        reliability = min(source_reliability, target_reliability)
         value = relative_pose(
-            features.frame_poses[factor.target],
-            features.frame_poses[factor.source],
+            target_pose,
+            source_pose,
         )
         return value, float(reliability)
     return None, 0.0
@@ -152,7 +161,9 @@ class EntryGuard:
             if key.startswith(prefix)
         }
         results = []
-        compatibilities = []
+        joint_entries: list[
+            tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]
+        ] = []
         all_available = bool(selected)
         features = belief.runtime_features
         for key, distribution in sorted(selected.items()):
@@ -168,7 +179,17 @@ class EntryGuard:
             )
             compatibility = 0.0 if value is None else distribution.compatibility(value)
             if observed:
-                compatibilities.append(compatibility)
+                assert value is not None
+                joint_entries.append(
+                    (
+                        frame,
+                        features.frame_poses[frame],
+                        distribution.mean,
+                        distribution.covariance,
+                        value,
+                        reliability,
+                    )
+                )
             else:
                 all_available = False
             condition_id = ConditionId(ConditionKind.LOCAL_GOAL, self.arm_id, key)
@@ -190,11 +211,16 @@ class EntryGuard:
                     reason="observed" if observed else "goal_unobservable",
                 )
             )
-        return (
-            results,
-            _geometric_mean(compatibilities) if all_available else 0.0,
-            all_available,
-        )
+        if all_available:
+            joint_compatibility, _, _ = joint_peak_normalized_pose_support(
+                joint_entries,
+                diagonalize=(
+                    self.task_model.base_policy.config.diagonalize_transformed_covariance
+                ),
+            )
+        else:
+            joint_compatibility = 0.0
+        return results, joint_compatibility, all_available
 
     def _relation_result(
         self,
@@ -287,7 +313,11 @@ class EntryGuard:
         beliefs: Mapping[str, ClosedLoopBelief],
         mode_by_arm_skill: Mapping[str, Mapping[int, int]] | None,
     ) -> RelationVerificationRequest | None:
-        if estimate is None or estimate.decision_state != RelationDecision.UNKNOWN:
+        # LINK_PENDING marks a new grasp occurrence for which the pre-event
+        # external decision may only be persistence.  With no post-grasp
+        # motion evidence, both Unknown and that stale external decision need
+        # active verification; an already confirmed linked relation does not.
+        if estimate is None or estimate.decision_state == RelationDecision.LINKED:
             return None
         belief = beliefs[relation_arm]
         features = belief.runtime_features
@@ -302,20 +332,17 @@ class EntryGuard:
         mode_by_skill = (
             None if mode_by_arm_skill is None else mode_by_arm_skill.get(relation_arm)
         )
-        for event_id, candidate in sorted(model.link_pending_events.items()):
-            if candidate.frame_id != frame:
-                continue
-            if candidate.candidate_state != belief.progress.estimated_state:
-                continue
-            if mode_by_skill is not None:
-                mode = mode_by_skill.get(candidate.candidate_state.skill_index)
-                if mode is not None and mode != event_id.mode:
-                    continue
+        candidate = model.active_link_pending_candidate(
+            frame,
+            belief.progress.estimated_state,
+            mode_by_skill,
+        )
+        if candidate is not None:
             return RelationVerificationRequest(
                 arm_id=relation_arm,
                 frame_id=frame,
                 relation="linked",
-                pending_event_id=event_id,
+                pending_event_id=candidate.event_id,
             )
         return None
 

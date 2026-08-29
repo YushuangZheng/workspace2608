@@ -63,6 +63,45 @@ class _Gripper:
         return next(self._completion)
 
 
+class _Detection:
+    def __init__(self, detected: bool) -> None:
+        self.detected = detected
+
+    def is_detected(self, obj) -> bool:
+        del obj
+        return self.detected
+
+
+class _OwnershipGripper:
+    def __init__(self, *, open_amount: float, detected: bool, grasped=()) -> None:
+        self.open_amount = open_amount
+        self._proximity_sensor = _Detection(detected)
+        self.grasped = list(grasped)
+        self.releases = 0
+
+    def get_open_amount(self):
+        return [self.open_amount]
+
+    def get_grasped_objects(self):
+        return list(self.grasped)
+
+    def grasp(self, obj):
+        if not self._proximity_sensor.is_detected(obj):
+            return False
+        if obj not in self.grasped:
+            self.grasped.append(obj)
+        return True
+
+    def release(self):
+        self.releases += 1
+        self.grasped.clear()
+
+    def actuate(self, action, *, velocity):
+        del velocity
+        self.open_amount = float(action)
+        return True
+
+
 def _scene(*, gripper=None, right_gripper=None, left_gripper=None):
     robot = SimpleNamespace(
         gripper=gripper,
@@ -78,11 +117,13 @@ def test_default_protocol_is_demo_aligned_and_has_stable_identity() -> None:
     assert protocol.actuation_velocity == DEMONSTRATION_GRIPPER_ACTUATION_VELOCITY
     assert protocol.protocol_id == (
         "rlbench-discrete-gripper-bimanual-velocity0p04"
-        "-attach1-detach-before-open1-v1"
+        "-attach1-detach-before-open1-transfer-detect1"
+        "-retry-pending-close1-v3"
     )
     assert protocol.extend_evaluation_protocol_id("absolute-ee-v3") == (
         "absolute-ee-v3+rlbench-discrete-gripper-bimanual-velocity0p04"
-        "-attach1-detach-before-open1-v1"
+        "-attach1-detach-before-open1-transfer-detect1"
+        "-retry-pending-close1-v3"
     )
     assert protocol.extend_evaluation_protocol_id(
         protocol.extend_evaluation_protocol_id("absolute-ee-v3")
@@ -96,7 +137,15 @@ def test_default_protocol_is_demo_aligned_and_has_stable_identity() -> None:
         "velocity_aligned_with_demonstrations": True,
         "attach_grasped_objects": True,
         "detach_before_open": True,
-        "implementation": "project_subclass_preserving_vendor_action_semantics",
+        "ownership_transfer_requires_receiver_detection": True,
+        "delayed_attachment_retry": True,
+        "delayed_attachment_retry_scope": (
+            "unresolved_open_to_closed_command_until_attach_or_reopen"
+        ),
+        "implementation": (
+            "project_subclass_with_pending_close_attachment_retry_and_"
+            "receiver_proximity_checked_bimanual_transfer"
+        ),
     }
 
 
@@ -163,3 +212,72 @@ def test_bimanual_mode_stops_each_arm_independently_at_custom_velocity(
     assert scene.pyrep.steps == 2
     assert scene.task.steps == 2
     assert protocol.metadata()["velocity_aligned_with_demonstrations"] is False
+
+
+@pytest.mark.parametrize("receiver_detected", [False, True])
+def test_bimanual_ownership_transfer_requires_receiver_detection(
+    fake_vendor_gripper_modes,
+    receiver_detected,
+) -> None:
+    obj = object()
+    right = _OwnershipGripper(
+        open_amount=1.0,
+        detected=receiver_detected,
+    )
+    left = _OwnershipGripper(open_amount=0.0, detected=True, grasped=(obj,))
+    scene = _scene(right_gripper=right, left_gripper=left)
+    scene.task.get_graspable_objects = lambda: [obj]
+    mode = DiscreteGripperProtocol(bimanual=True).make_action_mode()
+    mode.action_shape = lambda robot: (2,)
+
+    mode.action(scene, np.asarray([0.0, 0.0]))
+
+    if receiver_detected:
+        assert left.grasped == []
+        assert right.grasped == [obj]
+        assert left.releases == 1
+    else:
+        assert left.grasped == [obj]
+        assert right.grasped == []
+        assert left.releases == 0
+
+
+def test_bimanual_unresolved_close_retries_attachment_without_reclosing(
+    fake_vendor_gripper_modes,
+) -> None:
+    obj = object()
+    right = _OwnershipGripper(open_amount=1.0, detected=False)
+    left = _OwnershipGripper(open_amount=0.0, detected=True, grasped=(obj,))
+    scene = _scene(right_gripper=right, left_gripper=left)
+    scene.task.get_graspable_objects = lambda: [obj]
+    mode = DiscreteGripperProtocol(bimanual=True).make_action_mode()
+    mode.action_shape = lambda robot: (2,)
+
+    mode.action(scene, np.asarray([0.0, 0.0]))
+    assert left.grasped == [obj]
+    assert right.grasped == []
+
+    right._proximity_sensor.detected = True
+    mode.action(scene, np.asarray([0.0, 0.0]))
+
+    assert left.grasped == []
+    assert right.grasped == [obj]
+    assert left.releases == 1
+
+
+def test_unimanual_unresolved_close_retries_attachment_without_reclosing(
+    fake_vendor_gripper_modes,
+) -> None:
+    obj = object()
+    gripper = _OwnershipGripper(open_amount=1.0, detected=False)
+    scene = _scene(gripper=gripper)
+    scene.task.get_graspable_objects = lambda: [obj]
+    mode = DiscreteGripperProtocol(bimanual=False).make_action_mode()
+
+    mode.action(scene, np.asarray([0.0]))
+    assert gripper.grasped == []
+
+    gripper._proximity_sensor.detected = True
+    mode.action(scene, np.asarray([0.0]))
+
+    assert gripper.grasped == [obj]

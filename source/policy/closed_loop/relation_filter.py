@@ -33,6 +33,7 @@ class RelationEstimate:
     entropy: float
     informative: bool
     decision_state: RelationDecision
+    informative_evidence_direction: RelationDecision = RelationDecision.UNKNOWN
 
     def __post_init__(self) -> None:
         for name in ("posterior", "predicted", "demonstration_prior"):
@@ -81,6 +82,7 @@ class RelationFilterConfig:
     decision_probability: float = 0.70
     residual_ratio_scale: float = 0.25
     residual_motion_floor: float = 5.0e-4
+    observation_outlier_probability: float = 0.002
     gripper_log_bias: float = 0.15
     probability_floor: float = 1.0e-12
 
@@ -103,6 +105,8 @@ class RelationFilterConfig:
             raise ValueError("稳定关系判定阈值必须大于 0.5")
         if self.residual_ratio_scale <= 0.0 or self.residual_motion_floor <= 0.0:
             raise ValueError("关系残差尺度必须为正数")
+        if not 0.0 <= self.observation_outlier_probability < 1.0:
+            raise ValueError("关系观测离群概率必须位于 [0,1)")
         if self.gripper_log_bias < 0.0 or self.probability_floor <= 0.0:
             raise ValueError("夹爪偏置必须非负且概率下限必须为正数")
 
@@ -178,14 +182,16 @@ class RelationFilter:
         linked_support = math.exp(
             -0.5 * (ratio / self.config.residual_ratio_scale) ** 2
         )
-        floor = self.config.probability_floor
-        likelihood = np.asarray(
-            [
-                floor + (1.0 - floor) * (1.0 - linked_support),
-                floor + (1.0 - floor) * linked_support,
-            ],
-            dtype=np.float64,
-        )
+        # A single relative-pose sample can be corrupted by tracking jitter or
+        # transient multi-body contact.  Mix the kinematic observation with a
+        # state-independent outlier component so one sample has finite evidence
+        # strength and the temporal relation prior remains meaningful.  Keep
+        # this physical robustness parameter separate from ``probability_floor``,
+        # which is only numerical underflow protection.
+        outlier = self.config.observation_outlier_probability
+        likelihood = (1.0 - outlier) * np.asarray(
+            [1.0 - linked_support, linked_support], dtype=np.float64
+        ) + outlier * np.asarray([0.5, 0.5], dtype=np.float64)
 
         # The gripper is weak context only.  It cannot create evidence without
         # motion because the whole likelihood is exponentiated by X below.
@@ -194,7 +200,7 @@ class RelationFilter:
         bias = self.config.gripper_log_bias * (closed_score - 0.5)
         likelihood[0] *= math.exp(-bias)
         likelihood[1] *= math.exp(bias)
-        return np.maximum(likelihood, floor)
+        return np.maximum(likelihood, self.config.probability_floor)
 
     def update(
         self,
@@ -203,10 +209,12 @@ class RelationFilter:
         previous_posteriors: Mapping[str, Array] | None = None,
         *,
         previous_decisions: Mapping[str, RelationDecision] | None = None,
+        previous_evidence_decisions: Mapping[str, RelationDecision] | None = None,
         mode_by_skill: Mapping[int, int] | None = None,
     ) -> dict[str, RelationEstimate]:
         previous_posteriors = previous_posteriors or {}
         previous_decisions = previous_decisions or {}
+        previous_evidence_decisions = previous_evidence_decisions or {}
         estimates: dict[str, RelationEstimate] = {}
         for frame in self.task_model.relation_frames:
             demo_prior = self.demonstration_prior(progress_prior, frame, mode_by_skill)
@@ -229,8 +237,8 @@ class RelationFilter:
             )
             log_posterior -= float(np.max(log_posterior))
             posterior = _normalize(np.exp(log_posterior), self.config.probability_floor)
-            entropy = float(
-                -np.sum(
+            entropy = -float(
+                np.sum(
                     posterior
                     * np.log(np.maximum(posterior, self.config.probability_floor))
                 )
@@ -240,6 +248,13 @@ class RelationFilter:
                 and reliability >= self.config.minimum_tracking_reliability
                 and information >= self.config.minimum_information_weight
             )
+            informative_evidence_direction = RelationDecision.UNKNOWN
+            if informative and not np.isclose(likelihood[0], likelihood[1]):
+                informative_evidence_direction = (
+                    RelationDecision.LINKED
+                    if likelihood[1] > likelihood[0]
+                    else RelationDecision.EXTERNAL
+                )
             posterior_decision = RelationDecision.UNKNOWN
             if (
                 entropy <= self.config.maximum_decision_entropy
@@ -255,6 +270,7 @@ class RelationFilter:
                 decision = posterior_decision
             else:
                 previous_decision = previous_decisions.get(frame)
+                evidence_decision = previous_evidence_decisions.get(frame)
                 may_persist = bool(
                     visibility
                     and reliability >= self.config.minimum_tracking_reliability
@@ -266,9 +282,19 @@ class RelationFilter:
                     }
                     and posterior_decision == previous_decision
                 )
-                decision = (
-                    previous_decision if may_persist else RelationDecision.UNKNOWN
+                evidence_supported_confirmation = bool(
+                    visibility
+                    and reliability >= self.config.minimum_tracking_reliability
+                    and evidence_decision
+                    in {RelationDecision.EXTERNAL, RelationDecision.LINKED}
+                    and posterior_decision == evidence_decision
                 )
+                if may_persist and previous_decision is not None:
+                    decision = previous_decision
+                elif evidence_supported_confirmation:
+                    decision = posterior_decision
+                else:
+                    decision = RelationDecision.UNKNOWN
             estimates[frame] = RelationEstimate(
                 frame_id=frame,
                 posterior=posterior,
@@ -279,6 +305,7 @@ class RelationFilter:
                 entropy=entropy,
                 informative=informative,
                 decision_state=decision,
+                informative_evidence_direction=informative_evidence_direction,
             )
         return estimates
 

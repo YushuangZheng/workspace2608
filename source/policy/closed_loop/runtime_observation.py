@@ -39,6 +39,7 @@ class RuntimeObservation:
     tracking_reliability: dict[str, float]
     frame_visibility: dict[str, bool]
     entity_configurations: dict[str, dict[str, Array]] = field(default_factory=dict)
+    previous_command_covariance: Array | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.tick, (bool, np.bool_)) or not isinstance(
@@ -118,6 +119,24 @@ class RuntimeObservation:
         object.__setattr__(self, "tracking_reliability", reliability)
         object.__setattr__(self, "frame_visibility", visibility)
         object.__setattr__(self, "entity_configurations", configurations)
+        if self.previous_command_covariance is None:
+            command_covariance = None
+        else:
+            command_covariance = np.asarray(
+                self.previous_command_covariance, dtype=np.float64
+            )
+            if command_covariance.shape != (6, 6) or not np.all(
+                np.isfinite(command_covariance)
+            ):
+                raise ValueError("previous_command_covariance 必须为有限 [6,6] 矩阵")
+            command_covariance = 0.5 * (command_covariance + command_covariance.T)
+            if np.linalg.eigvalsh(command_covariance).min() <= 0.0:
+                raise ValueError("previous_command_covariance 必须为正定矩阵")
+        object.__setattr__(
+            self,
+            "previous_command_covariance",
+            None if command_covariance is None else command_covariance.copy(),
+        )
 
     def visibility(self, frame: str) -> bool:
         """Return explicit visibility, defaulting available simulator poses to true."""
@@ -144,6 +163,7 @@ class RuntimeObservation:
         frame_visibility: Mapping[str, bool] | None = None,
         additional_frame_poses: Mapping[str, Array] | None = None,
         entity_configurations: Mapping[str, Mapping[str, Array]] | None = None,
+        previous_command_covariance: Array | None = None,
     ) -> RuntimeObservation:
         frames = {name: value.copy() for name, value in observation.frames.items()}
         if additional_frame_poses is not None:
@@ -161,6 +181,7 @@ class RuntimeObservation:
                 entity: dict(fields)
                 for entity, fields in (entity_configurations or {}).items()
             },
+            previous_command_covariance=previous_command_covariance,
         )
 
 

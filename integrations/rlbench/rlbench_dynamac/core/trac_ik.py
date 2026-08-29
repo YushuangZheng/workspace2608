@@ -208,7 +208,9 @@ def _live_panda_chain_urdf(arm: Any, lower: Array, upper: Array) -> tuple[str, A
     fixed_after_joint: list[Array] = []
     for index, joint in enumerate(joints):
         downstream = joints[index + 1] if index < 6 else tip
-        fixed_after_joint.append(_orthonormalized(_rigid_matrix(downstream, relative_to=joint)))
+        fixed_after_joint.append(
+            _orthonormalized(_rigid_matrix(downstream, relative_to=joint))
+        )
 
     lines = ['<?xml version="1.0"?>', '<robot name="rlbench_live_panda">']
     lines.append('  <link name="base"/>')
@@ -366,7 +368,14 @@ class AlignedTracIKDistanceSolver:
             raise RuntimeError("TRAC-IK Panda model no longer matches the live arm")
         return translation, rotation
 
-    def solve(self, target_pose: Any) -> TracIKDistanceResult | None:
+    def _solve(
+        self,
+        target_pose: Any,
+        *,
+        cartesian_bounds: Array,
+        fk_translation_max_m: float,
+        fk_rotation_max_rad: float,
+    ) -> TracIKDistanceResult | None:
         current = self._current_joints()
         self._verify_live_alignment(current)
         target_world = _matrix_from_xyzw_pose(target_pose)
@@ -381,7 +390,7 @@ class AlignedTracIKDistanceSolver:
             target_model[:3, 3],
             target_model[:3, :3],
             seed_jnt_values=current.copy(),
-            bounds=self.config.cartesian_bounds.copy(),
+            bounds=np.asarray(cartesian_bounds, dtype=np.float64).copy(),
         )
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         if candidate is None:
@@ -401,10 +410,7 @@ class AlignedTracIKDistanceSolver:
             return None
         predicted_world = self.world_from_model_root @ self._model_fk(joints)
         translation, rotation = _pose_error(predicted_world, target_world)
-        if (
-            translation > self.config.fk_translation_max_m
-            or rotation > self.config.fk_rotation_max_rad
-        ):
+        if translation > fk_translation_max_m or rotation > fk_rotation_max_rad:
             return None
         return TracIKDistanceResult(
             joints=joints.copy(),
@@ -414,4 +420,12 @@ class AlignedTracIKDistanceSolver:
             fk_translation_error_m=translation,
             fk_rotation_error_rad=rotation,
             bounded_cartesian_api_used=True,
+        )
+
+    def solve(self, target_pose: Any) -> TracIKDistanceResult | None:
+        return self._solve(
+            target_pose,
+            cartesian_bounds=self.config.cartesian_bounds,
+            fk_translation_max_m=self.config.fk_translation_max_m,
+            fk_rotation_max_rad=self.config.fk_rotation_max_rad,
         )

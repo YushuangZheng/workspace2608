@@ -22,6 +22,7 @@ from .relation_filter import RelationDecision, RelationEstimate
 from .relation_goals import RelationGoal, RelationGoalKind, RelationGoalPlanner
 from .relation_verification import (
     AuxiliaryAction,
+    ProbeExitReason,
     RelationVerificationConfig,
     RelationVerificationController,
     RelationVerificationStep,
@@ -169,6 +170,11 @@ class RecoveryCycleResult:
     completed_goals: tuple[RelationGoal, ...]
     legal_reentry_states: tuple[StateId, ...]
     failure: RecoveryFailure | None = None
+    link_probe_phase: str | None = None
+    link_probe_exit_reason: ProbeExitReason | None = None
+    link_probe_cycles: int = 0
+    link_return_cycles: int = 0
+    link_probe_motion: float = 0.0
 
     @property
     def terminal(self) -> bool:
@@ -206,6 +212,7 @@ class RecoveryTriggerTracker:
         *,
         transition_requests: Mapping[str, TransitionRequest] | None = None,
         beliefs: Mapping[str, ClosedLoopBelief] | None = None,
+        mode_by_arm_skill: Mapping[str, Mapping[int, int]] | None = None,
     ) -> RecoveryTriggerDecision:
         transition_requests = transition_requests or {}
         beliefs = beliefs or {}
@@ -258,6 +265,53 @@ class RecoveryTriggerTracker:
                 expected = self._required_decision(condition.required_state)
                 if expected == estimate.decision_state:
                     continue
+                if (
+                    condition_id.kind == ConditionKind.GUARD_RELATION
+                    and relation_arm != arm
+                ):
+                    # A peer guard is normally only a readiness wait: the other
+                    # arm may not have reached the relation-changing event yet.
+                    # It becomes a repair request only when that arm has already
+                    # reached a matching LINK_PENDING occurrence and reliable
+                    # online evidence resolves the required LINK as external.
+                    # This routes the repair to the relation-owning arm without
+                    # turning every directional dependency into recovery.
+                    if (
+                        expected != RelationDecision.LINKED
+                        or estimate.decision_state != RelationDecision.EXTERNAL
+                    ):
+                        continue
+                    relation_state = belief.progress.estimated_state
+                    configured_mode = None
+                    if mode_by_arm_skill is not None:
+                        configured_mode = mode_by_arm_skill.get(relation_arm, {}).get(
+                            relation_state.skill_index
+                        )
+                    candidate_modes = (
+                        (configured_mode,)
+                        if configured_mode is not None
+                        else tuple(
+                            sorted(
+                                {
+                                    event_id.mode
+                                    for event_id in self.task_models[
+                                        relation_arm
+                                    ].link_pending_events
+                                    if event_id.frame_id == frame
+                                }
+                            )
+                        )
+                    )
+                    registry = EpisodeLinkAnchorRegistry(self.task_models[relation_arm])
+                    if not any(
+                        registry.has_pending_recovery_candidate(
+                            frame,
+                            relation_state,
+                            candidate_mode,
+                        )
+                        for candidate_mode in candidate_modes
+                    ):
+                        continue
                 key = (arm, request.boundary_id.token, condition_id.token)
                 active_boundary_keys.add(key)
                 count = self._boundary_counts.get(key, 0) + 1
@@ -288,9 +342,11 @@ class RelationRecoveryController:
         self,
         anchor_registry: EpisodeLinkAnchorRegistry,
         config: RecoveryConfig = RecoveryConfig(),
+        verification_config: RelationVerificationConfig = RelationVerificationConfig(),
     ) -> None:
         self.anchor_registry = anchor_registry
         self.config = config
+        self.verification_config = verification_config
         self.reset()
 
     def reset(self) -> None:
@@ -305,6 +361,16 @@ class RelationRecoveryController:
         self._attempts = 0
         self._total_cycles = 0
         self._goal_had_expected_information = False
+        self._link_probe_phase: str | None = None
+        self._link_probe_entry_pose: Array | None = None
+        self._link_probe_direction: Array | None = None
+        self._link_probe_path: list[Array] = []
+        self._link_return_path: list[Array] = []
+        self._link_probe_cycles = 0
+        self._link_return_cycles = 0
+        self._link_probe_motion = 0.0
+        self._link_probe_exit_reason: ProbeExitReason | None = None
+        self._link_probe_decision = RelationDecision.UNKNOWN
         self._completed: list[RelationGoal] = []
         self._reentry_states: list[StateId] = []
         self._reentry_cycles = 0
@@ -343,6 +409,12 @@ class RelationRecoveryController:
     def legal_reentry_states(self) -> tuple[StateId, ...]:
         return tuple(self._reentry_states)
 
+    @property
+    def has_relation_goals(self) -> bool:
+        """Whether this recovery attempt ever contained a relation repair."""
+
+        return bool(self._goals)
+
     @staticmethod
     def _pose(value: Array, name: str) -> Array:
         pose = np.asarray(value, dtype=np.float64)
@@ -366,6 +438,16 @@ class RelationRecoveryController:
         self._open_cycles = 0
         self._attempts = max(1, self._attempts + 1)
         self._goal_had_expected_information = False
+        self._link_probe_phase = None
+        self._link_probe_entry_pose = None
+        self._link_probe_direction = None
+        self._link_probe_path = []
+        self._link_return_path = []
+        self._link_probe_cycles = 0
+        self._link_return_cycles = 0
+        self._link_probe_motion = 0.0
+        self._link_probe_exit_reason = None
+        self._link_probe_decision = RelationDecision.UNKNOWN
         self._unlink_target = None
 
     def _action(
@@ -406,7 +488,16 @@ class RelationRecoveryController:
         for state in goal.legal_reentry_states:
             if state not in self._reentry_states:
                 self._reentry_states.append(state)
-        if goal.kind == RelationGoalKind.UNLINK:
+        if (
+            goal.kind == RelationGoalKind.LINK
+            and goal.link_anchor is not None
+            and goal.link_anchor.source == "pending_recovery"
+        ):
+            # The Pending trajectory was only a repair template.  Promote it
+            # to this episode's relation origin after recovery has obtained
+            # informative linked evidence, never before.
+            self.anchor_registry.activate_pending(goal.link_anchor.origin_event_id)
+        elif goal.kind == RelationGoalKind.UNLINK:
             self.anchor_registry.release(goal.frame_id)
         self._goal_index += 1
         self._attempts = 0
@@ -425,7 +516,131 @@ class RelationRecoveryController:
             completed_goals=tuple(self._completed),
             legal_reentry_states=tuple(self._reentry_states),
             failure=self._failure,
+            link_probe_phase=self._link_probe_phase,
+            link_probe_exit_reason=self._link_probe_exit_reason,
+            link_probe_cycles=self._link_probe_cycles,
+            link_return_cycles=self._link_return_cycles,
+            link_probe_motion=self._link_probe_motion,
         )
+
+    def _begin_link_probe(
+        self,
+        current: Array,
+        waypoint_poses: Sequence[Array],
+    ) -> None:
+        history = [self._pose(value, "LINK 恢复锚点") for value in waypoint_poses]
+        history = history[-self.verification_config.task_history_length :]
+        if len(history) < 2:
+            self._fail("link_probe_direction_unavailable")
+            return
+        displacement = history[-1][:3] - history[0][:3]
+        norm = float(np.linalg.norm(displacement))
+        if norm < self.verification_config.minimum_approach_displacement:
+            self._fail("link_probe_direction_unavailable")
+            return
+        self._link_probe_phase = "probe"
+        self._link_probe_entry_pose = current.copy()
+        self._link_probe_direction = displacement / norm
+        self._link_probe_path = [current.copy()]
+
+    def _link_probe_stable(self, estimate: RelationEstimate) -> RelationDecision:
+        if (
+            self._link_probe_motion >= self.verification_config.minimum_probe_motion
+            and estimate.decision_state != RelationDecision.UNKNOWN
+            and estimate.informative
+            and estimate.information_weight
+            >= self.verification_config.minimum_information_weight
+        ):
+            return estimate.decision_state
+        return RelationDecision.UNKNOWN
+
+    def _begin_link_probe_return(self, reason: ProbeExitReason) -> None:
+        assert self._link_probe_entry_pose is not None
+        self._link_probe_exit_reason = reason
+        path = [value.copy() for value in reversed(self._link_probe_path[:-1])]
+        if not path or not np.allclose(path[-1], self._link_probe_entry_pose):
+            path.append(self._link_probe_entry_pose.copy())
+        self._link_return_path = path
+        self._link_probe_phase = "return"
+
+    def _update_link_probe(
+        self,
+        *,
+        current: Array,
+        estimate: RelationEstimate,
+        final_gripper: Array,
+        final_covariance: Array,
+    ) -> RecoveryCycleResult:
+        if self._link_probe_phase == "probe":
+            if not np.allclose(current, self._link_probe_path[-1]):
+                self._link_probe_motion += float(
+                    np.linalg.norm(current[:3] - self._link_probe_path[-1][:3])
+                )
+                self._link_probe_path.append(current.copy())
+            stable = self._link_probe_stable(estimate)
+            if stable != RelationDecision.UNKNOWN:
+                self._link_probe_decision = stable
+                self._begin_link_probe_return(ProbeExitReason.STABLE_RELATION)
+            elif (
+                self._link_probe_cycles >= self.verification_config.maximum_probe_cycles
+            ):
+                self._begin_link_probe_return(ProbeExitReason.TIMEOUT)
+            else:
+                assert self._link_probe_entry_pose is not None
+                assert self._link_probe_direction is not None
+                self._link_probe_cycles += 1
+                distance = (
+                    self.verification_config.probe_speed
+                    * self.verification_config.control_period_seconds
+                    * self._link_probe_cycles
+                )
+                target = self._link_probe_entry_pose.copy()
+                target[:3] -= distance * self._link_probe_direction
+                return self._snapshot(
+                    self._action(
+                        target,
+                        final_gripper,
+                        "recovery_link_probe",
+                        final_covariance,
+                    )
+                )
+
+        if self._link_probe_phase == "return":
+            stable = self._link_probe_stable(estimate)
+            if stable != RelationDecision.UNKNOWN:
+                self._link_probe_decision = stable
+            self._link_return_cycles += 1
+            if (
+                self._link_return_cycles
+                > self.verification_config.maximum_return_cycles
+            ):
+                self._fail("link_probe_return_timeout")
+                return self._snapshot(None)
+            while (
+                self._link_return_path
+                and np.linalg.norm(current[:3] - self._link_return_path[0][:3])
+                <= self.verification_config.return_position_tolerance
+            ):
+                self._link_return_path.pop(0)
+            if self._link_return_path:
+                return self._snapshot(
+                    self._action(
+                        self._link_return_path[0],
+                        final_gripper,
+                        "recovery_link_return",
+                        final_covariance,
+                    )
+                )
+            if (
+                self._link_probe_decision == RelationDecision.LINKED
+                and self._goal_had_expected_information
+            ):
+                self._complete_goal()
+            else:
+                self._retry_or_fail("link_relation_not_recovered")
+            return self._snapshot(None)
+
+        raise RuntimeError("LINK 恢复主动验证阶段无效")
 
     def update(
         self,
@@ -501,23 +716,25 @@ class RelationRecoveryController:
 
             if self._goal_phase == RelationGoalPhase.VERIFY:
                 if (
-                    estimate.decision_state == RelationDecision.LINKED
+                    self._link_probe_phase is None
+                    and estimate.decision_state == RelationDecision.LINKED
                     and self._goal_had_expected_information
                 ):
                     self._complete_goal()
                     return self._snapshot(None)
-                self._verify_cycles += 1
-                if self._verify_cycles > self.config.maximum_relation_verify_cycles:
-                    self._retry_or_fail("link_relation_not_recovered")
-                    return self._snapshot(None)
                 final = waypoints[-1]
-                return self._snapshot(
-                    self._action(
-                        final.pose,
-                        final.gripper_command,
-                        "recovery_link_verify",
-                        final.covariance,
+                if self._link_probe_phase is None:
+                    self._begin_link_probe(
+                        current,
+                        tuple(waypoint.pose for waypoint in waypoints),
                     )
+                    if self.phase == RecoveryPhase.FAILED:
+                        return self._snapshot(None)
+                return self._update_link_probe(
+                    current=current,
+                    estimate=estimate,
+                    final_gripper=final.gripper_command,
+                    final_covariance=final.covariance,
                 )
 
         else:
@@ -614,9 +831,15 @@ class ClosedLoopRecoveryManager:
         )
         self.verification = RelationVerificationController(config.verification)
         self.recovery = RelationRecoveryController(
-            self.anchor_registry, config.recovery
+            self.anchor_registry,
+            config.recovery,
+            config.verification,
         )
-        self.reentry = ReentrySelector(task_model, config.reentry)
+        self.reentry = ReentrySelector(
+            task_model,
+            config.reentry,
+            robot_covariance_inflation=config.recovery.covariance_inflation,
+        )
         self.reset()
 
     def reset(self) -> None:
@@ -642,6 +865,44 @@ class ClosedLoopRecoveryManager:
         maximum = self.verification.config.task_history_length
         self._task_pose_history = self._task_pose_history[-maximum:]
 
+    def can_begin_verification(
+        self,
+        request: RelationVerificationRequest,
+        belief: ClosedLoopBelief,
+        *,
+        task_state: StateId,
+        grasp_event: Hashable,
+    ) -> bool:
+        """Return whether a Pending request is eligible and re-armed now.
+
+        Boundary and role inference may keep emitting the same request while
+        its guard remains unsatisfied.  A completed attempt is therefore a
+        normal no-op until the relation decision, task state, or grasp-event
+        identity changes; it is not an exceptional policy failure.
+        """
+
+        candidate = self.task_model.link_pending_events.get(request.pending_event_id)
+        estimate = belief.relation_estimates.get(request.frame_id)
+        features = belief.runtime_features
+        return bool(
+            self.mode == ExecutionMode.TASK
+            and candidate is not None
+            and request.pending_event_id == candidate.event_id
+            and estimate is not None
+            and estimate.decision_state != RelationDecision.LINKED
+            and features.frame_pair_available.get(request.frame_id, False)
+            and features.paired_tracking_reliability.get(request.frame_id, 0.0)
+            >= self.verification.config.minimum_tracking_reliability
+            and estimate.information_weight
+            < self.verification.config.minimum_information_weight
+            and self.verification.can_attempt(
+                candidate,
+                task_state=task_state,
+                relation_state=estimate.decision_state,
+                grasp_event=grasp_event,
+            )
+        )
+
     def begin_verification(
         self,
         request: RelationVerificationRequest,
@@ -662,14 +923,14 @@ class ClosedLoopRecoveryManager:
         features = belief.runtime_features
         if (
             estimate is None
-            or estimate.decision_state != RelationDecision.UNKNOWN
+            or estimate.decision_state == RelationDecision.LINKED
             or not features.frame_pair_available.get(request.frame_id, False)
             or features.paired_tracking_reliability.get(request.frame_id, 0.0)
             < self.verification.config.minimum_tracking_reliability
             or estimate.information_weight
             >= self.verification.config.minimum_information_weight
         ):
-            raise ValueError("主动验证请求不满足可见可靠但动作激励不足条件")
+            raise ValueError("主动验证请求不满足 Pending、可见可靠且动作激励不足条件")
         self.verification.start(
             request,
             candidate,
@@ -769,15 +1030,55 @@ class ClosedLoopRecoveryManager:
         permitted_boundaries: frozenset[BoundaryId] = frozenset(),
         mode_by_skill: Mapping[int, int] | None = None,
     ) -> RecoveryManagerResult:
+        evaluation = self.select_reentry(
+            belief,
+            permitted_boundaries=permitted_boundaries,
+            mode_by_skill=mode_by_skill,
+        )
+        return self.commit_reentry(
+            evaluation,
+            belief=belief,
+            observation=observation,
+            belief_updater=belief_updater,
+            execution_controller=execution_controller,
+        )
+
+    def select_reentry(
+        self,
+        belief: ClosedLoopBelief,
+        *,
+        permitted_boundaries: frozenset[BoundaryId] = frozenset(),
+        mode_by_skill: Mapping[int, int] | None = None,
+    ) -> ReentryEvaluation:
+        """Validate a reentry candidate without mutating recovery or cursors."""
+
         if self.mode != ExecutionMode.RECOVERY or self._frozen_reference is None:
             raise RuntimeError("当前没有可执行的恢复重入")
-        evaluation = self.reentry.select(
+        if self.recovery.phase != RecoveryPhase.REENTRY:
+            raise RuntimeError("关系恢复尚未进入重入阶段")
+        return self.reentry.select(
             self.recovery.legal_reentry_states,
             belief,
             current_reference=self._frozen_reference,
             permitted_boundaries=permitted_boundaries,
             mode_by_skill=mode_by_skill,
         )
+
+    def commit_reentry(
+        self,
+        evaluation: ReentryEvaluation,
+        *,
+        belief: ClosedLoopBelief,
+        observation: RuntimeObservation,
+        belief_updater: BeliefUpdater,
+        execution_controller: ClosedLoopExecutionController,
+    ) -> RecoveryManagerResult:
+        """Atomically apply one already-selected state and finish this attempt."""
+
+        if self.mode != ExecutionMode.RECOVERY or self._frozen_reference is None:
+            raise RuntimeError("当前没有可提交的恢复重入")
+        if self.recovery.phase != RecoveryPhase.REENTRY:
+            raise RuntimeError("关系恢复尚未进入可提交的重入阶段")
         decision = evaluation.decision
         if decision is not None:
             ReentrySelector.apply(

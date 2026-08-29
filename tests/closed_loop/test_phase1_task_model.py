@@ -19,6 +19,7 @@ from essay2608.policy import (
     product_of_experts,
 )
 from essay2608.policy.closed_loop import (
+    BoundaryId,
     ClosedLoopTaskModel,
     ClosedLoopTaskModelBuilder,
     ClosedLoopTaskModelConfig,
@@ -31,7 +32,11 @@ from essay2608.policy.closed_loop.task_model_builder import (
     _fit_pose_samples,
     _relation_prior,
 )
-from essay2608.policy.dynamac import pose_compose, pose_inverse
+from essay2608.policy.dynamac import (
+    pose_compose,
+    pose_inverse,
+    synchronized_bimanual_demonstrations,
+)
 from integrations.rlbench.rlbench_dynamac.core.task_specs import get_task_spec
 
 
@@ -272,6 +277,7 @@ def test_builder_creates_one_unified_sparse_model() -> None:
     )
     for boundary in model.boundaries.values():
         duration = policy.skills[boundary.source_skill].duration
+        skill = policy.skills[boundary.source_skill]
         expected_indices = tuple(range(max(0, duration - 3), duration))
         assert (
             tuple(state.local_index for state in boundary.terminal_window)
@@ -297,6 +303,24 @@ def test_builder_creates_one_unified_sparse_model() -> None:
                 *boundary.relation_conditions,
             )
         )
+        # Local completion supervises the actual frozen skill executor.  Its
+        # terminal targets therefore reuse the base model distributions fitted
+        # from the normal demonstrations instead of performing a second fit
+        # whose quaternion gauge may differ from a released checkpoint.
+        for mode in range(len(skill.mode_priors)):
+            for frame in skill.selected_frames:
+                stream = skill.streams[frame]
+                if not stream.is_selected(mode):
+                    continue
+                goal = boundary.local_completion_model.goal_distributions[
+                    f"m{mode}:{frame}"
+                ]
+                np.testing.assert_array_equal(
+                    goal.mean, stream.mean[mode, duration - 1]
+                )
+                np.testing.assert_array_equal(
+                    goal.covariance, stream.covariance[mode, duration - 1]
+                )
     second_boundary = next(
         boundary for boundary in model.boundaries.values() if boundary.source_skill == 1
     )
@@ -653,6 +677,18 @@ def test_link_pending_preserves_unexcited_candidate_without_creating_link() -> N
     assert candidate.gripper_commands.shape[0] == 7
     assert np.any(candidate.gripper_commands > 0.0)
     assert np.any(candidate.gripper_commands < 0.0)
+    np.testing.assert_allclose(
+        model.state(candidate.candidate_state).demo_relation_priors["object"][0],
+        [0.3, 0.7],
+    )
+    assert all(
+        np.allclose(
+            model.state(state).demo_relation_priors["object"][0],
+            [0.3, 0.7],
+        )
+        for state in model.skill_states[candidate.candidate_state.skill_index]
+        if state >= candidate.candidate_state
+    )
 
     class ConfirmedLaterBuilder(PendingOnlyBuilder):
         def _joint_relation_event_probability_sequence(
@@ -1236,6 +1272,203 @@ def test_bimanual_builder_reuses_synchronized_peer_frames() -> None:
         assert guaranteed.isdisjoint(left_boundary.relation_conditions)
 
 
+def test_bimanual_peer_execution_dependency_filters_only_redundant_modes(
+    tmp_path: Path,
+) -> None:
+    left = demonstrations()
+    right = demonstrations(right_arm=True)
+    policy = BimanualDynaMAC(config=config()).fit(left, right)
+    left_model, right_model = ClosedLoopTaskModelBuilder().build_bimanual(
+        policy,
+        left,
+        right,
+        recoverable_frames=("object",),
+    )
+
+    for model, peer_frame in (
+        (left_model, "right_ee"),
+        (right_model, "left_ee"),
+    ):
+        records = model.builder_config["peer_execution_dependencies"]
+        by_skill = {record["skill_index"]: record for record in records}
+
+        # Skill 0 is an independent approach to ordinary physical references.
+        # Synchronized demonstrations alone must not turn the other arm into a
+        # continuous action reference.
+        assert by_skill[0]["eligible"] is False
+        assert by_skill[0]["reason"] == "redundant_with_physical_task_reference"
+        assert peer_frame not in model.state(model.skill_states[0][0]).selected_frames
+        first_boundary = next(
+            boundary
+            for boundary in model.boundaries.values()
+            if boundary.source_skill == 0
+        )
+        assert all(
+            not key.endswith(f":{peer_frame}")
+            for key in first_boundary.local_completion_model.goal_distributions
+        )
+
+        # Once both arm models contain the same event-confirmed object
+        # relation, the same peer stream is retained by the general graph rule.
+        assert by_skill[1]["eligible"] is True
+        assert by_skill[1]["reason"] == "shared_or_transfer_relation"
+        assert peer_frame in model.state(model.skill_states[1][0]).selected_frames
+
+        path = tmp_path / f"{model.arm_id}.npz"
+        model.save(path)
+        restored = ClosedLoopTaskModel.load(path, model.base_policy)
+        assert restored.schema_version == 4
+        assert (
+            restored.state(restored.skill_states[0][0]).selected_frames
+            == model.state(model.skill_states[0][0]).selected_frames
+        )
+        assert (
+            restored.state(restored.skill_states[1][0]).selected_frames
+            == model.state(model.skill_states[1][0]).selected_frames
+        )
+
+
+def test_peer_only_directed_geometry_is_not_confused_with_constant_synchrony() -> None:
+    left = demonstrations()
+    right = demonstrations(right_arm=True)
+    policy = BimanualDynaMAC(config=config()).fit(left, right)
+    paired_left, paired_right = synchronized_bimanual_demonstrations(left, right)
+
+    skill = policy.left.skills[0]
+    skill.selected_frames = ("right_ee", "virtual_skill_0")
+    for name, stream in skill.streams.items():
+        selected = name in skill.selected_frames
+        stream.selected_by_eq6[:] = selected
+        stream.active = (
+            stream.availability.copy()
+            if selected
+            else np.zeros_like(stream.availability, dtype=bool)
+        )
+
+    def peer_demonstrations(directed: bool) -> list[DynaMACDemonstration]:
+        result = []
+        for demonstration in paired_left:
+            frames = {
+                name: values.copy() for name, values in demonstration.frames.items()
+            }
+            if directed:
+                frames["right_ee"] = np.repeat(
+                    pose([0.78, 0.25, 0.25])[None],
+                    len(demonstration.ee_pose),
+                    axis=0,
+                )
+            else:
+                frames["right_ee"] = np.stack(
+                    [
+                        pose_compose(current, pose([0.0, 0.22, 0.0]))
+                        for current in demonstration.ee_pose
+                    ]
+                )
+            result.append(
+                DynaMACDemonstration(
+                    ee_pose=demonstration.ee_pose,
+                    action_pose=demonstration.action_pose,
+                    gripper=demonstration.gripper,
+                    frames=frames,
+                    skill=demonstration.skill,
+                    name=demonstration.name,
+                )
+            )
+        return result
+
+    builder = ClosedLoopTaskModelBuilder()
+    right_model = builder.build(
+        policy.right,
+        paired_right,
+        arm_id="right",
+        recoverable_frames=(),
+    )
+    outcomes = {}
+    for label, directed in (("directed", True), ("constant", False)):
+        values = peer_demonstrations(directed)
+        left_model = builder.build(
+            policy.left,
+            values,
+            arm_id="left",
+            recoverable_frames=(),
+        )
+        record = builder._peer_execution_dependency_records(
+            left_model,
+            right_model,
+            values,
+        )[0]
+        outcomes[label] = record
+
+    assert outcomes["directed"]["eligible"] is True
+    assert outcomes["directed"]["reason"] == "exclusive_relative_geometry_target"
+    assert outcomes["constant"]["eligible"] is False
+    assert outcomes["constant"]["reason"] == "no_cross_arm_execution_dependency"
+
+
+def test_peer_relative_completion_reuses_standard_boundary_scene_condition() -> None:
+    left = demonstrations()
+    right = demonstrations(right_arm=True)
+    policy = BimanualDynaMAC(config=config()).fit(left, right)
+    paired_left, paired_right = synchronized_bimanual_demonstrations(left, right)
+    builder = ClosedLoopTaskModelBuilder()
+    left_model = builder.build(
+        policy.left,
+        paired_left,
+        arm_id="left",
+        recoverable_frames=("object",),
+    )
+    right_model = builder.build(
+        policy.right,
+        paired_right,
+        arm_id="right",
+        recoverable_frames=("object",),
+    )
+
+    # Remove the reciprocal right->left terminal dependency.  The remaining
+    # left terminal goal is expressed relative to right_ee, so only the right
+    # boundary must wait for the shared physical configuration.
+    for boundary_id, boundary in tuple(right_model.boundaries.items()):
+        local = boundary.local_completion_model
+        kept_goals = {
+            key: value
+            for key, value in local.goal_distributions.items()
+            if not key.endswith(":left_ee")
+        }
+        kept_thresholds = {
+            key: value
+            for key, value in local.minimum_goal_log_likelihood.items()
+            if key in kept_goals
+        }
+        right_model.boundaries[boundary_id] = replace(
+            boundary,
+            local_completion_model=replace(
+                local,
+                goal_distributions=kept_goals,
+                minimum_goal_log_likelihood=kept_thresholds,
+            ),
+        )
+
+    builder._complete_bimanual_boundary_scene_conditions(
+        left_model,
+        right_model,
+        paired_left,
+        paired_right,
+    )
+    factor = FactorId("edge", "left_ee", "right_ee")
+    assert all(
+        factor not in boundary.scene_conditions
+        and boundary.affected_arms == ("left",)
+        and boundary.transaction_group is None
+        for boundary in left_model.boundaries.values()
+    )
+    assert all(
+        factor in boundary.scene_conditions
+        and boundary.affected_arms == ("left", "right")
+        and boundary.transaction_group is None
+        for boundary in right_model.boundaries.values()
+    )
+
+
 def test_bimanual_transaction_group_uses_confirmed_boundary_straddling_links() -> None:
     left = demonstrations()
     right = demonstrations(right_arm=True)
@@ -1387,6 +1620,92 @@ def test_transaction_group_does_not_promote_directional_relation_guard() -> None
     right_model.link_anchors.clear()
 
     builder._assign_transaction_groups(left_model, right_model, left, right)
+    assert left_model.boundaries[left_id].transaction_group is None
+    assert right_model.boundaries[right_id].transaction_group is None
+
+
+def test_handover_evidence_adds_only_receiver_linked_directional_guard() -> None:
+    left = demonstrations()
+    right = demonstrations(right_arm=True)
+    policy = BimanualDynaMAC(config=config()).fit(left, right)
+    paired_left, paired_right = synchronized_bimanual_demonstrations(left, right)
+    builder = ClosedLoopTaskModelBuilder()
+    left_model = builder.build(
+        policy.left,
+        paired_left,
+        arm_id="left",
+        recoverable_frames=("object",),
+    )
+    right_model = builder.build(
+        policy.right,
+        paired_right,
+        arm_id="right",
+        recoverable_frames=("object",),
+    )
+    left_id = BoundaryId("left", 1, 2)
+    right_id = BoundaryId("right", 1, 2)
+
+    # Isolate the transfer evidence.  The synthetic left arm already holds and
+    # releases object at this boundary.  Make the right command open before the
+    # boundary and close at the entry, then attach the all-demo Pending event
+    # that an unexcited receiver grasp would produce.
+    for model, boundary_id in ((left_model, left_id), (right_model, right_id)):
+        boundary = model.boundaries[boundary_id]
+        model.boundaries[boundary_id] = replace(
+            boundary,
+            local_completion_model=replace(
+                boundary.local_completion_model,
+                own_relation_conditions={},
+            ),
+            relation_conditions={},
+            scene_conditions={},
+            scene_condition_thresholds={},
+            condition_reliability={},
+            affected_arms=(model.arm_id,),
+            transaction_group=None,
+        )
+    right_model.state(right_model.skill_states[1][-1]).gripper_commands[:] = 1.0
+    candidate_state = right_model.skill_states[2][0]
+    right_model.state(candidate_state).gripper_commands[:] = -1.0
+    event_id = RelationEventId("right", "object", 2, 0, 0, "link_pending")
+    right_model.link_pending_events[event_id] = LinkPendingCandidate(
+        event_id=event_id,
+        arm_id="right",
+        frame_id="object",
+        candidate_state=candidate_state,
+        context_state=right_model.skill_states[1][-2],
+        local_means=np.stack([pose([0.0, 0.0, 0.0])]),
+        local_covariances=np.stack([np.eye(6) * 0.01]),
+        gripper_commands=np.asarray([[-1.0]]),
+        support_fraction=1.0,
+        demonstration_indices=(0, 1, 2, 3, 4),
+        event_local_indices=(0, 0, 0, 0, 0),
+    )
+
+    builder._complete_bimanual_transfer_relation_conditions(
+        left_model,
+        right_model,
+        paired_left,
+        paired_right,
+    )
+    left_boundary = left_model.boundaries[left_id]
+    right_boundary = right_model.boundaries[right_id]
+    condition = left_boundary.relation_conditions["right/object"]
+    assert condition.required_state == "linked"
+    assert condition.external == pytest.approx(0.3)
+    assert condition.linked == pytest.approx(0.7)
+    assert left_boundary.affected_arms == ("left", "right")
+    assert left_boundary.transaction_group is None
+    assert right_boundary.relation_conditions == {}
+    assert right_boundary.affected_arms == ("right",)
+
+    # A one-way guard remains one-way after the generic transaction pass.
+    builder._assign_transaction_groups(
+        left_model,
+        right_model,
+        paired_left,
+        paired_right,
+    )
     assert left_model.boundaries[left_id].transaction_group is None
     assert right_model.boundaries[right_id].transaction_group is None
 

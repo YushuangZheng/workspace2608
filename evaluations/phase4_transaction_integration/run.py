@@ -166,7 +166,7 @@ def _terminal_context(
                 continue
             belief = updaters[arm].update(
                 _runtime_observation(tick, current, previous),
-                executed_reference_state=previous.state_id,
+                executed_reference_state=current.state_id,
                 mode_by_skill=modes[arm],
             )
             beliefs[arm] = belief
@@ -270,7 +270,10 @@ def _validate_one(
         case.policy.reset(observation, mode_strategy="map")
         controllers[arm].reset(source_states[arm])
     boundary_controller = MultiArmBoundaryController(
-        models, controllers, runtime_config
+        models,
+        controllers,
+        runtime_config,
+        belief_updaters=cloned,
     )
     delayed_state = models[delayed_arm].skill_states[source_skill][0]
     rows: list[dict[str, Any]] = []

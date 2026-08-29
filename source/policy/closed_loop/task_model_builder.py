@@ -39,7 +39,12 @@ from .relation_events import (
     RelationStateKey,
     UnlinkEventMetadata,
 )
-from .scene_factors import FactorDistribution, FactorId, fit_factor_distribution
+from .scene_factors import (
+    FactorDistribution,
+    FactorId,
+    FactorSpace,
+    fit_factor_distribution,
+)
 from .state_index import StateId, build_state_topology
 from .task_model import ClosedLoopTaskModel, StateNode
 
@@ -358,7 +363,7 @@ class ClosedLoopTaskModelBuilder:
         return tuple(sorted(factors))
 
     @staticmethod
-    def _factor_space(factor_id: FactorId) -> str:
+    def _factor_space(factor_id: FactorId) -> FactorSpace:
         return "euclidean" if factor_id.kind == "node" else "se3"
 
     def _factor_values(
@@ -813,7 +818,8 @@ class ClosedLoopTaskModelBuilder:
                         tuple(
                             name
                             for name, stream in skill.streams.items()
-                            if stream.is_selected(mode)
+                            if name in skill.selected_frames
+                            and stream.is_selected(mode)
                         )
                         for mode in range(len(skill.mode_priors))
                     ),
@@ -1744,8 +1750,8 @@ class ClosedLoopTaskModelBuilder:
                 pending_starts.setdefault(
                     (int(demonstration), event_id.frame_id), []
                 ).append(start)
-        for values in pending_starts.values():
-            values.sort()
+        for start_indices in pending_starts.values():
+            start_indices.sort()
 
         pending_runtime: dict[tuple[tuple[int, ...], str], tuple[int, bool]] = {}
 
@@ -1757,48 +1763,68 @@ class ClosedLoopTaskModelBuilder:
                 mode_members = tuple(int(value) for value in _mode_members(skill, mode))
                 for frame in policy.frame_names:
                     raw_prior = node.demo_relation_priors[frame][mode].copy()
+                    member_pending = [
+                        pending_starts.get((member, frame), [])
+                        for member in mode_members
+                    ]
+                    common_starts = (
+                        sorted(
+                            set.intersection(
+                                *(set(values) for values in member_pending)
+                            )
+                        )
+                        if member_pending and all(member_pending)
+                        else []
+                    )
+                    available_starts = [
+                        start for start in common_starts if start <= state_global_index
+                    ]
+                    runtime_key = (mode_members, frame)
+                    last_start, pending_active = pending_runtime.get(
+                        runtime_key, (-1, False)
+                    )
+                    new_pending = bool(
+                        available_starts and available_starts[-1] > last_start
+                    )
+                    if new_pending:
+                        last_start = available_starts[-1]
+                        pending_active = True
+                    # The candidate state is the repeatable gripper-close
+                    # occurrence itself.  Requiring that exact sample to
+                    # already contain post-close motion evidence is
+                    # contradictory: LINK_PENDING exists precisely because
+                    # such evidence is unavailable there.  Admit the event
+                    # state from the cross-demonstration Pending evidence,
+                    # then keep the hypothesis only while the original
+                    # covariance evidence supports linked on later states.
+                    pending_hypothesis = bool(
+                        pending_active
+                        and (
+                            state_global_index == last_start
+                            or raw_prior[1] >= self.config.relation_link_threshold
+                        )
+                    )
+                    if (
+                        pending_active
+                        and state_global_index > last_start
+                        and not pending_hypothesis
+                    ):
+                        pending_active = False
+                    pending_runtime[runtime_key] = (last_start, pending_active)
+
                     tracks = [
                         transitions.get((member, frame)) for member in mode_members
                     ]
                     if not tracks or any(track is None for track in tracks):
-                        member_pending = [
-                            pending_starts.get((member, frame), [])
-                            for member in mode_members
-                        ]
-                        common_starts = (
-                            sorted(
-                                set.intersection(
-                                    *(set(values) for values in member_pending)
-                                )
-                            )
-                            if member_pending and all(member_pending)
-                            else []
+                        linked_probability = (
+                            self.config.relation_link_threshold
+                            if pending_hypothesis
+                            else self.config.relation_unlink_threshold
                         )
-                        available_starts = [
-                            start
-                            for start in common_starts
-                            if start <= state_global_index
-                        ]
-                        runtime_key = (mode_members, frame)
-                        last_start, active = pending_runtime.get(
-                            runtime_key, (-1, False)
+                        node.demo_relation_priors[frame][mode] = np.asarray(
+                            [1.0 - linked_probability, linked_probability],
+                            dtype=np.float64,
                         )
-                        if available_starts and available_starts[-1] > last_start:
-                            last_start = available_starts[-1]
-                            active = True
-                        pending_hypothesis = bool(
-                            active
-                            and raw_prior[1] >= self.config.relation_link_threshold
-                        )
-                        if active and not pending_hypothesis:
-                            active = False
-                        pending_runtime[runtime_key] = (last_start, active)
-                        if not pending_hypothesis:
-                            linked_probability = self.config.relation_unlink_threshold
-                            node.demo_relation_priors[frame][mode] = np.asarray(
-                                [1.0 - linked_probability, linked_probability],
-                                dtype=np.float64,
-                            )
                         continue
                     active_origins: list[RelationEventId | None] = []
                     active_count = 0
@@ -1808,12 +1834,12 @@ class ClosedLoopTaskModelBuilder:
                         # relation for which no in-task recovery anchor exists.
                         active = bool(track and track[0][1] == "unlink")
                         origin: RelationEventId | None = None
-                        for index, transition, event_id in track:
+                        for index, transition, transition_event_id in track:
                             if index > state_global_index:
                                 break
                             if transition == "link":
                                 active = True
-                                origin = event_id
+                                origin = transition_event_id
                             else:
                                 active = False
                                 origin = None
@@ -1838,6 +1864,15 @@ class ClosedLoopTaskModelBuilder:
                             - self.config.relation_unlink_threshold
                         )
                     )
+                    if pending_hypothesis:
+                        # Pending is a soft expected LINK overlay, not a formal
+                        # event transition.  It can coexist with older formal
+                        # LINK/UNLINK occurrences for the same arm-frame while
+                        # never creating an origin by itself.
+                        linked_probability = max(
+                            linked_probability,
+                            self.config.relation_link_threshold,
+                        )
                     node.demo_relation_priors[frame][mode] = np.asarray(
                         [1.0 - linked_probability, linked_probability],
                         dtype=np.float64,
@@ -1888,6 +1923,70 @@ class ClosedLoopTaskModelBuilder:
                 )
             )
         return tuple(float(value) for value in fold_scores)
+
+    def _fit_boundary_scene_condition(
+        self,
+        values: Array,
+        start: int,
+        skill: Any,
+        policy: DynaMAC,
+        factor_id: FactorId,
+    ) -> tuple[FactorDistribution, float, ReliabilityStatistics] | None:
+        """Fit one all-demo-stable boundary scene condition.
+
+        The same leave-one-demonstration-out support rule is used for ordinary
+        object factors and for bimanual end-effector factors.  Keeping this in
+        one helper prevents directional coordination from acquiring a second
+        scoring or thresholding mechanism.
+        """
+
+        samples = []
+        fold_compatibilities: list[float] = []
+        time_repeats = np.arange(
+            1,
+            skill.duration - start + 1,
+            dtype=np.int64,
+        )
+        for mode in range(len(skill.mode_priors)):
+            members = _mode_members(skill, mode)
+            window = values[members, start : skill.duration]
+            samples.append(
+                np.repeat(window, time_repeats, axis=1).reshape(-1, values.shape[-1])
+            )
+            fold_compatibilities.extend(
+                self._boundary_loo_coverage(
+                    values,
+                    start,
+                    members,
+                    policy,
+                    factor_id,
+                )
+            )
+        support_threshold = self._support_compatibility(
+            6 if factor_id.kind == "edge" else values.shape[-1]
+        )
+        passed_folds = sum(value >= support_threshold for value in fold_compatibilities)
+        total_folds = len(fold_compatibilities)
+        stable_fraction = passed_folds / float(total_folds) if total_folds else 0.0
+        if stable_fraction < self.config.boundary_scene_min_stable_fraction:
+            return None
+        distribution = self._fit_factor(
+            np.concatenate(samples, axis=0),
+            policy,
+            factor_id,
+            observability=1.0,
+            stable_fraction=stable_fraction,
+            loo_accuracy=stable_fraction,
+        )
+        threshold = max(
+            0.0,
+            min(fold_compatibilities) - self.config.boundary_compatibility_margin,
+        )
+        return (
+            distribution,
+            threshold,
+            ReliabilityStatistics(distribution.observability, stable_fraction),
+        )
 
     def _fit_boundary_relation_guard(
         self,
@@ -2046,11 +2145,18 @@ class ClosedLoopTaskModelBuilder:
                         data.frames[frame][members, final_index],
                         data.ee_pose[members, final_index],
                     )
-                    distribution = fit_factor_distribution(
-                        frame_samples,
-                        position_variance_floor=policy.config.position_variance_floor,
-                        rotation_variance_floor=policy.config.rotation_variance_floor,
-                        covariance_estimation_method=policy.config.covariance_estimation_method,
+                    stream = skill.streams[frame]
+                    # The terminal target is the final-state distribution that
+                    # this exact frozen DynaMAC skill executes.  It was fitted
+                    # from the same normal demonstrations and must not be
+                    # independently refitted here: doing so can silently change
+                    # the quaternion gauge or numerical estimator relative to a
+                    # released checkpoint, leaving LocalDone inconsistent with
+                    # the action generator it is meant to supervise.
+                    distribution = FactorDistribution(
+                        mean=stream.mean[mode, final_index],
+                        covariance=stream.covariance[mode, final_index],
+                        sample_count=len(members),
                     )
                     key = f"m{mode}:{frame}"
                     goal_distributions[key] = distribution
@@ -2136,60 +2242,19 @@ class ClosedLoopTaskModelBuilder:
                     # The factor can be sparse in the next skill but genuinely
                     # unobservable in the source boundary window.
                     continue
-                samples = []
-                fold_compatibilities: list[float] = []
-                time_repeats = np.arange(
-                    1,
-                    skill.duration - start + 1,
-                    dtype=np.int64,
-                )
-                for mode in range(len(skill.mode_priors)):
-                    members = _mode_members(skill, mode)
-                    window = values[members, start : skill.duration]
-                    samples.append(
-                        np.repeat(window, time_repeats, axis=1).reshape(
-                            -1, values.shape[-1]
-                        )
-                    )
-                    fold_compatibilities.extend(
-                        self._boundary_loo_coverage(
-                            values,
-                            start,
-                            members,
-                            policy,
-                            factor_id,
-                        )
-                    )
-                support_threshold = self._support_compatibility(
-                    6 if factor_id.kind == "edge" else values.shape[-1]
-                )
-                passed_folds = sum(
-                    value >= support_threshold for value in fold_compatibilities
-                )
-                total_folds = len(fold_compatibilities)
-                stable_fraction = (
-                    passed_folds / float(total_folds) if total_folds else 0.0
-                )
-                if stable_fraction < self.config.boundary_scene_min_stable_fraction:
-                    continue
-                distribution = self._fit_factor(
-                    np.concatenate(samples, axis=0),
+                scene_fitted = self._fit_boundary_scene_condition(
+                    values,
+                    start,
+                    skill,
                     policy,
                     factor_id,
-                    observability=1.0,
-                    stable_fraction=stable_fraction,
-                    loo_accuracy=stable_fraction,
                 )
+                if scene_fitted is None:
+                    continue
+                distribution, threshold, statistics = scene_fitted
                 scene_conditions[factor_id] = distribution
-                scene_condition_thresholds[factor_id] = max(
-                    0.0,
-                    min(fold_compatibilities)
-                    - self.config.boundary_compatibility_margin,
-                )
-                reliability[factor_id.token] = ReliabilityStatistics(
-                    distribution.observability,
-                    stable_fraction,
-                )
+                scene_condition_thresholds[factor_id] = threshold
+                reliability[factor_id.token] = statistics
 
             boundary_id = BoundaryId(arm_id, source_skill, source_skill + 1)
             boundaries[boundary_id] = BoundaryModel(
@@ -2496,6 +2561,556 @@ class ClosedLoopTaskModelBuilder:
             used_left.add(left_id)
             used_right.add(right_id)
 
+    def _synchronized_boundary_pairs(
+        self,
+        left_model: ClosedLoopTaskModel,
+        right_model: ClosedLoopTaskModel,
+        left_demonstrations: Sequence[DynaMACDemonstration],
+        right_demonstrations: Sequence[DynaMACDemonstration],
+    ) -> tuple[tuple[BoundaryId, BoundaryId], ...]:
+        """Pair one-to-one boundaries that coincide in every normal demo."""
+
+        left_positions = self._boundary_positions(
+            left_demonstrations,
+            left_model.base_policy.skill_sequence,
+        )
+        right_positions = self._boundary_positions(
+            right_demonstrations,
+            right_model.base_policy.skill_sequence,
+        )
+        candidates = []
+        for left_id, left_boundary in left_model.boundaries.items():
+            for right_id, right_boundary in right_model.boundaries.items():
+                differences = np.abs(
+                    left_positions[left_boundary.source_skill]
+                    - right_positions[right_boundary.source_skill]
+                )
+                if np.any(differences > self.config.transaction_boundary_tolerance):
+                    continue
+                candidates.append((float(np.mean(differences)), left_id, right_id))
+        result = []
+        used_left = set()
+        used_right = set()
+        for _, left_id, right_id in sorted(candidates):
+            if left_id in used_left or right_id in used_right:
+                continue
+            result.append((left_id, right_id))
+            used_left.add(left_id)
+            used_right.add(right_id)
+        return tuple(result)
+
+    def _complete_bimanual_transfer_relation_conditions(
+        self,
+        left_model: ClosedLoopTaskModel,
+        right_model: ClosedLoopTaskModel,
+        left_demonstrations: Sequence[DynaMACDemonstration],
+        right_demonstrations: Sequence[DynaMACDemonstration],
+    ) -> None:
+        """Add one-way receiver-LINKED guards for demonstrated handovers.
+
+        A handover is not an atomic transaction: the receiver closes first and
+        the giver may release only after the receiver's relation filter has
+        confirmed ``linked``.  The offline evidence for that directed ordering
+        is deliberately strict and task-agnostic:
+
+        * the giver is linked to the same frame in every normal terminal fold;
+        * the giver opens in the paired target-skill prefix;
+        * the receiver closes there and has an all-demonstration
+          ``LINK_PENDING`` candidate for that frame.
+
+        Pending remains a hypothesis rather than a saved LINK.  Consequently
+        this helper adds only ``receiver/frame == linked`` to the giver's
+        ordinary ``BoundaryModel.relation_conditions``.  It never assigns a
+        transaction group or changes the receiver's independent boundary.
+        """
+
+        models = {"left": left_model, "right": right_model}
+        demonstrations = {
+            "left": left_demonstrations,
+            "right": right_demonstrations,
+        }
+        aligned = {
+            arm: self._align_demonstrations(model.base_policy, demonstrations[arm])
+            for arm, model in models.items()
+        }
+        expected_demonstrations = {
+            arm: set(range(len(values))) for arm, values in demonstrations.items()
+        }
+        tolerance = 1.0e-9
+
+        def mean_gripper(node: StateNode, mode: int | None = None) -> float:
+            values = (
+                node.gripper_commands
+                if mode is None
+                else node.gripper_commands[mode : mode + 1]
+            )
+            return float(np.mean(values))
+
+        def giver_opens(
+            model: ClosedLoopTaskModel,
+            boundary: BoundaryModel,
+        ) -> bool:
+            source = model.state(model.skill_states[boundary.source_skill][-1])
+            source_max = float(np.max(np.mean(source.gripper_commands, axis=1)))
+            prefix = model.skill_states[boundary.target_skill][
+                : self.config.relation_event_alignment_tolerance + 1
+            ]
+            return any(
+                float(np.min(np.mean(model.state(state).gripper_commands, axis=1)))
+                > source_max + tolerance
+                for state in prefix
+            )
+
+        def receiver_pending_by_frame(
+            model: ClosedLoopTaskModel,
+            boundary: BoundaryModel,
+            arm: str,
+        ) -> dict[str, tuple[LinkPendingCandidate, ...]]:
+            source = model.state(model.skill_states[boundary.source_skill][-1])
+            source_min = float(np.min(np.mean(source.gripper_commands, axis=1)))
+            modes = len(model.base_policy.skills[boundary.target_skill].mode_priors)
+            candidates: dict[str, list[LinkPendingCandidate]] = {}
+            for event_id, candidate in sorted(model.link_pending_events.items()):
+                if (
+                    candidate.candidate_state.skill_index != boundary.target_skill
+                    or candidate.candidate_state.local_index
+                    > self.config.relation_event_alignment_tolerance
+                    or candidate.support_fraction < 1.0 - 1.0e-12
+                    or set(candidate.demonstration_indices)
+                    != expected_demonstrations[arm]
+                ):
+                    continue
+                target = model.state(candidate.candidate_state)
+                if mean_gripper(target, event_id.mode) >= source_min - tolerance:
+                    continue
+                candidates.setdefault(candidate.frame_id, []).append(candidate)
+            return {
+                frame: tuple(values)
+                for frame, values in candidates.items()
+                if {value.event_id.mode for value in values} == set(range(modes))
+                and len(values) == modes
+            }
+
+        def add_direction(
+            giver_arm: str,
+            giver_id: BoundaryId,
+            receiver_arm: str,
+            receiver_id: BoundaryId,
+        ) -> None:
+            giver = models[giver_arm]
+            receiver = models[receiver_arm]
+            giver_boundary = giver.boundaries[giver_id]
+            receiver_boundary = receiver.boundaries[receiver_id]
+            if not giver_opens(giver, giver_boundary):
+                return
+            pending_by_frame = receiver_pending_by_frame(
+                receiver,
+                receiver_boundary,
+                receiver_arm,
+            )
+            if not pending_by_frame:
+                return
+
+            source_skill = giver_boundary.source_skill
+            skill = giver.base_policy.skills[source_skill]
+            start = max(0, skill.duration - self.config.boundary_terminal_window)
+            relation_conditions = dict(giver_boundary.relation_conditions)
+            reliability = dict(giver_boundary.condition_reliability)
+            affected = set(giver_boundary.affected_arms)
+            changed = False
+            for frame, candidates in sorted(pending_by_frame.items()):
+                if frame not in giver.relation_frames:
+                    continue
+                # This independently verifies that the giver really holds the
+                # object at the successful source boundary.  Mere paired
+                # gripper commands therefore cannot invent a handover guard.
+                giver_link = self._fit_boundary_relation_guard(
+                    giver.base_policy,
+                    giver.states,
+                    aligned[giver_arm],
+                    source_skill,
+                    start,
+                    frame,
+                    expected_state="linked",
+                )
+                if giver_link is None:
+                    continue
+                condition_key = f"{receiver_arm}/{frame}"
+                if (
+                    condition_key
+                    in giver_boundary.local_completion_model.own_relation_conditions
+                ):
+                    continue
+                existing = relation_conditions.get(condition_key)
+                if existing is not None and existing.required_state != "linked":
+                    continue
+                if existing is None:
+                    linked = self.config.relation_link_threshold
+                    relation_conditions[condition_key] = RelationGuardDistribution(
+                        external=1.0 - linked,
+                        linked=linked,
+                        required_state="linked",
+                    )
+                reliability[condition_key] = ReliabilityStatistics(
+                    observed_fraction=1.0,
+                    stable_fraction=min(
+                        candidate.support_fraction for candidate in candidates
+                    ),
+                )
+                affected.add(receiver_arm)
+                changed = True
+            if changed:
+                giver.boundaries[giver_id] = replace(
+                    giver_boundary,
+                    relation_conditions=relation_conditions,
+                    condition_reliability=reliability,
+                    affected_arms=tuple(sorted(affected)),
+                )
+
+        for left_id, right_id in self._synchronized_boundary_pairs(
+            left_model,
+            right_model,
+            left_demonstrations,
+            right_demonstrations,
+        ):
+            add_direction("left", left_id, "right", right_id)
+            add_direction("right", right_id, "left", left_id)
+
+    def _complete_bimanual_boundary_scene_conditions(
+        self,
+        left_model: ClosedLoopTaskModel,
+        right_model: ClosedLoopTaskModel,
+        left_demonstrations: Sequence[DynaMACDemonstration],
+        right_demonstrations: Sequence[DynaMACDemonstration],
+    ) -> None:
+        """Complete the ordinary boundary factor set from both arm models.
+
+        If arm B's terminal controller is expressed relative to arm A's end
+        effector, A must not move past the paired boundary before that current
+        physical configuration is reached.  B already checks the distribution
+        inside its LocalCompletionModel; the same SE(3) distribution is added
+        only to A's existing ``BoundaryModel.scene_conditions``.  Evaluation
+        therefore continues through the one standard EntryGuard path: this is
+        bimanual candidate discovery, not a second collaboration guard.  No
+        peer progress condition or fixed clock offset is introduced.
+
+        Reciprocal dependencies remain eligible for the existing atomic
+        transaction rule because both sides then contain the same canonical
+        scene edge.
+        """
+
+        aligned = {
+            "left": self._align_demonstrations(
+                left_model.base_policy, left_demonstrations
+            ),
+            "right": self._align_demonstrations(
+                right_model.base_policy, right_demonstrations
+            ),
+        }
+        models = {"left": left_model, "right": right_model}
+
+        def add_dependency(
+            source_arm: str,
+            source_id: BoundaryId,
+            target_arm: str,
+            target_id: BoundaryId,
+        ) -> None:
+            source_model = models[source_arm]
+            target_model = models[target_arm]
+            source_boundary = source_model.boundaries[source_id]
+            target_boundary = target_model.boundaries[target_id]
+            peer_frame = f"{target_arm}_ee"
+            source_skill = source_model.base_policy.skills[source_boundary.source_skill]
+            if any(
+                f"m{mode}:{peer_frame}"
+                not in source_boundary.local_completion_model.goal_distributions
+                for mode in range(len(source_skill.mode_priors))
+            ):
+                return
+
+            ee_names = tuple(sorted((f"{source_arm}_ee", peer_frame)))
+            factor_id = FactorId("edge", ee_names[0], ee_names[1])
+            data = aligned[source_arm][source_boundary.source_skill]
+            poses = {
+                f"{source_arm}_ee": data.ee_pose,
+                peer_frame: data.frames[peer_frame],
+            }
+            assert factor_id.target is not None
+            values = np.empty_like(data.ee_pose)
+            for demonstration in range(len(values)):
+                values[demonstration] = _relative_batch(
+                    poses[factor_id.target][demonstration],
+                    poses[factor_id.source][demonstration],
+                )
+            start = max(
+                0,
+                source_skill.duration - self.config.boundary_terminal_window,
+            )
+            fitted = self._fit_boundary_scene_condition(
+                values,
+                start,
+                source_skill,
+                source_model.base_policy,
+                factor_id,
+            )
+            if fitted is None:
+                return
+            distribution, threshold, statistics = fitted
+            scene_conditions = dict(target_boundary.scene_conditions)
+            scene_thresholds = dict(target_boundary.scene_condition_thresholds)
+            reliability = dict(target_boundary.condition_reliability)
+            scene_conditions.setdefault(factor_id, distribution)
+            scene_thresholds.setdefault(factor_id, threshold)
+            reliability.setdefault(factor_id.token, statistics)
+            target_model.boundaries[target_id] = replace(
+                target_boundary,
+                scene_conditions=scene_conditions,
+                scene_condition_thresholds=scene_thresholds,
+                condition_reliability=reliability,
+                affected_arms=tuple(
+                    sorted(set(target_boundary.affected_arms).union({source_arm}))
+                ),
+            )
+
+        for left_id, right_id in self._synchronized_boundary_pairs(
+            left_model,
+            right_model,
+            left_demonstrations,
+            right_demonstrations,
+        ):
+            add_dependency("left", left_id, "right", right_id)
+            add_dependency("right", right_id, "left", left_id)
+
+    @staticmethod
+    def _peer_relation_event_frames(model: ClosedLoopTaskModel) -> set[str]:
+        """Physical entities that the peer formally links or may verify later."""
+
+        return {
+            event_id.frame_id
+            for event_id in (*model.link_anchors, *model.link_pending_events)
+        }
+
+    @staticmethod
+    def _linked_frames_in_skill_mode(
+        model: ClosedLoopTaskModel,
+        skill_index: int,
+        mode: int,
+    ) -> set[str]:
+        return {
+            key.frame_id
+            for key in model.link_origins
+            if key.state_id.skill_index == skill_index and key.mode == mode
+        }
+
+    def _exclusive_peer_geometry_evidence(
+        self,
+        model: ClosedLoopTaskModel,
+        aligned: dict[int, _AlignedSkillData],
+        skill_index: int,
+        mode: int,
+        peer_frame: str,
+    ) -> dict[str, Any]:
+        """Audit a peer-only directed relative-geometry target.
+
+        This fallback covers tasks whose interface has no tracked physical
+        target for a genuine end-effector-to-end-effector motion.  It is not
+        considered while an ordinary scene entity already participates in the
+        same mode: in that case synchronized demonstrations cannot establish
+        that the peer contributes non-redundant control information.
+        """
+
+        skill = model.base_policy.skills[skill_index]
+        members = _mode_members(skill, mode)
+        data = aligned[skill_index]
+        local = np.stack(
+            [
+                _relative_batch(
+                    data.frames[peer_frame][demonstration],
+                    data.ee_pose[demonstration],
+                )
+                for demonstration in members
+            ]
+        )
+        translations = local[:, :, :3]
+        displacement = translations[:, -1] - translations[:, 0]
+        mean_displacement = np.mean(displacement, axis=0)
+        terminal = translations[:, -1]
+        terminal_spread = float(
+            np.sqrt(
+                np.mean(
+                    np.sum(
+                        (terminal - np.mean(terminal, axis=0)) ** 2,
+                        axis=1,
+                    )
+                )
+            )
+        )
+        magnitudes = np.linalg.norm(displacement, axis=1)
+        numerical_floor = max(
+            math.sqrt(model.base_policy.config.position_variance_floor),
+            np.finfo(np.float64).eps,
+        )
+        directed = bool(
+            np.linalg.norm(mean_displacement) > numerical_floor
+            and np.all(displacement @ mean_displacement > 0.0)
+        )
+        dominates_terminal_spread = bool(
+            np.all(magnitudes > max(terminal_spread, numerical_floor))
+        )
+        return {
+            "directed": directed,
+            "dominates_terminal_spread": dominates_terminal_spread,
+            "terminal_spread": terminal_spread,
+            "minimum_relative_motion": float(np.min(magnitudes)),
+            "eligible": directed and dominates_terminal_spread,
+        }
+
+    def _peer_execution_dependency_records(
+        self,
+        model: ClosedLoopTaskModel,
+        peer_model: ClosedLoopTaskModel,
+        demonstrations: Sequence[DynaMACDemonstration],
+    ) -> list[dict[str, Any]]:
+        """Classify selected peer-EE streams without task-name rules.
+
+        Eq. (6) remains the initial candidate selector.  A peer end effector
+        additionally needs either a demonstrated cross-arm physical relation
+        path (shared/transfer entity), or it must be the exclusive non-virtual
+        target of a stable directed relative-geometry motion.  Otherwise its
+        synchronization belongs in boundary readiness, not continuous PoE.
+        """
+
+        peer_frame = f"{'right' if model.arm_id == 'left' else 'left'}_ee"
+        aligned = self._align_demonstrations(model.base_policy, demonstrations)
+        peer_event_frames = self._peer_relation_event_frames(peer_model)
+        records: list[dict[str, Any]] = []
+        for skill_index, skill in enumerate(model.base_policy.skills):
+            for mode in range(len(skill.mode_priors)):
+                selected = tuple(
+                    name
+                    for name, stream in skill.streams.items()
+                    if name in skill.selected_frames and stream.is_selected(mode)
+                )
+                if peer_frame not in selected:
+                    continue
+                physical_frames = tuple(
+                    name for name in selected if self._is_scene_entity(name)
+                )
+                linked_frames = self._linked_frames_in_skill_mode(
+                    model, skill_index, mode
+                )
+                relation_path = tuple(sorted(linked_frames & peer_event_frames))
+                geometry = self._exclusive_peer_geometry_evidence(
+                    model,
+                    aligned,
+                    skill_index,
+                    mode,
+                    peer_frame,
+                )
+                if relation_path:
+                    eligible = True
+                    reason = "shared_or_transfer_relation"
+                elif not physical_frames and geometry["eligible"]:
+                    eligible = True
+                    reason = "exclusive_relative_geometry_target"
+                else:
+                    eligible = False
+                    reason = (
+                        "redundant_with_physical_task_reference"
+                        if physical_frames
+                        else "no_cross_arm_execution_dependency"
+                    )
+                records.append(
+                    {
+                        "skill_index": skill_index,
+                        "mode": mode,
+                        "peer_frame": peer_frame,
+                        "eligible": eligible,
+                        "reason": reason,
+                        "physical_frames": list(physical_frames),
+                        "relation_path_frames": list(relation_path),
+                        "geometry": geometry,
+                    }
+                )
+        return records
+
+    @staticmethod
+    def _apply_peer_execution_dependency_records(
+        model: ClosedLoopTaskModel,
+        records: Sequence[dict[str, Any]],
+    ) -> None:
+        """Apply the audited per-mode selection to the closed-loop sidecar."""
+
+        by_key = {
+            (int(record["skill_index"]), int(record["mode"])): record
+            for record in records
+        }
+        for skill_index, state_ids in model.skill_states.items():
+            skill = model.base_policy.skills[skill_index]
+            for state_id in state_ids:
+                node = model.states[state_id]
+                filtered_modes = []
+                for mode, selected in enumerate(node.mode_selected_frames):
+                    record = by_key.get((skill_index, mode))
+                    if record is not None and not bool(record["eligible"]):
+                        peer_frame = str(record["peer_frame"])
+                        selected = tuple(
+                            frame for frame in selected if frame != peer_frame
+                        )
+                    filtered_modes.append(tuple(selected))
+                selected_union = {
+                    frame for selected in filtered_modes for frame in selected
+                }
+                node.mode_selected_frames = tuple(filtered_modes)
+                node.selected_frames = tuple(
+                    frame for frame in skill.streams if frame in selected_union
+                )
+
+        for boundary_id, boundary in tuple(model.boundaries.items()):
+            local = boundary.local_completion_model
+            goals = dict(local.goal_distributions)
+            thresholds = dict(local.minimum_goal_log_likelihood)
+            for mode in range(
+                len(model.base_policy.skills[boundary.source_skill].mode_priors)
+            ):
+                record = by_key.get((boundary.source_skill, mode))
+                if record is None or bool(record["eligible"]):
+                    continue
+                key = f"m{mode}:{record['peer_frame']}"
+                goals.pop(key, None)
+                thresholds.pop(key, None)
+
+            relation_conditions = dict(boundary.relation_conditions)
+            reliability = dict(boundary.condition_reliability)
+            target_records = [
+                record
+                for (skill_index, _), record in by_key.items()
+                if skill_index == boundary.target_skill
+            ]
+            if target_records and not any(
+                bool(record["eligible"]) for record in target_records
+            ):
+                peer_frame = str(target_records[0]["peer_frame"])
+                condition_key = f"{model.arm_id}/{peer_frame}"
+                relation_conditions.pop(condition_key, None)
+                reliability.pop(condition_key, None)
+
+            model.boundaries[boundary_id] = replace(
+                boundary,
+                local_completion_model=replace(
+                    local,
+                    goal_distributions=goals,
+                    minimum_goal_log_likelihood=thresholds,
+                ),
+                relation_conditions=relation_conditions,
+                condition_reliability=reliability,
+            )
+
+        model.builder_config = {
+            **model.builder_config,
+            "peer_execution_dependencies": [dict(record) for record in records],
+        }
+
     def build_bimanual(
         self,
         policy: BimanualDynaMAC,
@@ -2523,6 +3138,30 @@ class ClosedLoopTaskModelBuilder:
             paired_right,
             arm_id="right",
             recoverable_frames=recoverable_frames,
+        )
+        left_dependencies = self._peer_execution_dependency_records(
+            left_model,
+            right_model,
+            paired_left,
+        )
+        right_dependencies = self._peer_execution_dependency_records(
+            right_model,
+            left_model,
+            paired_right,
+        )
+        self._apply_peer_execution_dependency_records(left_model, left_dependencies)
+        self._apply_peer_execution_dependency_records(right_model, right_dependencies)
+        self._complete_bimanual_boundary_scene_conditions(
+            left_model,
+            right_model,
+            paired_left,
+            paired_right,
+        )
+        self._complete_bimanual_transfer_relation_conditions(
+            left_model,
+            right_model,
+            paired_left,
+            paired_right,
         )
         self._assign_transaction_groups(
             left_model,

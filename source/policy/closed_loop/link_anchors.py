@@ -18,7 +18,7 @@ from .state_index import StateId
 from .task_model import ClosedLoopTaskModel
 
 Array = np.ndarray
-AnchorSource = Literal["offline_link", "verified_pending"]
+AnchorSource = Literal["offline_link", "pending_recovery", "verified_pending"]
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,11 @@ class RuntimeLinkAnchor:
             raise ValueError("运行时 LINK 锚点夹爪命令必须为 [H,G]")
         if not self.legal_reentry_states:
             raise ValueError("运行时 LINK 锚点必须提供至少一个合法重入状态")
-        if self.source not in {"offline_link", "verified_pending"}:
+        if self.source not in {
+            "offline_link",
+            "pending_recovery",
+            "verified_pending",
+        }:
             raise ValueError("未知 LINK 锚点来源")
         object.__setattr__(self, "local_means", means.copy())
         object.__setattr__(self, "local_covariances", covariances.copy())
@@ -70,7 +74,12 @@ class RuntimeLinkAnchor:
         )
 
     @classmethod
-    def from_pending(cls, candidate: LinkPendingCandidate) -> RuntimeLinkAnchor:
+    def from_pending(
+        cls,
+        candidate: LinkPendingCandidate,
+        *,
+        verified: bool,
+    ) -> RuntimeLinkAnchor:
         return cls(
             origin_event_id=candidate.event_id,
             arm_id=candidate.arm_id,
@@ -80,7 +89,7 @@ class RuntimeLinkAnchor:
             local_covariances=candidate.local_covariances,
             gripper_commands=candidate.gripper_commands,
             legal_reentry_states=(candidate.candidate_state,),
-            source="verified_pending",
+            source="verified_pending" if verified else "pending_recovery",
         )
 
 
@@ -127,9 +136,81 @@ class EpisodeLinkAnchorRegistry:
             candidate = self.task_model.link_pending_events[event_id]
         except KeyError as exc:
             raise KeyError(f"不存在 LINK_PENDING 候选 {event_id.token}") from exc
-        anchor = RuntimeLinkAnchor.from_pending(candidate)
+        anchor = RuntimeLinkAnchor.from_pending(candidate, verified=True)
         self._active_pending[candidate.frame_id] = anchor
         return anchor
+
+    def _pending_recovery_candidate(
+        self,
+        frame_id: str,
+        state_id: StateId,
+        mode: int,
+    ) -> LinkPendingCandidate | None:
+        """Return the latest unresolved Pending occurrence already reached.
+
+        A Pending trajectory may be executed to repair the same failed LINK
+        occurrence, but it is not installed in ``active_pending`` and therefore
+        does not claim that a relation or ``link_origin`` already exists.  A
+        later UNLINK invalidates older Pending candidates for recovery.
+        """
+
+        latest_unlink = max(
+            (
+                metadata.release_state
+                for event_id, metadata in self.task_model.unlink_events.items()
+                if event_id.arm_id == self.task_model.arm_id
+                and event_id.frame_id == frame_id
+                and event_id.mode == mode
+                and metadata.release_state <= state_id
+            ),
+            default=None,
+        )
+        candidates = [
+            candidate
+            for event_id, candidate in self.task_model.link_pending_events.items()
+            if event_id.arm_id == self.task_model.arm_id
+            and event_id.frame_id == frame_id
+            and event_id.mode == mode
+            and candidate.candidate_state <= state_id
+            and (latest_unlink is None or candidate.candidate_state > latest_unlink)
+        ]
+        if not candidates:
+            return None
+        latest_state = max(candidate.candidate_state for candidate in candidates)
+        latest = [
+            candidate
+            for candidate in candidates
+            if candidate.candidate_state == latest_state
+        ]
+        if len(latest) != 1:
+            raise RuntimeError(
+                "同一 arm-frame-mode 状态匹配到多个 LINK_PENDING occurrence"
+            )
+        return latest[0]
+
+    def has_pending_recovery_candidate(
+        self,
+        frame_id: str,
+        state_id: StateId,
+        mode: int,
+    ) -> bool:
+        return self._pending_recovery_candidate(frame_id, state_id, mode) is not None
+
+    def resolve_for_recovery(
+        self,
+        frame_id: str,
+        state_id: StateId,
+        mode: int,
+    ) -> RuntimeLinkAnchor:
+        """Resolve a confirmed origin or a non-activated Pending repair template."""
+
+        try:
+            return self.resolve(frame_id, state_id, mode)
+        except KeyError as original_error:
+            candidate = self._pending_recovery_candidate(frame_id, state_id, mode)
+            if candidate is None:
+                raise original_error
+            return RuntimeLinkAnchor.from_pending(candidate, verified=False)
 
     def release(self, frame_id: str) -> None:
         """Clear only an intentionally released episode-scoped relation origin."""

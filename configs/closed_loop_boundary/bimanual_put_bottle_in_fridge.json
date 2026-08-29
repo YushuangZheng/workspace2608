@@ -5,22 +5,22 @@
   "minimum_information_weight": 0.1,
   "calibrations": {
     "left:0->1": {
-      "local_score_threshold": 0.04853133594092845,
+      "local_score_threshold": 0.4112847699148902,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     },
     "left:1->2": {
-      "local_score_threshold": 0.02964493052327555,
+      "local_score_threshold": 0.21140177707969074,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     },
     "right:0->1": {
-      "local_score_threshold": 0.495546617950258,
+      "local_score_threshold": 0.4955568590463175,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     },
     "right:1->2": {
-      "local_score_threshold": 0.44969577002398,
+      "local_score_threshold": 0.45507858677807655,
       "confirmation_cycles": 2,
       "relation_thresholds": {}
     }

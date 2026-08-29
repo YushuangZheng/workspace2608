@@ -114,7 +114,7 @@ def test_stack_wine_five_normal_demonstrations_track_in_sidecar_replay() -> None
         for tick in range(1, len(sequence)):
             belief = updater.update(
                 runtime_observation(tick, sequence[tick], sequence[tick - 1]),
-                executed_reference_state=sequence[tick - 1][0],
+                executed_reference_state=sequence[tick][0],
                 permitted_boundaries=frozenset(model.boundaries),
                 mode_by_skill=mode_by_skill,
             )
@@ -225,7 +225,7 @@ def test_handover_right_static_segment_does_not_stick_at_old_boundary() -> None:
     for tick in range(1, len(sequence)):
         belief = updater.update(
             runtime_observation(tick, sequence[tick], sequence[tick - 1]),
-            executed_reference_state=sequence[tick - 1][0],
+            executed_reference_state=sequence[tick][0],
             permitted_boundaries=frozenset(model.boundaries),
             mode_by_skill=mode_by_skill,
         )

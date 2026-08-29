@@ -1,6 +1,8 @@
 """Policy implementations used in the paper."""
 
 from .closed_loop import (
+    ArmCommand,
+    ArmCycleResult,
     AuxiliaryAction,
     BeliefUpdater,
     BeliefUpdaterConfig,
@@ -11,7 +13,10 @@ from .closed_loop import (
     ClosedLoopCursor,
     ClosedLoopExecutionConfig,
     ClosedLoopExecutionController,
+    ControlEquivalenceAssessment,
     ClosedLoopBelief,
+    ClosedLoopMultiStreamPolicy,
+    ClosedLoopPolicyConfig,
     ClosedLoopRecoveryConfig,
     ClosedLoopRecoveryManager,
     ClosedLoopTaskModel,
@@ -19,6 +24,7 @@ from .closed_loop import (
     ClosedLoopTaskModelConfig,
     FactorDistribution,
     FactorId,
+    DiagnosticRecorder,
     ExecutionCycleResult,
     ExecutionDecision,
     ExecutionMode,
@@ -46,6 +52,8 @@ from .closed_loop import (
     ProgressPriorBuilder,
     ProgressPriorConfig,
     ProgressStatus,
+    PolicyCycleResult,
+    PolicyLifecycle,
     ProbeExitReason,
     RecoveryConfig,
     RecoveryCycleResult,
@@ -154,6 +162,8 @@ from .tapas_segmentation import (
 )
 
 __all__ = [
+    "ArmCommand",
+    "ArmCycleResult",
     "AuxiliaryAction",
     "BimanualDynaMAC",
     "BimanualDynaMACAction",
@@ -168,7 +178,10 @@ __all__ = [
     "ClosedLoopCursor",
     "ClosedLoopExecutionConfig",
     "ClosedLoopExecutionController",
+    "ControlEquivalenceAssessment",
     "ClosedLoopBelief",
+    "ClosedLoopMultiStreamPolicy",
+    "ClosedLoopPolicyConfig",
     "ClosedLoopRecoveryConfig",
     "ClosedLoopRecoveryManager",
     "ClosedLoopTaskModel",
@@ -181,6 +194,7 @@ __all__ = [
     "DynaMACGripperLookahead",
     "DynaMACObservation",
     "DynaMACPolicy",
+    "DiagnosticRecorder",
     "ExecutionCycleResult",
     "ExecutionDecision",
     "ExecutionMode",
@@ -215,6 +229,8 @@ __all__ = [
     "ProgressPriorBuilder",
     "ProgressPriorConfig",
     "ProgressStatus",
+    "PolicyCycleResult",
+    "PolicyLifecycle",
     "ProbeExitReason",
     "RecoveryConfig",
     "RecoveryCycleResult",

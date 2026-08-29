@@ -49,8 +49,16 @@ class MismatchUpdate:
 
 @dataclass(frozen=True)
 class MismatchConfig:
-    no_plausible_cycles: int = 3
-    relation_mismatch_cycles: int = 3
+    # RLBench runs at 20 Hz.  Require one second of continuous absence of any
+    # plausible state before recovery so ordinary contact/servo transients
+    # remain HOLD/closed-loop reservo rather than becoming false recoveries.
+    no_plausible_cycles: int = 20
+    # A demonstrated LINK/UNLINK changes the expected relation immediately,
+    # while the action-conditioned posterior needs several real control
+    # cycles to accumulate post-transition motion evidence.  Five cycles is
+    # the normal-data confirmation horizon; it remains one shared setting for
+    # every task and relation rather than an event-specific grace branch.
+    relation_mismatch_cycles: int = 5
     persistent_hold_cycles: int = 20
     stalled_progress_cycles: int = 20
 
@@ -89,8 +97,21 @@ class MismatchTracker:
         cursor: ClosedLoopCursor,
         decision: ExecutionDecision,
         roles: FrameRoleSnapshot,
+        *,
+        action_executed: bool = True,
     ) -> MismatchUpdate:
-        no_plausible = belief.progress.status == ProgressStatus.NO_PLAUSIBLE_STATE
+        if not isinstance(action_executed, bool):
+            raise TypeError("action_executed 必须为布尔值")
+        # A controller-level rejection means the requested task command never
+        # produced the current observation: the environment committed a joint
+        # hold instead.  That observation is valid feedback for HOLD/retry, but
+        # it is not evidence that an *executed* task action led outside the
+        # learned state model.  Counting it as NO_PLAUSIBLE_STATE would turn a
+        # known low-level IK rejection into a false task-level recovery.
+        no_plausible = bool(
+            action_executed
+            and belief.progress.status == ProgressStatus.NO_PLAUSIBLE_STATE
+        )
         relation_mismatch = bool(roles.recovery_intents)
         hold = decision == ExecutionDecision.HOLD
         stalled = bool(

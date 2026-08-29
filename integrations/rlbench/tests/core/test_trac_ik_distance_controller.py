@@ -3,11 +3,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from integrations.rlbench.rlbench_dynamac.eval import direct_evaluate, unimanual_evaluate
+from integrations.rlbench.rlbench_dynamac.eval import (
+    direct_evaluate,
+    unimanual_evaluate,
+)
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     GLOBAL_IK_CONTROLLER_PROFILE,
+    STAGE6_IK_CONTROLLER_PROFILE,
     GlobalIKControllerConfig,
+    Stage6IKControllerConfig,
     execute_global_ik_ee_control,
+    execute_stage6_ik_ee_control,
+    global_ik_controller_metadata,
     initialize_global_ik_controller_diagnostics,
 )
 
@@ -33,10 +40,21 @@ class _Tip:
         return np.asarray([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
 
 
-class _Path:
+class _CartesianTip:
     def __init__(self, arm):
         self.arm = arm
-        self.target = np.asarray([0.1, 0.1])
+
+    def get_pose(self):
+        return np.asarray([self.arm.current[0], 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+
+
+class _Path:
+    def __init__(self, arm, target=None):
+        self.arm = arm
+        self.target = np.asarray(
+            [0.1, 0.1] if target is None else target,
+            dtype=np.float64,
+        )
 
     def step(self):
         self.arm.set_joint_target_positions(self.target)
@@ -47,9 +65,7 @@ class _Path:
 
 
 class _Arm:
-    def __init__(
-        self, *, jacobian_result=None, sampling_result=None, path_fails=False
-    ):
+    def __init__(self, *, jacobian_result=None, sampling_result=None, path_fails=False):
         self.current = np.zeros(2, dtype=np.float64)
         self.target = self.current.copy()
         self.jacobian_result = jacobian_result
@@ -60,12 +76,23 @@ class _Arm:
         self.target_writes = 0
         self.sampling_calls = []
         self.solver_events = []
+        self.velocity = np.zeros(2, dtype=np.float64)
+        self.target_history = []
 
     def get_tip(self):
         return _Tip()
 
     def get_joint_positions(self):
         return self.current.copy()
+
+    def get_joint_target_positions(self):
+        return self.target.copy()
+
+    def get_joint_velocities(self):
+        return self.velocity.copy()
+
+    def get_joint_upper_velocity_limits(self):
+        return np.ones_like(self.current)
 
     def get_joint_intervals(self):
         return [False, False], [[-1.0, 2.0], [-1.0, 2.0]]
@@ -74,10 +101,12 @@ class _Arm:
         self.property_calls.append(dict(kwargs))
 
     def solve_ik_via_jacobian(self, position, **kwargs):
-        del position, kwargs
+        del kwargs
         self.solver_events.append("pseudo_inverse")
         if isinstance(self.jacobian_result, Exception):
             raise self.jacobian_result
+        if callable(self.jacobian_result):
+            return np.asarray(self.jacobian_result(position), dtype=np.float64)
         return np.asarray(self.jacobian_result, dtype=np.float64)
 
     def solve_ik_via_sampling(self, *args, **kwargs):
@@ -98,6 +127,48 @@ class _Arm:
     def set_joint_target_positions(self, target):
         self.target_writes += 1
         self.target = np.asarray(target, dtype=np.float64).copy()
+        self.target_history.append(self.target.copy())
+
+    def set_joint_positions(self, positions, disable_dynamics=False):
+        del disable_dynamics
+        self.current = np.asarray(positions, dtype=np.float64).copy()
+
+    def check_arm_collision(self):
+        return False
+
+
+class _CartesianArm(_Arm):
+    def get_tip(self):
+        return _CartesianTip(self)
+
+
+class _LinearPathArm(_CartesianArm):
+    def __init__(self, *, collision_aware_fails=False, relaxed_fails=False):
+        super().__init__(jacobian_result=_IKError("no local solution"))
+        self.collision_aware_fails = bool(collision_aware_fails)
+        self.relaxed_fails = bool(relaxed_fails)
+        self.linear_path_calls = []
+
+    def get_linear_path(self, position, **kwargs):
+        self.linear_path_calls.append((np.asarray(position).copy(), dict(kwargs)))
+        ignore_collisions = bool(kwargs["ignore_collisions"])
+        if (not ignore_collisions and self.collision_aware_fails) or (
+            ignore_collisions and self.relaxed_fails
+        ):
+            raise _ConfigurationPathError("no linear path")
+        return _Path(self, [float(position[0]), 0.0])
+
+
+class _CollisionSelectiveSamplingArm(_CartesianArm):
+    def __init__(self):
+        super().__init__(jacobian_result=_IKError("no local solution"))
+
+    def solve_ik_via_sampling(self, position, **kwargs):
+        self.solver_events.append("sampling")
+        self.sampling_calls.append(((position,), dict(kwargs)))
+        if not kwargs["ignore_collisions"]:
+            raise _ConfigurationError("contact pose rejected by collision filter")
+        return np.asarray([[float(position[0]), 0.0]], dtype=np.float64)
 
 
 class _Scene:
@@ -108,7 +179,38 @@ class _Scene:
     def step(self):
         self.steps += 1
         for arm in self.arms:
+            arm.velocity = (arm.target - arm.current) / 0.05
             arm.current = arm.target.copy()
+
+
+class _PartiallyStalledScene(_Scene):
+    def __init__(self, moving_arm, stalled_arm):
+        super().__init__(moving_arm, stalled_arm)
+        self.moving_arm = moving_arm
+
+    def step(self):
+        self.steps += 1
+        self.moving_arm.velocity = (
+            self.moving_arm.target - self.moving_arm.current
+        ) / 0.05
+        self.moving_arm.current = self.moving_arm.target.copy()
+        for arm in self.arms:
+            if arm is not self.moving_arm:
+                arm.velocity = np.zeros_like(arm.current)
+
+
+class _SlowScene(_Scene):
+    def __init__(self, arm, step=0.005):
+        super().__init__(arm)
+        self.arm = arm
+        self.step_size = float(step)
+
+    def step(self):
+        self.steps += 1
+        delta = self.arm.target - self.arm.current
+        change = np.clip(delta, -self.step_size, self.step_size)
+        self.arm.velocity = change / 0.05
+        self.arm.current += change
 
 
 class _Solver:
@@ -123,7 +225,8 @@ class _Solver:
             raise self.result
         if self.result is None:
             return None
-        return _Result(self.result)
+        value = self.result(target_pose) if callable(self.result) else self.result
+        return _Result(value)
 
 
 class _Result:
@@ -149,6 +252,34 @@ class _Factory:
         return solver
 
 
+class _LocalStepSolver:
+    chain_source = "fake_exact_chain"
+    chain_schema = "fake-exact-chain-v1"
+
+    def __init__(self, arm, maximum_cartesian_step):
+        self.arm = arm
+        self.maximum_cartesian_step = float(maximum_cartesian_step)
+
+    def solve(self, target_pose):
+        target = np.asarray(target_pose, dtype=np.float64)
+        if abs(float(target[0]) - float(self.arm.current[0])) > (
+            self.maximum_cartesian_step + 1.0e-9
+        ):
+            return None
+        return _Result([target[0], 0.0])
+
+
+class _LocalStepFactory:
+    def __init__(self, maximum_cartesian_step):
+        self.maximum_cartesian_step = float(maximum_cartesian_step)
+        self.calls = []
+
+    def __call__(self, arm):
+        arm.solver_events.append("trac_ik_distance")
+        self.calls.append(arm)
+        return _LocalStepSolver(arm, self.maximum_cartesian_step)
+
+
 def _target(x):
     return np.asarray([x, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
 
@@ -167,6 +298,24 @@ def _execute(scene, arm_targets, factory, *, config=None):
         invalid_action_error=_InvalidActionError,
         path_algorithm="RRTConnect",
         error_message="dev IK failed",
+    )
+    return status, diagnostics
+
+
+def _execute_stage6(scene, arm_targets, factory):
+    diagnostics = initialize_global_ik_controller_diagnostics()
+    status = execute_stage6_ik_ee_control(
+        scene,
+        tuple(arm_targets),
+        config=Stage6IKControllerConfig(),
+        diagnostics=diagnostics,
+        external_solver_factory=factory,
+        ik_error=_IKError,
+        configuration_error=_ConfigurationError,
+        configuration_path_error=_ConfigurationPathError,
+        invalid_action_error=_InvalidActionError,
+        path_algorithm="RRTConnect",
+        error_message="stage6 IK failed",
     )
     return status, diagnostics
 
@@ -213,6 +362,372 @@ def test_profile_is_formal_global_and_declares_solver_order():
     assert diagnostics["selected_via_pseudo_inverse"] == 1
     assert diagnostics["selected_via_jacobian"] == 1
     assert diagnostics["selected_joint_delta_l2_max"] == pytest.approx(2**0.5 / 10)
+
+
+def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
+    config = Stage6IKControllerConfig()
+    metadata = config.metadata()
+    controller = global_ik_controller_metadata(config)
+
+    assert metadata["profile"] == STAGE6_IK_CONTROLLER_PROFILE
+    assert metadata["post_execution_cartesian_verification"] is True
+    assert metadata["fallback_collision_policy"] == (
+        "collision_aware_first_then_bounded_relaxation"
+    )
+    assert metadata["task_specific_controller_branches"] is False
+    assert metadata["ik_order"].startswith(
+        "current_seeded_continuous_pseudo_inverse_then_"
+    )
+    assert "then_bounded_cartesian_continuation_" in metadata["ik_order"]
+    assert metadata["primary_resolution_method"] == (
+        "current_seeded_coppeliasim_pseudo_inverse"
+    )
+    assert metadata["pseudo_inverse_continuity_gate"] is True
+    assert metadata["trac_ik_translation_tolerance_m"] == pytest.approx(0.0005)
+    assert metadata["trac_ik_rotation_tolerance_rad"] == pytest.approx(np.deg2rad(0.05))
+    assert metadata["trac_ik_fk_translation_max_m"] == pytest.approx(0.002)
+    assert metadata["trac_ik_fk_rotation_max_rad"] == pytest.approx(np.deg2rad(1.0))
+    assert controller["sampling_ik"]["ignore_collisions"] is False
+    assert controller["far_path"]["ignore_collisions"] is False
+    assert controller["sampling_collision_policy"] == (
+        "collision_aware_then_collision_relaxed"
+    )
+    assert controller["path_fallback"]["order"] == (
+        "collision_aware_linear_then_collision_relaxed_linear_"
+        "then_far_only_collision_aware_rrt_connect"
+    )
+    assert controller["post_execution_cartesian_verification"] is True
+    assert controller["cartesian_translation_tolerance_m"] == pytest.approx(0.0005)
+    assert controller["cartesian_rotation_tolerance_rad"] == pytest.approx(
+        np.deg2rad(0.05)
+    )
+    assert controller["control_acceptance_translation_tolerance_m"] == (
+        pytest.approx(0.0005)
+    )
+    assert controller["control_acceptance_rotation_tolerance_rad"] == (
+        pytest.approx(np.deg2rad(0.05))
+    )
+    assert controller["same_target_alternate_solver_after_primary_stall"] is False
+    assert controller["unreported_hidden_motion_after_physical_stall"] is False
+    assert controller["joint_target_execution"] == (
+        "shared_clock_joint_target_until_reached_or_stopped"
+    )
+    assert controller["same_target_ik_solution_cache"] is False
+    assert metadata["cartesian_continuation"] == {
+        "entry_condition": "full_target_local_ik_exhausted",
+        "translation_step_m": pytest.approx(0.005),
+        "rotation_step_rad": pytest.approx(np.deg2rad(2.0)),
+        "backoff_factors": [1.0, 0.5, 0.25, 0.125],
+        "max_segments_per_policy_action": 96,
+        "interpolation": "linear_translation_shortest_xyzw_slerp",
+        "progress_feedback": "physical_pose_reobserved_between_segments",
+        "commit_semantics": ("finish_original_policy_target_or_report_measured_stall"),
+        "task_specific": False,
+    }
+    assert metadata["sampling_collision_policy"] == (
+        "collision_aware_then_collision_relaxed"
+    )
+
+
+def test_stage6_continues_toward_a_target_outside_local_ik_basin():
+    arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
+    factory = _LocalStepFactory(maximum_cartesian_step=0.005)
+
+    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert arm.current[0] == pytest.approx(0.05)
+    assert diagnostics["cartesian_continuation_attempts"] == 9
+    assert diagnostics["cartesian_continuation_successes"] == 9
+    assert diagnostics["cartesian_continuation_failures"] == 0
+    assert diagnostics["selected_via_cartesian_continuation"] == 9
+    assert diagnostics["cartesian_multi_pass_goals_completed"] == 1
+    assert diagnostics["cartesian_continuation_fraction_min"] == pytest.approx(0.1)
+    assert arm.sampling_calls == []
+
+
+def test_stage6_continuation_backs_off_before_global_sampling():
+    arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
+    factory = _LocalStepFactory(maximum_cartesian_step=0.00125)
+
+    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert arm.current[0] == pytest.approx(0.05)
+    assert diagnostics["cartesian_continuation_attempts"] == 113
+    assert diagnostics["cartesian_continuation_successes"] == 39
+    assert diagnostics["cartesian_continuation_failures"] == 0
+    assert diagnostics["cartesian_continuation_fraction_min"] == pytest.approx(0.025)
+    assert arm.sampling_calls == []
+
+
+def test_stage6_reobserves_between_bounded_cartesian_continuation_steps():
+    arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
+    scene = _Scene(arm)
+    factory = _LocalStepFactory(maximum_cartesian_step=0.005)
+
+    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert arm.current[0] == pytest.approx(0.05)
+    assert len(factory.calls) == 19
+    assert diagnostics["cartesian_multi_pass_goals_completed"] == 1
+
+
+def test_stage6_direct_feedback_reaches_a_dense_target():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    factory = _Factory(lambda target: [target[0], 0.0])
+
+    status, diagnostics = _execute_stage6(
+        _Scene(arm), ((arm, _target(0.018)),), factory
+    )
+
+    assert status == "reached"
+    assert factory.calls == []
+    assert arm.solver_events == ["pseudo_inverse"]
+    assert diagnostics["selected_via_pseudo_inverse"] == 1
+    assert diagnostics["cartesian_direct_goal_reaches"] == 1
+    np.testing.assert_allclose(arm.current, [0.018, 0.0])
+
+
+def test_stage6_converged_execution_is_not_limited_to_four_raw_steps():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    factory = _Factory(lambda _target: [0.2, 0.0])
+    scene = _SlowScene(arm)
+
+    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.2)),), factory)
+
+    assert status == "reached"
+    assert scene.steps > 4
+    assert arm.current[0] == pytest.approx(0.2)
+    assert diagnostics["trac_ik_distance_controller_raw_physics_steps"] == (scene.steps)
+
+
+def test_stage6_resolves_the_same_cartesian_target_from_each_new_observation():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    scene = _Scene(arm)
+    factory = _Factory(lambda _target: [0.2, 0.0])
+
+    statuses = [
+        _execute_stage6(scene, ((arm, _target(0.2)),), factory)[0] for _ in range(2)
+    ]
+
+    assert statuses == ["reached", "reached"]
+    assert arm.solver_events == ["pseudo_inverse", "pseudo_inverse"]
+    np.testing.assert_allclose(arm.current, [0.2, 0.0])
+
+
+def test_stage6_direct_feedback_reports_real_progress_for_a_farther_target():
+    arm = _CartesianArm(jacobian_result=lambda position: [0.5 * position[0], 0.0])
+    factory = _Factory(lambda target: [0.5 * target[0], 0.0])
+
+    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+
+    assert status == "progressed"
+    np.testing.assert_allclose(arm.current, [0.025, 0.0])
+    assert diagnostics["cartesian_direct_goal_progress_accepts"] == 1
+    assert diagnostics["cartesian_goal_directed_progress_accepts"] == 1
+
+
+def test_stage6_slow_motion_converges_within_one_policy_action():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    scene = _SlowScene(arm)
+    factory = _Factory(lambda target: [target[0], 0.0])
+
+    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert scene.steps > 4
+    assert arm.current[0] == pytest.approx(0.05)
+    assert diagnostics.get("controller_raw_physics_budget_exhaustions", 0) == 0
+
+
+def test_stage6_small_observed_motion_is_not_limited_to_four_raw_steps():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    scene = _SlowScene(arm, step=0.0015)
+    factory = _Factory(lambda target: [target[0], 0.0])
+    config = Stage6IKControllerConfig()
+
+    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert scene.steps > 4
+    assert abs(arm.current[0] - 0.05) <= (
+        config.physical_completion_translation_tolerance_m
+    )
+    assert diagnostics.get("controller_raw_physics_budget_exhaustions", 0) == 0
+
+
+def test_stage6_native_primary_avoids_a_coarse_external_model_solution():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    scene = _Scene(arm)
+    factory = _Factory(lambda target: [target[0] - 0.0015, 0.0])
+
+    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert arm.current[0] == pytest.approx(0.05)
+    assert arm.solver_events == ["pseudo_inverse"]
+    assert factory.calls == []
+    assert diagnostics["selected_via_pseudo_inverse"] == 1
+    assert diagnostics["selected_via_trac_ik_distance"] == 0
+
+
+def test_stage6_uses_external_solver_when_native_primary_has_no_solution():
+    arm = _CartesianArm(jacobian_result=_IKError("no native solution"))
+    scene = _Scene(arm)
+    factory = _Factory(lambda target: [target[0], 0.0])
+
+    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert arm.current[0] == pytest.approx(0.05)
+    assert arm.solver_events == ["pseudo_inverse", "trac_ik_distance"]
+    assert diagnostics["pseudo_inverse_ik_failures"] == 1
+    assert diagnostics["selected_via_trac_ik_distance"] == 1
+
+
+def test_stage6_resolves_again_when_cartesian_target_changes():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    scene = _Scene(arm)
+    factory = _Factory(lambda target: [target[0], 0.0])
+
+    _execute_stage6(scene, ((arm, _target(0.02)),), factory)
+    _execute_stage6(scene, ((arm, _target(0.03)),), factory)
+
+    assert arm.solver_events == ["pseudo_inverse", "pseudo_inverse"]
+
+
+def test_global_controller_does_not_use_the_stage6_joint_cache():
+    arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    scene = _Scene(arm)
+    factory = _Factory(lambda target: [target[0], 0.0])
+
+    _execute(scene, ((arm, _target(0.02)),), factory)
+    _execute(scene, ((arm, _target(0.02)),), factory)
+
+    assert arm.solver_events == ["pseudo_inverse", "pseudo_inverse"]
+
+
+def test_stage6_sampling_fallback_is_collision_aware():
+    arm = _CartesianArm(
+        jacobian_result=_IKError("no local solution"),
+        sampling_result=[[0.005, 0.0]],
+    )
+    factory = _Factory(RuntimeError("no external solution"))
+
+    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+
+    assert status == "progressed"
+    assert len(arm.sampling_calls) >= 1
+    _args, kwargs = arm.sampling_calls[0]
+    assert kwargs["ignore_collisions"] is False
+    assert diagnostics["selected_via_sampling"] >= 1
+
+
+def test_stage6_sampling_relaxes_collision_filter_only_after_aware_failure():
+    arm = _CollisionSelectiveSamplingArm()
+    factory = _Factory(RuntimeError("no external solution"))
+
+    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert [call[1]["ignore_collisions"] for call in arm.sampling_calls] == [
+        False,
+        True,
+    ]
+    assert diagnostics["sampling_collision_relaxed_attempts"] == 1
+    assert diagnostics["sampling_collision_relaxed_successes"] == 1
+    assert diagnostics["selected_via_collision_relaxed_sampling"] == 1
+
+
+def test_stage6_near_fallback_uses_fast_linear_path_before_nonlinear_planning():
+    arm = _LinearPathArm(collision_aware_fails=True)
+    factory = _Factory(RuntimeError("no external solution"))
+
+    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+
+    assert status == "reached"
+    assert [call[1]["ignore_collisions"] for call in arm.linear_path_calls] == [
+        False,
+        True,
+    ]
+    assert arm.path_calls == []
+    assert diagnostics["linear_path_collision_aware_failures"] == 1
+    assert diagnostics["linear_path_collision_relaxed_successes"] == 1
+    assert diagnostics["far_target_planner_attempts"] == 0
+
+
+def test_stage6_near_fallback_skips_unbounded_nonlinear_planning():
+    arm = _LinearPathArm(collision_aware_fails=True, relaxed_fails=True)
+    factory = _Factory(RuntimeError("no external solution"))
+    diagnostics = initialize_global_ik_controller_diagnostics()
+
+    with pytest.raises(_InvalidActionError):
+        execute_stage6_ik_ee_control(
+            _Scene(arm),
+            ((arm, _target(0.05)),),
+            config=Stage6IKControllerConfig(),
+            diagnostics=diagnostics,
+            external_solver_factory=factory,
+            ik_error=_IKError,
+            configuration_error=_ConfigurationError,
+            configuration_path_error=_ConfigurationPathError,
+            invalid_action_error=_InvalidActionError,
+            path_algorithm="RRTConnect",
+            error_message="stage6 IK failed",
+        )
+
+    assert arm.path_calls == []
+    assert diagnostics["near_target_nonlinear_planner_skips"] == 1
+    assert diagnostics["far_target_planner_attempts"] == 0
+
+
+def test_stage6_keeps_all_bimanual_targets_active_on_the_shared_physics_clock():
+    right = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    left = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    left.current = np.asarray([0.05, 0.0])
+    left.target = left.current.copy()
+    factory = _Factory(lambda target: [target[0], 0.0])
+
+    status, diagnostics = _execute_stage6(
+        _Scene(right, left),
+        ((right, _target(0.05)), (left, _target(0.05))),
+        factory,
+    )
+
+    assert status == "reached"
+    assert right.solver_events == ["pseudo_inverse"]
+    assert left.solver_events == ["pseudo_inverse"]
+    assert factory.calls == []
+
+
+def test_stage6_accepts_one_arm_progress_while_the_other_is_stationary():
+    moving = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    stalled = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
+    factory = _Factory(lambda target: [target[0], 0.0])
+
+    status, diagnostics = _execute_stage6(
+        _PartiallyStalledScene(moving, stalled),
+        ((moving, _target(0.05)), (stalled, _target(0.05))),
+        factory,
+    )
+
+    assert status == "progressed"
+    assert moving.current[0] == pytest.approx(0.05)
+    assert stalled.current[0] == pytest.approx(0.0)
+    assert diagnostics["cartesian_partial_arm_progress_accepts"] == 1
+
+
+def test_stage6_reports_joint_motion_without_cartesian_progress_as_stopped():
+    arm = _CartesianArm(jacobian_result=[-0.2, 0.0])
+    factory = _Factory(RuntimeError("no external solution"))
+
+    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+
+    assert status == "stopped"
+    assert arm.current[0] < 0.0
+    assert diagnostics["reached_joint_target_with_cartesian_residual"] == 1
 
 
 def test_evaluators_reject_removed_development_profile_before_importing_pyrep():
@@ -396,9 +911,7 @@ def test_path_is_only_after_pseudo_trac_and_sampling_fail_for_far_target():
     arm = _Arm(jacobian_result=_IKError("no local solution"))
     factory = _Factory(RuntimeError("no external solution"))
 
-    status, diagnostics = _execute(
-        _Scene(arm), ((arm, _target(0.100001)),), factory
-    )
+    status, diagnostics = _execute(_Scene(arm), ((arm, _target(0.100001)),), factory)
 
     assert status == "reached"
     assert len(arm.path_calls) == 1
