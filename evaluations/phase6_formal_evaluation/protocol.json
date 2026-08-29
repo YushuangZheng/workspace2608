@@ -1,7 +1,7 @@
 {
   "schema": "essay2608.phase6_formal_protocol.v1",
   "status": "preregistered_before_results",
-  "implementation_parent_commit": "671c6be48ddced7263378ba55a99e8714461b256",
+  "implementation_parent_commit": "6b86b172d437da2363161c2db60af5599502ff89",
   "pre_result_amendment": {
     "date_utc": "2026-08-29",
     "before_any_validated_formal_cell": true,
@@ -32,6 +32,23 @@
       "full_successes": 9,
       "dynamac_v4_shared_executor_audit_successes": 9,
       "episodes_per_method": 10
+    }
+  },
+  "pre_result_amendment_3": {
+    "date_utc": "2026-08-29",
+    "before_any_retained_formal_cell": true,
+    "reason": "Four reproducible full-only PlaceCups failures in the early normal matrix reached valid recovery geometry but were rejected because event expansion and reentry compared raw overlap with a soft relation prior directly against a fixed absolute threshold.",
+    "resolution": "Thresholded state eligibility now uses peak-normalized soft-prior support together with uncompensated external/linked direction consistency. Raw relation overlap remains unchanged in the progress posterior, and no task-specific branch or additional gate was introduced.",
+    "implementation_parent_commit": "6b86b172d437da2363161c2db60af5599502ff89",
+    "invalidated_attempt_disposition": "All incomplete results produced before this repair are excluded from statistics and removed from the formal result root before restart.",
+    "same_episode_validation": {
+      "task": "place_cups",
+      "method": "full",
+      "episode_indices": [4, 16, 18, 21],
+      "successes": 4,
+      "episodes": 4,
+      "selected_reentry_state": "k4:t24",
+      "targeted_tests_passed": 119
     }
   },
   "evaluation_set": {
