@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -1299,6 +1300,65 @@ def test_reentry_reuses_recovery_covariance_without_changing_normal_scores(
         ),
     )
     assert manager.reentry.robot_covariance_inflation == recovery_inflation
+
+
+def test_reentry_alignment_routes_with_candidate_relation_without_mutating_beta(
+    phase5_case,
+) -> None:
+    model, demonstrations, _ = phase5_case
+    candidate = StateId(1, 0)
+    frozen = StateId(1, 2)
+    assert model.state(candidate).demo_relation_priors["object"][0, 0] > 0.5
+    assert model.state(frozen).demo_relation_priors["object"][0, 1] > 0.5
+
+    frozen_belief = belief_for(
+        model,
+        demonstrations,
+        frozen,
+        relation(RelationDecision.EXTERNAL),
+    )
+    belief = replace(
+        frozen_belief,
+        runtime_features=features_for(model, demonstrations, candidate),
+    )
+    controller = ClosedLoopExecutionController(model)
+    mode_by_skill = {1: 0}
+
+    # Ordinary TASK routing intentionally keeps using the real frozen beta:
+    # its linked expectation conflicts with the observed external relation.
+    ordinary = controller._route_roles(
+        candidate,
+        belief,
+        mode_by_skill=mode_by_skill,
+        commit=False,
+    )
+    assert ordinary.blocks_advance is True
+
+    calls = []
+    expected = SimpleNamespace(action=object())
+
+    def query(observation, state_id, roles, *, mode_index=None):
+        calls.append((observation, state_id, roles, mode_index))
+        return expected
+
+    controller.weighted_poe = SimpleNamespace(query=query)
+    observation = DynaMACObservation(
+        demonstrations[0].ee_pose[4],
+        {"object": demonstrations[0].frames["object"][4]},
+    )
+    result = controller.query_reentry_alignment(
+        candidate,
+        belief,
+        observation,
+        mode_by_skill=mode_by_skill,
+    )
+
+    assert result is expected
+    assert len(calls) == 1
+    assert calls[0][1] == candidate
+    assert calls[0][2].blocks_advance is False
+    assert belief.progress.posterior == {frozen: 1.0}
+    assert belief.progress.estimated_state == frozen
 
 
 def test_reentry_relation_threshold_uses_soft_peak_scale_and_physical_direction(

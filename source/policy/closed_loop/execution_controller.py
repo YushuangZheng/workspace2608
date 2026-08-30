@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -499,9 +499,27 @@ class ClosedLoopExecutionController:
 
         if state_id not in self.task_model.states:
             raise KeyError(f"恢复重入对齐引用未知状态 {state_id}")
+        # Reentry selection has already checked this candidate's robot,
+        # scene, and relation conditions.  Route the *alignment action* with
+        # that same candidate-conditioned relation expectation instead of the
+        # frozen fault state's beta-weighted expectation.  Otherwise a valid
+        # earlier state can be selected for alignment and then be blocked by
+        # the relation semantics of the state from which recovery started.
+        #
+        # This is a read-only routing view.  The committed belief, beta,
+        # cursor, role history, and task clock stay frozen until the ordinary
+        # full-state reentry decision succeeds below the existing thresholds.
+        conditioned_progress = replace(
+            belief.progress,
+            prior={state_id: 1.0},
+            posterior={state_id: 1.0},
+            nominal_state=state_id,
+            estimated_state=state_id,
+        )
+        conditioned_belief = replace(belief, progress=conditioned_progress)
         roles = self._route_roles(
             state_id,
-            belief,
+            conditioned_belief,
             mode_by_skill=mode_by_skill,
             commit=False,
         )

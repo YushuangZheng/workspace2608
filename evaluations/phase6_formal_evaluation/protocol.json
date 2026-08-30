@@ -95,6 +95,30 @@
       "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v21"
     }
   },
+  "implementation_correction_after_invalidated_reentry_alignment_context_audit": {
+    "date_utc": "2026-08-30",
+    "implementation_parent_commit": "e7ec315330004d0bbabbfcbdfc8c2ae4a681f158",
+    "retained_formal_results_before_correction": false,
+    "observed_audit_scope": "2511 of 6400 normal episodes and 10 complete cells; the entire attempt is invalidated",
+    "reason": "Reentry selection evaluated a candidate with that candidate's relation prior, but alignment action routing reused the frozen fault-state beta and could therefore block the selected candidate with stale relation semantics.",
+    "resolution": "Route only the read-only alignment action with a candidate-conditioned progress view. The real beta, StateId, reference_state, mode, role history, task clock, candidates, thresholds, and atomic reentry criteria remain frozen and unchanged.",
+    "invalidated_attempt_disposition": "All results and diagnostics from the audit attempt are excluded from statistics and moved out of the formal result root before a complete restart from the repaired commit.",
+    "automated_validation": {
+      "stage5_stage6_tests_passed": 39,
+      "candidate_relation_context_regression_exercised": true,
+      "real_belief_and_reference_unchanged": true
+    },
+    "real_simulator_nonregression": {
+      "task": "open_microwave",
+      "method": "full",
+      "episode_indices": [177, 180],
+      "successes": 2,
+      "episodes": 2,
+      "control_cycles": [482, 231],
+      "alignment_branch_reentered": false,
+      "interpretation": "same sealed environments succeeded without normal-task regression; simulator nondeterminism avoided the old final alignment branch, whose direct evidence remains the targeted regression"
+    }
+  },
   "evaluation_set": {
     "id": "rlbench_eval_v2",
     "seed_start": 2608000000,
