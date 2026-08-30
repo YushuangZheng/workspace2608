@@ -13,6 +13,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     GlobalIKControllerConfig,
     Stage6IKControllerConfig,
     _prepare_collision_aware_path_command,
+    _release_configuration_path_motion_handle,
     execute_global_ik_ee_control,
     execute_stage6_ik_ee_control,
     global_ik_controller_metadata,
@@ -63,6 +64,38 @@ class _Path:
 
     def get_executed_joint_position_action(self):
         return self.target.copy()
+
+
+class _ActiveRMLPath:
+    def __init__(self, *, handle=17, done=False):
+        self._rml_handle = handle
+        self._path_done = bool(done)
+
+
+def test_unfinished_configuration_path_releases_owned_motion_handle_once():
+    path = _ActiveRMLPath()
+    removed = []
+
+    assert _release_configuration_path_motion_handle(
+        path, remover=removed.append
+    )
+    assert removed == [17]
+    assert path._rml_handle is None
+    assert path._path_done is True
+    assert not _release_configuration_path_motion_handle(
+        path, remover=removed.append
+    )
+    assert removed == [17]
+
+
+def test_completed_configuration_path_does_not_remove_handle_twice():
+    path = _ActiveRMLPath(done=True)
+    removed = []
+
+    assert not _release_configuration_path_motion_handle(
+        path, remover=removed.append
+    )
+    assert removed == []
 
 
 class _Arm:

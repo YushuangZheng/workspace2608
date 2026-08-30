@@ -411,7 +411,7 @@ IK_SAMPLING_MAX_CONFIGS = 5
 IK_SAMPLING_MAX_TIME_MS = 10
 IK_JOINT_LIMIT_ATOL = 1.0e-9
 GLOBAL_IK_CONTROLLER_PROFILE = "global_pseudo_trac_sampling_path_formal_v1"
-STAGE6_IK_CONTROLLER_PROFILE = "stage6_hybrid_cartesian_executor_v17"
+STAGE6_IK_CONTROLLER_PROFILE = "stage6_hybrid_cartesian_executor_v18"
 FROZEN_V4_CONTROLLER_PROFILE = "v4_frozen_legacy_replay"
 FROZEN_V4_IK_RESOLUTION_METHOD = "pseudo_inverse"
 FROZEN_V4_IK_MAX_ITERATIONS = 6
@@ -651,7 +651,7 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
 
     @property
     def protocol_id(self) -> str:
-        return "rlbench-stage6-hybrid-cartesian-continuation-v20"
+        return "rlbench-stage6-hybrid-cartesian-continuation-v21"
 
     def metadata(self) -> dict[str, Any]:
         value = super().metadata()
@@ -725,6 +725,9 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
                     ),
                     "near_nonlinear_entry_condition": (
                         "same_target_measured_stall_exhausted_local_solver_tiers"
+                    ),
+                    "motion_handle_lifetime": (
+                        "released_when_complete_or_before_bounded_controller_return"
                     ),
                     "task_specific": False,
                 },
@@ -921,6 +924,37 @@ class PreparedEECommand:
                 raise ValueError("planned-path command requires a step API")
         else:
             raise ValueError("unsupported prepared EE command mode")
+
+
+def _release_configuration_path_motion_handle(
+    path: Any,
+    *,
+    remover: Callable[[int], Any] | None = None,
+) -> bool:
+    """Release one unfinished PyRep configuration-path motion handle.
+
+    ``ArmConfigurationPath.step`` removes its Reflexxes handle only when the
+    complete path reaches its end.  Stage six deliberately returns to the
+    observer after a bounded number of raw physics steps, so an unfinished
+    path is discarded by design and must release that simulator resource at
+    the same ownership boundary.  Completed paths have already removed their
+    handle inside PyRep and are left untouched.
+    """
+
+    handle = getattr(path, "_rml_handle", None)
+    if handle is None or bool(getattr(path, "_path_done", False)):
+        return False
+    if remover is None:
+        from pyrep.backend import sim
+
+        remover = sim.simRMLRemove
+    remover(int(handle))
+    # This path object is discarded after the bounded controller return.  Mark
+    # it terminal as well as clearing the stale simulator handle so accidental
+    # reuse cannot recreate or step a prefix that no longer owns its motion.
+    setattr(path, "_rml_handle", None)
+    setattr(path, "_path_done", True)
+    return True
 
 
 _STAGE6_JOINT_CACHE_ATTRIBUTE = "_dynamac_stage6_joint_target_cache_v1"
@@ -1466,6 +1500,8 @@ def initialize_global_ik_controller_diagnostics() -> dict[str, Any]:
             "cartesian_multi_pass_goals_completed": 0,
             "cartesian_multi_pass_limit_exhaustions": 0,
             "cartesian_multi_pass_solver_exhaustions_after_progress": 0,
+            "planned_path_motion_handle_releases": 0,
+            "planned_path_motion_handle_release_failures": 0,
         }
     )
     return diagnostics
@@ -3227,6 +3263,20 @@ def execute_global_ik_ee_control(
             budget_exhaustion_is_stopped=budget_exhaustion_is_stopped,
         )
     finally:
+        release_error: Exception | None = None
+        for command in prepared:
+            if command.mode != "planned_path":
+                continue
+            try:
+                if _release_configuration_path_motion_handle(command.path):
+                    _increment_ik_diagnostic(
+                        diagnostics, "planned_path_motion_handle_releases"
+                    )
+            except Exception as exc:
+                _increment_ik_diagnostic(
+                    diagnostics, "planned_path_motion_handle_release_failures"
+                )
+                release_error = exc
         steps = int(counter["steps"])
         if int(counter.get("budget_exhausted", 0)):
             _increment_ik_diagnostic(
@@ -3243,6 +3293,8 @@ def execute_global_ik_ee_control(
             ),
             steps,
         )
+        if release_error is not None:
+            raise invalid_action_error(error_message) from release_error
 
 
 def _cartesian_unresolved_targets(

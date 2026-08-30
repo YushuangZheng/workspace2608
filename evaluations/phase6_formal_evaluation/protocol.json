@@ -106,7 +106,7 @@
     }
   },
   "shared_execution": {
-    "controller_profile": "stage6_hybrid_cartesian_executor_v17",
+    "controller_profile": "stage6_hybrid_cartesian_executor_v18",
     "scenario": "static",
     "horizon": 1000,
     "policy_timeout_seconds": 120.0,
