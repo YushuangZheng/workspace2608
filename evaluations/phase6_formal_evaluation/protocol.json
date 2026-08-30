@@ -1,7 +1,7 @@
 {
   "schema": "essay2608.phase6_formal_protocol.v1",
-  "status": "preregistered_before_results",
-  "implementation_parent_commit": "6b86b172d437da2363161c2db60af5599502ff89",
+  "status": "preregistered_before_results_with_invalidated_implementation_audits",
+  "implementation_parent_commit": "7915a236ac02df401f69f65e6c007ad8c018aa6b",
   "pre_result_amendment": {
     "date_utc": "2026-08-29",
     "before_any_validated_formal_cell": true,
@@ -49,6 +49,25 @@
       "episodes": 4,
       "selected_reentry_state": "k4:t24",
       "targeted_tests_passed": 119
+    }
+  },
+  "implementation_correction_after_invalidated_audit_matrix": {
+    "date_utc": "2026-08-30",
+    "implementation_parent_commit": "7915a236ac02df401f69f65e6c007ad8c018aa6b",
+    "retained_formal_results_before_correction": false,
+    "observed_audit_scope": "19 of 32 normal cells completed; the entire attempt is invalidated",
+    "reason": "The relation likelihood geometrically multiplied translation and rotation component evidence. During a normal Handover grasp, compliant rotational contact wobble could therefore veto clear translational co-motion, falsely classify an intact link as external, and trigger destructive LINK recovery.",
+    "resolution": "Marginalize finite per-component likelihoods with weights proportional to the actually observed action component magnitude. This introduces no state, task branch, threshold, or fitted parameter; single-component excitation is unchanged and sustained all-component mismatch remains external evidence.",
+    "invalidated_attempt_disposition": "All results and diagnostics from the audit attempt are excluded from statistics and moved out of the formal result root before a complete restart from the repaired commit.",
+    "same_episode_validation": {
+      "task": "bimanual_handover_item",
+      "method": "full",
+      "episode_index": 3,
+      "previous_outcome": "policy_structured_failure after false LINK recovery",
+      "repaired_outcome": "success",
+      "repaired_steps": 289,
+      "recovery_entered": false,
+      "closed_loop_tests_passed": 177
     }
   },
   "evaluation_set": {
