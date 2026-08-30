@@ -59,7 +59,7 @@
 
 在不改写上述 v16/v18 pilot 身份的前提下，正式评测前又完成三项通用闭环修复：TASK 夹爪改由每臂进度对齐与边界事务授权，执行器 `reached/progressed/stopped` 只保留物理反馈语义；VERIFY_LINK 在原路返回结束时精确提交稳定周期的原二元关系后验；同一目标的碰撞感知线性路径若“生成成功但物理停滞”，后续周期会继续尝试碰撞感知非线性路径和最后的碰撞放宽线性路径。这些规则均不读取任务名、seed、StateId 或对象身份。
 
-快速真实门控使用封存正常索引0：PlaceCups 在190周期成功；Handover 在245周期首次成功、0 InvalidAction，诊断续跑中右臂完成 VERIFY_LINK 并以 `[0.127675, 0.872325]` 的原始在线后验返回 TASK。定向测试79项通过，全仓为 `651 passed, 4 skipped in 323.72s`。正式评测四种方法将统一使用 `stage6_hybrid_cartesian_executor_v17` / `rlbench-stage6-hybrid-cartesian-continuation-v20`；本节只是启动前门控，不与上方 pilot 合并统计。机器可读摘要保存在 `results/preformal_gate_v1/summary.json`。
+快速真实门控使用封存正常索引0：PlaceCups 在190周期成功；Handover 在245周期首次成功、0 InvalidAction，诊断续跑中右臂完成 VERIFY_LINK 并以 `[0.127675, 0.872325]` 的原始在线后验返回 TASK。定向测试79项通过，全仓为 `651 passed, 4 skipped in 323.72s`。该门控产物保留其生成时的 v17/v20 身份；正式评测四种方法将统一使用修复有界规划路径资源生命周期后的 `stage6_hybrid_cartesian_executor_v18` / `rlbench-stage6-hybrid-cartesian-continuation-v21`，不把旧门控伪装成新执行器结果。本节只是启动前门控，不与上方 pilot 合并统计。机器可读摘要保存在 `results/preformal_gate_v1/summary.json`。
 
 ```text
 9009094a2903b447c1d4421e22ae27db1fea4ce5eaadfe53d8b284b753f3418c  integrations/rlbench/results/diagnostics/place_cups_v18_task_gripper_auth_ep0_h300.json

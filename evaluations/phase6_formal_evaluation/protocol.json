@@ -70,6 +70,31 @@
       "closed_loop_tests_passed": 177
     }
   },
+  "implementation_correction_after_invalidated_executor_lifecycle_audit": {
+    "date_utc": "2026-08-30",
+    "implementation_parent_commit": "0d9840a684f0bd0ea33c6a69e57118ab0b68bd69",
+    "retained_formal_results_before_correction": false,
+    "observed_audit_scope": "approximately 545 normal episodes completed before the incomplete attempt was stopped and invalidated",
+    "reason": "A PyRep planned path removes its Reflexxes motion handle only when the full path completes. The shared Stage-six executor intentionally returns after a bounded raw-physics budget, so an unfinished planned-path prefix could be discarded without releasing its simulator-owned handle.",
+    "resolution": "Release every unfinished planned-path motion handle at the bounded controller ownership boundary before returning reached, progressed, stopped, or an exception. This changes only executor resource lifetime; StateId, progress, relation, role, boundary, recovery, task set, sample set, fault protocol, and statistical plan are unchanged.",
+    "invalidated_attempt_disposition": "The incomplete attempt is excluded from all statistics and moved out of the formal result root before restart from the repaired commit.",
+    "automated_validation": {
+      "stage5_stage6_and_executor_tests_passed": 170,
+      "tests_skipped_by_environment": 3,
+      "targeted_protocol_and_executor_tests_passed": 55
+    },
+    "real_simulator_validation": {
+      "task": "place_cups",
+      "method": "full",
+      "episode_index": 0,
+      "success": true,
+      "steps": 184,
+      "planned_path_motion_handle_releases": 4,
+      "planned_path_motion_handle_release_failures": 0,
+      "controller_profile": "stage6_hybrid_cartesian_executor_v18",
+      "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v21"
+    }
+  },
   "evaluation_set": {
     "id": "rlbench_eval_v2",
     "seed_start": 2608000000,
