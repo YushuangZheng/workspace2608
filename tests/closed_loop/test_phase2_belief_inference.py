@@ -368,6 +368,8 @@ def test_relation_filter_keeps_mixed_component_contact_wobble_ambiguous(
         action_excitation=0.529,
         relation_information_weight={"object": 0.529},
     )
+    mixed_likelihood = relation_filter._observation_likelihood("object", mixed)
+    assert mixed_likelihood[1] > mixed_likelihood[0]
     previous = confirmed
     for _ in range(4):
         estimate = relation_filter.update(
@@ -392,6 +394,55 @@ def test_relation_filter_keeps_mixed_component_contact_wobble_ambiguous(
         previous_evidence_decisions={"object": RelationDecision.LINKED},
     )["object"]
     assert disconnected.decision_state == RelationDecision.EXTERNAL
+
+
+def test_relation_filter_robust_component_mixture_matches_handover_contact_trace(
+    phase2_model,
+) -> None:
+    """A dominant co-moving component must survive compliant contact wobble."""
+
+    model, _ = phase2_model
+    feature_builder = RuntimeFeatureBuilder()
+    relation_filter = RelationFilter(
+        model,
+        RelationFilterConfig(demonstration_prior_strength=0.0),
+        feature_builder=feature_builder,
+    )
+    previous_observation = observation(0, 0.0, 0.4, previous_ee_x=None)
+    current_observation = observation(1, 0.1, 0.5, previous_ee_x=0.0)
+    base = feature_builder.build(current_observation, previous_observation)
+
+    # Component magnitudes reproduce the critical normal Handover cycle:
+    # translation residual ratio 0.158 supports linked, while a smaller
+    # rotational action component has a contact-wobble ratio 1.389.  The
+    # translation-dominant response is still net linked evidence; a product
+    # fusion incorrectly classified it as a disconnect.
+    actual_motion = np.asarray(
+        [0.0015386, 0.0, 0.0, 0.0, 0.0, 0.003829], dtype=np.float64
+    )
+    relative_residual = np.asarray(
+        [0.0002431, 0.0, 0.0, 0.0, 0.0, 0.0053165], dtype=np.float64
+    )
+    features = replace(
+        base,
+        actual_ee_motion=actual_motion,
+        relative_motion_residuals={"object": relative_residual},
+        actual_motion_magnitude=feature_builder.motion_magnitude(actual_motion),
+        action_excitation=0.160,
+        relation_information_weight={"object": 0.160},
+    )
+
+    likelihood = relation_filter._observation_likelihood("object", features)
+    assert likelihood[1] > likelihood[0]
+
+    estimate = relation_filter.update(
+        {StateId(0, 1): 1.0},
+        features,
+        {"object": np.asarray([0.1, 0.9])},
+        previous_decisions={"object": RelationDecision.LINKED},
+        previous_evidence_decisions={"object": RelationDecision.LINKED},
+    )["object"]
+    assert estimate.decision_state == RelationDecision.LINKED
 
 
 def test_invisible_or_unreliable_relation_is_unknown(phase2_model) -> None:

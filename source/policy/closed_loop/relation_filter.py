@@ -182,16 +182,18 @@ class RelationFilter:
         # actually excited by this action.  Collapsing both into one scalar
         # ratio lets uncommanded rotational contact wobble overwhelm clear
         # translational co-motion (or the converse).  Build one finite
-        # likelihood per component and combine them geometrically in proportion
-        # to the observed action magnitude.  Conflicting components therefore
-        # become bounded, ambiguous evidence instead of an artificial decisive
-        # disconnect observation.
+        # likelihood per component and marginalise the component that supplied
+        # reliable evidence, using the observed action magnitudes as mixture
+        # weights.  This robust mixture keeps conflicting contact evidence
+        # bounded instead of letting one corrupted component veto co-motion by
+        # multiplication.  When only one component is excited the expression
+        # reduces exactly to that component's ordinary likelihood.
         total_action = float(np.sum(action_components))
         if total_action <= np.finfo(np.float64).eps:
             likelihood = np.ones(2, dtype=np.float64)
         else:
             component_weights = action_components / total_action
-            component_log_likelihood = np.zeros(2, dtype=np.float64)
+            likelihood = np.zeros(2, dtype=np.float64)
             for action_magnitude, residual_magnitude, weight in zip(
                 action_components,
                 residual_components,
@@ -215,10 +217,7 @@ class RelationFilter:
                 component_likelihood = (1.0 - outlier) * np.asarray(
                     [1.0 - linked_support, linked_support], dtype=np.float64
                 ) + outlier * np.asarray([0.5, 0.5], dtype=np.float64)
-                component_log_likelihood += float(weight) * np.log(
-                    np.maximum(component_likelihood, self.config.probability_floor)
-                )
-            likelihood = np.exp(component_log_likelihood)
+                likelihood += float(weight) * component_likelihood
 
         # The gripper is weak context only.  It cannot create evidence without
         # motion because the whole likelihood is exponentiated by X below.
