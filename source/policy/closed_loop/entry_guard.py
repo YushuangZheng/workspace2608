@@ -368,6 +368,12 @@ class EntryGuard:
         satisfied.  Local completion remains the subsequent commit criterion.
         """
 
+        # This action is relation-event driven and therefore belongs to the
+        # complete relation/scene-boundary profile.  Progress-only ablations
+        # retain their original local-completion boundary semantics and must
+        # not silently acquire a later-stage relation mechanism.
+        if not self.relation_scene_guards:
+            return None
         if (
             source_state not in boundary.terminal_window
             or belief.progress.estimated_state not in boundary.terminal_window

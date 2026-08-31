@@ -444,8 +444,9 @@ def test_task_gripper_authorization_uses_alignment_and_boundary_transaction() ->
         )
 
     # Ordinary entry-state gripper commands remain transaction-gated.  A
-    # learned relation-establishing close is handled separately by the causal
-    # boundary-link actuator tested below; it never changes this authorization.
+    # learned relation-establishing close is handled separately by the
+    # boundary transition preparation tested below; it never changes this
+    # authorization.
     assert authorization(source, source, ProgressStatus.ALIGNED) is False
     # A committed boundary authorizes the entry-state command in the same
     # cycle although the posterior still describes the source terminal.
@@ -488,7 +489,7 @@ def test_learned_boundary_link_close_is_prepared_without_committing_progress() -
         link_anchors={},
         state=lambda state: nodes[state],
     )
-    guard = SimpleNamespace(task_model=model)
+    guard = SimpleNamespace(task_model=model, relation_scene_guards=True)
     request = TransitionRequest(
         tick=7,
         arm_id="right",
@@ -518,6 +519,24 @@ def test_learned_boundary_link_close_is_prepared_without_committing_progress() -
     assert preparation.event_ids == (event_id,)
     assert np.array_equal(preparation.gripper_command, np.asarray([-1.0]))
     assert request.source_state == source
+
+    # The two progress ablations do not receive this later-stage
+    # relation/boundary mechanism.
+    guard.relation_scene_guards = False
+    assert (
+        EntryGuard._transition_preparation(
+            guard,
+            boundary=boundary_model,
+            source_state=source,
+            target_state=entry,
+            belief=belief,
+            source_mode=0,
+            target_mode=0,
+            guard_results=[],
+        )
+        is None
+    )
+    guard.relation_scene_guards = True
 
     # The same close is not prepared before the terminal window, and removing
     # its learned LINK/PENDING support removes the exception entirely.
@@ -578,7 +597,7 @@ def test_boundary_transition_preparation_never_preexecutes_release() -> None:
         link_anchors={},
         state=lambda state: nodes[state],
     )
-    guard = SimpleNamespace(task_model=model)
+    guard = SimpleNamespace(task_model=model, relation_scene_guards=True)
     belief = SimpleNamespace(progress=SimpleNamespace(estimated_state=source))
     assert (
         EntryGuard._transition_preparation(
