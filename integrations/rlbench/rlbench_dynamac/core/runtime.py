@@ -648,9 +648,7 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
         if not isinstance(self.allow_collision_relaxed_linear_path, bool):
             raise TypeError("allow_collision_relaxed_linear_path must be boolean")
         if not isinstance(self.allow_collision_relaxed_nonlinear_path, bool):
-            raise TypeError(
-                "allow_collision_relaxed_nonlinear_path must be boolean"
-            )
+            raise TypeError("allow_collision_relaxed_nonlinear_path must be boolean")
         if not isinstance(self.allow_collision_relaxed_sampling, bool):
             raise TypeError("allow_collision_relaxed_sampling must be boolean")
 
@@ -1372,7 +1370,8 @@ def commit_joint_hold_after_primary_failure(
         commit = worker.request(
             "commit",
             transaction_id=transaction_id,
-            primary_action_succeeded=False,
+            primary_action_status="stopped",
+            primary_action_applied=False,
         )
     except Exception:
         # The raw physics step cannot be rolled back. Best-effort resolution
@@ -1383,10 +1382,6 @@ def commit_joint_hold_after_primary_failure(
             pass
         raise
     return observation, reward, terminate, bool(commit.get("complete"))
-
-
-# Legacy name retained for replay tooling.
-commit_joint_hold_noop_after_retry_exhaustion = commit_joint_hold_after_primary_failure
 
 
 def initialize_ik_solver_diagnostics() -> dict[str, Any]:

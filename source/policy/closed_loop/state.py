@@ -28,8 +28,8 @@ class ArmCommand:
     covariance: Array
     gripper: Array
     source: str
-    # ``None`` preserves the executor's legacy pose-completion sequencing for
-    # auxiliary or frozen commands.  TASK commands use an explicit Boolean:
+    # ``None`` selects executor-side pose-completion sequencing for auxiliary
+    # or frozen commands.  TASK commands use an explicit Boolean:
     # task-state/boundary semantics, rather than Cartesian millimetre error,
     # decide whether the accompanying gripper transition may be committed.
     gripper_authorized: bool | None = None

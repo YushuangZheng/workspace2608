@@ -15,6 +15,10 @@ from integrations.rlbench.rlbench_closed_loop.eval.fault_injection import (
     FaultInjectingTaskEnvironment,
 )
 from integrations.rlbench.rlbench_dynamac.core.records import atomic_json
+from integrations.rlbench.rlbench_dynamac.core.runtime import (
+    STAGE6_IK_CONTROLLER_PROFILE,
+    Stage6IKControllerConfig,
+)
 from integrations.rlbench.rlbench_dynamac.eval import (
     direct_evaluate,
     unimanual_evaluate,
@@ -49,6 +53,51 @@ def load_protocol(path: Path = PROTOCOL) -> dict[str, Any]:
         "essay2608.phase6_formal_protocol.v1"
     ):
         raise ValueError("unsupported Stage-six formal protocol")
+    expected_sections = {
+        "schema",
+        "status",
+        "active_implementation",
+        "evaluation_set",
+        "tasks",
+        "methods",
+        "shared_execution",
+        "faults",
+        "statistics",
+        "resource_plan",
+        "claims",
+    }
+    if set(value) != expected_sections:
+        raise ValueError("formal protocol contains obsolete or unknown sections")
+    if value.get("status") != "preregistered_active":
+        raise ValueError("formal protocol is not the active preregistered protocol")
+    active = value.get("active_implementation")
+    expected_active_fields = {
+        "controller_profile",
+        "protocol_id",
+        "validated_mechanism_parent_commit",
+        "retained_formal_results_before_activation",
+    }
+    if not isinstance(active, dict) or set(active) != expected_active_fields:
+        raise ValueError("formal active implementation identity is invalid")
+    mechanism_commit = active.get("validated_mechanism_parent_commit")
+    if (
+        not isinstance(mechanism_commit, str)
+        or len(mechanism_commit) != 40
+        or any(character not in "0123456789abcdef" for character in mechanism_commit)
+    ):
+        raise ValueError("formal mechanism commit identity is invalid")
+    if active.get("retained_formal_results_before_activation") is not False:
+        raise ValueError("formal protocol cannot retain pre-activation results")
+    shared = value.get("shared_execution")
+    expected_protocol_id = Stage6IKControllerConfig().protocol_id
+    if (
+        not isinstance(shared, dict)
+        or shared.get("controller_profile") != STAGE6_IK_CONTROLLER_PROFILE
+        or shared.get("protocol_id") != expected_protocol_id
+        or active.get("controller_profile") != shared.get("controller_profile")
+        or active.get("protocol_id") != shared.get("protocol_id")
+    ):
+        raise ValueError("formal active implementation and shared executor differ")
     tasks = value.get("tasks")
     methods = value.get("methods")
     faults = value.get("faults")

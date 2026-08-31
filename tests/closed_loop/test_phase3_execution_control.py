@@ -2135,16 +2135,13 @@ def test_tracked_phase_three_config_matches_code_defaults() -> None:
     assert ClosedLoopExecutionConfig.from_json(path).to_dict() == payload
 
 
-def test_phase_three_config_reads_legacy_command_completion_threshold() -> None:
-    legacy = ClosedLoopExecutionConfig.from_mapping(
-        {"minimum_command_completion_compatibility": 0.75}
-    )
-    assert legacy.minimum_action_equivalence_compatibility == pytest.approx(0.75)
-    assert "minimum_command_completion_compatibility" not in legacy.to_dict()
+def test_phase_three_config_rejects_unknown_top_level_field() -> None:
+    with pytest.raises(ValueError, match="未知分区"):
+        ClosedLoopExecutionConfig.from_mapping({"retired_threshold": 0.75})
 
 
-def test_phase_three_config_ignores_legacy_formal_link_state_cap() -> None:
-    legacy = ClosedLoopExecutionConfig.from_mapping(
-        {"frame_roles": {"formal_link_confirmation_states": 5}}
-    )
-    assert "formal_link_confirmation_states" not in legacy.to_dict()["frame_roles"]
+def test_phase_three_config_rejects_unknown_frame_role_field() -> None:
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        ClosedLoopExecutionConfig.from_mapping(
+            {"frame_roles": {"retired_state_cap": 5}}
+        )

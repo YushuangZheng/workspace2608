@@ -196,7 +196,7 @@ def test_rlbench_worker_commits_bounded_progress_without_completing_target() -> 
         {
             "status": "progressed",
             "status_by_arm": {"single": "progressed"},
-            "command_issued": True,
+            "primary_action_applied": True,
             "task_command_applied": {"single": True},
             "action_response_observed": {"single": True},
             "absolute_target_completed": {"single": False},
@@ -264,6 +264,68 @@ def test_rlbench_worker_does_not_use_bimanual_status_as_progress_commit() -> Non
         "left": "stopped",
         "right": "progressed",
     }
+
+
+def test_rlbench_worker_uses_explicit_stopped_unapplied_primary_action() -> None:
+    class Diagnostics:
+        def __init__(self) -> None:
+            self.annotation = None
+
+        def annotate_last(self, name, value) -> None:
+            self.annotation = (name, value)
+
+    class Policy:
+        def __init__(self) -> None:
+            self.complete = False
+            self.commit_args = None
+            self.diagnostics = Diagnostics()
+
+        def commit(self, *, task_command_applied, absolute_target_completed) -> None:
+            self.commit_args = (task_command_applied, absolute_target_completed)
+
+    server = object.__new__(ClosedLoopPolicyServer)
+    server.arms = ("single",)
+    server.policy = Policy()
+    server._tick = 2
+    pose = _pose_xyzw(0.0)
+    target = _pose_xyzw(0.1)
+    server._previous_ee = {"single": None}
+    server._previous_command = {"single": None}
+    server._previous_command_covariance = {"single": None}
+    server._pending = {
+        "transaction_id": 4,
+        "pre_action_ee": {"single": pose},
+        "commands": {"single": target},
+        "command_covariances": {"single": np.eye(6)},
+        "gripper_authorization": {"single": None},
+    }
+
+    response = server._resolve(
+        {
+            "transaction_id": 4,
+            "primary_action_status": "stopped",
+            "primary_action_applied": False,
+        },
+        commit=True,
+    )
+
+    assert server.policy.commit_args == ({"single": False}, {"single": False})
+    assert np.array_equal(server._previous_command["single"], pose)
+    assert server._previous_command_covariance["single"] is None
+    assert response["primary_action_applied"] is False
+    assert server.policy.diagnostics.annotation[1]["primary_action_applied"] is False
+
+
+def test_rlbench_worker_rejects_unknown_commit_fields() -> None:
+    server = object.__new__(ClosedLoopPolicyServer)
+    server.arms = ("single",)
+    server._pending = {"transaction_id": 5}
+
+    with pytest.raises(ValueError, match="闭环动作事务包含未知字段"):
+        server._resolve(
+            {"transaction_id": 5, "retired_flag": False},
+            commit=True,
+        )
 
 
 def test_rlbench_action_status_reads_stage6_arm_mode_only_when_available() -> None:
@@ -398,23 +460,17 @@ def test_current_state_gripper_transition_must_commit_before_successor() -> None
     terminal = StateId(1, 3)
     policy = SimpleNamespace(
         execution_controllers={
-            "right": SimpleNamespace(
-                cursor=SimpleNamespace(reference_state=current)
-            )
+            "right": SimpleNamespace(cursor=SimpleNamespace(reference_state=current))
         },
         task_models={
             "right": SimpleNamespace(
                 state=lambda state: {
                     current: SimpleNamespace(
-                        topology=SimpleNamespace(
-                            has_cross_skill_successor=False
-                        ),
+                        topology=SimpleNamespace(has_cross_skill_successor=False),
                         gripper_commands=np.asarray([[-1.0]]),
                     ),
                     terminal: SimpleNamespace(
-                        topology=SimpleNamespace(
-                            has_cross_skill_successor=True
-                        ),
+                        topology=SimpleNamespace(has_cross_skill_successor=True),
                         gripper_commands=np.asarray([[-1.0]]),
                     ),
                 }[state],

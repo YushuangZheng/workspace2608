@@ -49,9 +49,6 @@ class ClosedLoopExecutionConfig:
             "frame_roles",
             "mismatch",
             "minimum_action_equivalence_compatibility",
-            # Compatibility for phase-six bundles built before command
-            # tracking was correctly reduced to an audit-only signal.
-            "minimum_command_completion_compatibility",
         }
         unknown = set(value).difference(known)
         if unknown:
@@ -60,25 +57,12 @@ class ClosedLoopExecutionConfig:
         raw_mismatch = value.get("mismatch", {})
         if not isinstance(raw_roles, Mapping) or not isinstance(raw_mismatch, Mapping):
             raise TypeError("阶段三配置分区必须为对象")
-        role_values = dict(raw_roles)
-        # Compatibility for already built bundles.  Formal LINK confirmation
-        # now uses the complete per-event interval learned in phase one, so the
-        # former global fixed-state cap is deliberately ignored and not emitted
-        # by ``to_dict``.
-        role_values.pop("formal_link_confirmation_states", None)
-        if (
-            "minimum_action_equivalence_compatibility" in value
-            and "minimum_command_completion_compatibility" in value
-        ):
-            raise ValueError("动作等价阈值不得同时使用新旧字段")
-        equivalence_threshold = value.get(
-            "minimum_action_equivalence_compatibility",
-            value.get("minimum_command_completion_compatibility", 0.8),
-        )
         return cls(
-            frame_roles=FrameRoleConfig(**role_values),
+            frame_roles=FrameRoleConfig(**dict(raw_roles)),
             mismatch=MismatchConfig(**dict(raw_mismatch)),
-            minimum_action_equivalence_compatibility=float(equivalence_threshold),
+            minimum_action_equivalence_compatibility=float(
+                value.get("minimum_action_equivalence_compatibility", 0.8)
+            ),
         )
 
     @classmethod

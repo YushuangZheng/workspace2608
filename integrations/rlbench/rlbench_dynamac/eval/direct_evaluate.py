@@ -1399,7 +1399,8 @@ def _run_v4_store_episode(
             worker.request(
                 "commit",
                 transaction_id=transaction_id,
-                primary_action_succeeded=False,
+                primary_action_status="stopped",
+                primary_action_applied=False,
             )
             committed_policy_steps += 1
             return finish(
@@ -1445,12 +1446,12 @@ def _run_v4_store_episode(
             task_environment,
             response.get("gripper_authorization"),
         )
-        primary_action_succeeded = False
+        primary_action_applied = False
         try:
             observation, reward, terminate = task_environment.step(
                 np.asarray(action, dtype=np.float64)
             )
-            primary_action_succeeded = True
+            primary_action_applied = True
         except InvalidActionError:
             invalid_actions += 1
             try:
@@ -1477,7 +1478,7 @@ def _run_v4_store_episode(
         except Exception:
             worker.request("abort", transaction_id=transaction_id)
             raise
-        if primary_action_succeeded:
+        if primary_action_applied:
             commit = worker.request(
                 "commit",
                 transaction_id=transaction_id,
@@ -1786,7 +1787,8 @@ def _run_episode(
             worker.request(
                 "commit",
                 transaction_id=transaction_id,
-                primary_action_succeeded=False,
+                primary_action_status="stopped",
+                primary_action_applied=False,
             )
             committed_policy_steps += 1
             return finish(
@@ -1851,12 +1853,12 @@ def _run_episode(
             task_environment,
             response.get("gripper_authorization"),
         )
-        primary_action_succeeded = False
+        primary_action_applied = False
         try:
             observation, reward, terminate = task_environment.step(
                 np.asarray(action, dtype=np.float64)
             )
-            primary_action_succeeded = True
+            primary_action_applied = True
         except InvalidActionError:
             invalid_actions += 1
             try:
@@ -1884,7 +1886,7 @@ def _run_episode(
         except Exception:
             worker.request("abort", transaction_id=transaction_id)
             raise
-        if primary_action_succeeded:
+        if primary_action_applied:
             commit = worker.request(
                 "commit",
                 transaction_id=transaction_id,

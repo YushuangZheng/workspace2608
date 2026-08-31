@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -36,6 +38,50 @@ def test_formal_protocol_freezes_full_normal_and_balanced_fault_ranges() -> None
         protocol["shared_execution"]["controller_profile"]
         == STAGE6_IK_CONTROLLER_PROFILE
     )
+
+
+def test_formal_protocol_contains_only_the_active_runtime_identity() -> None:
+    protocol = run_cell.load_protocol()
+
+    assert protocol["status"] == "preregistered_active"
+    assert not any(
+        key.startswith("pre_result_amendment")
+        or key.startswith("implementation_correction_after_invalidated")
+        for key in protocol
+    )
+    assert protocol["active_implementation"]["controller_profile"] == (
+        protocol["shared_execution"]["controller_profile"]
+    )
+    assert protocol["active_implementation"]["protocol_id"] == (
+        protocol["shared_execution"]["protocol_id"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("obsolete_section", "obsolete or unknown"),
+        ("controller_mismatch", "shared executor differ"),
+        ("protocol_mismatch", "shared executor differ"),
+    ),
+)
+def test_formal_protocol_rejects_old_or_mixed_runtime_identities(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    protocol = deepcopy(run_cell.load_protocol())
+    if mutation == "obsolete_section":
+        protocol["pre_result_amendment"] = {"obsolete": True}
+    elif mutation == "controller_mismatch":
+        protocol["active_implementation"]["controller_profile"] = "old_executor"
+    else:
+        protocol["active_implementation"]["protocol_id"] = "old_protocol"
+    path = tmp_path / "protocol.json"
+    path.write_text(json.dumps(protocol), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        run_cell.load_protocol(path)
 
 
 def test_formal_matrix_has_exact_preregistered_cell_and_episode_counts() -> None:

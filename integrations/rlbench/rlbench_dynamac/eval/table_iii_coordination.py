@@ -47,9 +47,16 @@ from integrations.rlbench.rlbench_dynamac.eval.eval_set import (
     fixed_coordination_sources,
     validate_formal_artifact_paths,
 )
-from integrations.rlbench.rlbench_dynamac.report.evaluation_videos import LightweightCaptureConfig
-from integrations.rlbench.rlbench_dynamac.core.gripper_timing import global_gripper_timing_metadata
-from integrations.rlbench.rlbench_dynamac.core.records import atomic_json, reserve_output
+from integrations.rlbench.rlbench_dynamac.report.evaluation_videos import (
+    LightweightCaptureConfig,
+)
+from integrations.rlbench.rlbench_dynamac.core.gripper_timing import (
+    global_gripper_timing_metadata,
+)
+from integrations.rlbench.rlbench_dynamac.core.records import (
+    atomic_json,
+    reserve_output,
+)
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     DETERMINISTIC_SOURCE_RESET_PROTOCOL_ID,
     DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
@@ -79,6 +86,7 @@ from integrations.rlbench.rlbench_dynamac.protocols.v4_dynamic_protocol import (
 )
 
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
+
 POLICY_TASK = "bimanual_handover_item"
 TASK_MODULE = "rlbench.bimanual_tasks.bimanual_handover_item_dynamic"
 TASK_CLASS = "BimanualHandoverItemDynamic"
@@ -86,16 +94,14 @@ DEFAULT_DATA_ROOT = INTEGRATION_ROOT / "data" / "training" / "coordination"
 DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3" / "table_iii"
 DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v3" / "table_iii_coordination"
 DEFAULT_POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", "python3.10"))
-DEFAULT_POLICY_CONFIG = (
-    INTEGRATION_ROOT / "configs" / "dynamac_rlbench_v3.json"
+DEFAULT_POLICY_CONFIG = INTEGRATION_ROOT / "configs" / "dynamac_rlbench_v3.json"
+LOCAL_PROTOCOL_CONFIG = (
+    INTEGRATION_ROOT / "configs" / "table_iii_coordination_local.json"
 )
-LOCAL_PROTOCOL_CONFIG = INTEGRATION_ROOT / "configs" / "table_iii_coordination_local.json"
 PERTURBATION_METERS = (0.0, 0.0, 0.03)
 EXPECTED_VARIATION_COUNT = 5
 V4_VIDEO_PAPER_TARGET = 0.97
-EVALUATION_PROTOCOL_ID = evaluation_protocol_id(
-    DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS
-)
+EVALUATION_PROTOCOL_ID = evaluation_protocol_id(DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS)
 
 
 def _authenticated_v3_coordination_trigger(args, worker):
@@ -137,7 +143,9 @@ def _authenticated_v3_coordination_trigger(args, worker):
             "command-line coordination trigger differs from V3 preregistration"
         )
     if trigger >= worker.policy_steps:
-        raise RuntimeError("authenticated coordination trigger lies outside policy clock")
+        raise RuntimeError(
+            "authenticated coordination trigger lies outside policy clock"
+        )
     return protocol, authentication, trigger
 
 
@@ -150,7 +158,9 @@ def _authenticated_v4_coordination_trigger(args, worker):
     requested = getattr(args, "trigger_step", None)
     if args.arm == "none":
         if requested is not None:
-            raise RuntimeError("the unperturbed V4 coordination baseline has no trigger")
+            raise RuntimeError(
+                "the unperturbed V4 coordination baseline has no trigger"
+            )
         return protocol, None, None
     authentication = v4_coordination_trigger_authentication(
         arm=args.arm,
@@ -165,7 +175,9 @@ def _authenticated_v4_coordination_trigger(args, worker):
 def _validate_published_model(*args, **kwargs):
     """Import policy-only validation lazily so Python 3.8 can run evaluation."""
 
-    from integrations.rlbench.rlbench_dynamac.data.direct_policy import _validate_published_model as validate
+    from integrations.rlbench.rlbench_dynamac.data.direct_policy import (
+        _validate_published_model as validate,
+    )
 
     return validate(*args, **kwargs)
 
@@ -208,7 +220,13 @@ def _collection_action_mode():
 
 
 def _episode_dir(data_root, episode):
-    return Path(data_root) / POLICY_TASK / "all_variations" / "episodes" / f"episode{episode}"
+    return (
+        Path(data_root)
+        / POLICY_TASK
+        / "all_variations"
+        / "episodes"
+        / f"episode{episode}"
+    )
 
 
 def collect(args):
@@ -218,7 +236,9 @@ def collect(args):
 
     manifest_path = Path(args.data_root) / "collection_manifest.json"
     if manifest_path.exists():
-        raise FileExistsError(f"refusing to overwrite existing collection: {manifest_path}")
+        raise FileExistsError(
+            f"refusing to overwrite existing collection: {manifest_path}"
+        )
     environment = Environment(
         action_mode=_collection_action_mode(),
         obs_config=_observation_config(),
@@ -235,7 +255,9 @@ def collect(args):
         for episode in range(args.demonstrations):
             target = _episode_dir(args.data_root, episode)
             if target.exists():
-                raise FileExistsError(f"refusing to overwrite existing episode: {target}")
+                raise FileExistsError(
+                    f"refusing to overwrite existing episode: {target}"
+                )
             episode_seed = args.seed + episode
             variation = episode % variations
             random.seed(episode_seed)
@@ -257,9 +279,7 @@ def collect(args):
                 "variation": variation,
                 "observations": len(demo),
                 "path": (
-                    (target / "low_dim_obs.pkl")
-                    .relative_to(args.data_root)
-                    .as_posix()
+                    (target / "low_dim_obs.pkl").relative_to(args.data_root).as_posix()
                 ),
             }
             records.append(record)
@@ -297,7 +317,9 @@ def collect(args):
 def train(args):
     """Fit, authenticate, and atomically publish the coordination policy."""
 
-    from integrations.rlbench.rlbench_dynamac.eval.evaluation_split import validate_training_entry_paths
+    from integrations.rlbench.rlbench_dynamac.eval.evaluation_split import (
+        validate_training_entry_paths,
+    )
 
     validate_training_entry_paths(
         getattr(args, "data_root", DEFAULT_DATA_ROOT),
@@ -333,9 +355,17 @@ def _train_into(args, output):
 
     from essay2608.policy import BimanualDynaMAC
 
-    from integrations.rlbench.rlbench_dynamac.data.demo_adapter import load_low_dim_obs_pickles, make_bimanual_demonstrations
-    from integrations.rlbench.rlbench_dynamac.data.direct_policy import demonstration_paths, load_policy_config
-    from integrations.rlbench.rlbench_dynamac.data.tapas_segmentation import load_rlbench_segmentation_config
+    from integrations.rlbench.rlbench_dynamac.data.demo_adapter import (
+        load_low_dim_obs_pickles,
+        make_bimanual_demonstrations,
+    )
+    from integrations.rlbench.rlbench_dynamac.data.direct_policy import (
+        demonstration_paths,
+        load_policy_config,
+    )
+    from integrations.rlbench.rlbench_dynamac.data.tapas_segmentation import (
+        load_rlbench_segmentation_config,
+    )
     from integrations.rlbench.rlbench_dynamac.core.task_specs import get_task_spec
 
     protocol = json.loads(LOCAL_PROTOCOL_CONFIG.read_text(encoding="utf-8"))
@@ -559,9 +589,7 @@ def _run_episode(
         row.setdefault("perturbed_steps", perturbed_steps)
         row.setdefault("perturbed_attempts", perturbed_attempts)
         row.setdefault("primary_failure_joint_hold_commits", joint_hold_commits)
-        row.setdefault(
-            "policy_clock_semantics_id", FORMAL_POLICY_CLOCK_SEMANTICS_ID
-        )
+        row.setdefault("policy_clock_semantics_id", FORMAL_POLICY_CLOCK_SEMANTICS_ID)
         if release == "v4":
             row.setdefault("coordination_intervention", v4_intervention)
         row.setdefault("fresh_task_generation", fresh_task_generation)
@@ -572,11 +600,7 @@ def _run_episode(
     while committed_policy_steps < horizon:
         v4_fraction = None
         v4_smooth_window_tick = False
-        if (
-            release == "v4"
-            and arm != "none"
-            and committed_policy_steps >= trigger
-        ):
+        if release == "v4" and arm != "none" and committed_policy_steps >= trigger:
             if v4_intervention is None:
                 if committed_policy_steps != trigger:
                     raise RuntimeError(
@@ -592,8 +616,7 @@ def _run_episode(
                 trigger,
             )
             v4_smooth_window_tick = (
-                committed_policy_steps
-                < trigger + V4_COORDINATION_SMOOTH_POLICY_TICKS
+                committed_policy_steps < trigger + V4_COORDINATION_SMOOTH_POLICY_TICKS
             )
         response = worker.request("act", observation)
         if v4_smooth_window_tick:
@@ -613,27 +636,27 @@ def _run_episode(
                 reason = "policy_complete_after_final_settling"
             else:
                 reason = "policy_complete"
-            return finish({
-                "episode": episode,
-                "seed": episode_seed,
-                "success": bool(settling["success"]),
-                "steps": control_attempts,
-                "control_attempts": control_attempts,
-                "reason": reason,
-                "invalid_actions": invalid_actions,
-                "final_settling": settling,
-            })
+            return finish(
+                {
+                    "episode": episode,
+                    "seed": episode_seed,
+                    "success": bool(settling["success"]),
+                    "steps": control_attempts,
+                    "control_attempts": control_attempts,
+                    "reason": reason,
+                    "invalid_actions": invalid_actions,
+                    "final_settling": settling,
+                }
+            )
         transaction_id = response.get("transaction_id")
         if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
             raise RuntimeError("policy worker did not return an action transaction id")
         control_attempts += 1
         enabled = (
-            release == "v3"
-            and arm != "none"
-            and committed_policy_steps >= trigger
+            release == "v3" and arm != "none" and committed_policy_steps >= trigger
         )
         v4_enabled = v4_fraction is not None
-        primary_action_succeeded = False
+        primary_action_applied = False
         try:
             if v4_enabled:
                 command = _offset_action(
@@ -646,7 +669,7 @@ def _run_episode(
                 command = _perturb_action(action, arm, enabled)
             perturbed_attempts += int(enabled or v4_enabled)
             observation, reward, terminate = task_environment.step(command)
-            primary_action_succeeded = True
+            primary_action_applied = True
         except InvalidActionError:
             invalid_actions += 1
             if v4_smooth_window_tick:
@@ -660,21 +683,23 @@ def _run_episode(
                     )
                 )
             except InvalidActionError:
-                return finish({
-                    "episode": episode,
-                    "seed": episode_seed,
-                    "success": False,
-                    "steps": control_attempts,
-                    "control_attempts": control_attempts,
-                    "reason": "joint_hold_failed",
-                    "invalid_actions": invalid_actions,
-                })
+                return finish(
+                    {
+                        "episode": episode,
+                        "seed": episode_seed,
+                        "success": False,
+                        "steps": control_attempts,
+                        "control_attempts": control_attempts,
+                        "reason": "joint_hold_failed",
+                        "invalid_actions": invalid_actions,
+                    }
+                )
             joint_hold_commits += 1
             committed_policy_steps += 1
         except Exception:
             worker.request("abort", transaction_id=transaction_id)
             raise
-        if primary_action_succeeded:
+        if primary_action_applied:
             commit = worker.request("commit", transaction_id=transaction_id)
             policy_complete = bool(commit.get("complete"))
             committed_policy_steps += 1
@@ -683,7 +708,7 @@ def _run_episode(
             v4_intervention["policy_clock_advances"] += 1
             v4_intervention["smooth_policy_ticks_elapsed"] += 1
             perturbed_steps += 1
-            if primary_action_succeeded:
+            if primary_action_applied:
                 v4_intervention["offset_actions_applied"] += 1
                 v4_intervention["fractions_applied"].append(float(v4_fraction))
             else:
@@ -705,10 +730,7 @@ def _run_episode(
                 v4_intervention["completed"] = True
         elif v4_enabled:
             v4_intervention["persistent_policy_ticks_committed"] += 1
-        if (
-            v4_smooth_window_tick
-            and (reward > 0.0 or terminate)
-        ):
+        if v4_smooth_window_tick and (reward > 0.0 or terminate):
             v4_intervention["terminal_during_smooth_window"] = True
         settling = None
         if reward > 0.0:
@@ -730,25 +752,29 @@ def _run_episode(
                 reason = "policy_complete"
         else:
             continue
-        return finish({
+        return finish(
+            {
+                "episode": episode,
+                "seed": episode_seed,
+                "success": bool(reward > 0.0 or (settling or {}).get("success")),
+                "steps": control_attempts,
+                "control_attempts": control_attempts,
+                "reason": reason,
+                "invalid_actions": invalid_actions,
+                **({"final_settling": settling} if settling is not None else {}),
+            }
+        )
+    return finish(
+        {
             "episode": episode,
             "seed": episode_seed,
-            "success": bool(reward > 0.0 or (settling or {}).get("success")),
+            "success": False,
             "steps": control_attempts,
             "control_attempts": control_attempts,
-            "reason": reason,
+            "reason": "horizon",
             "invalid_actions": invalid_actions,
-            **({"final_settling": settling} if settling is not None else {}),
-        })
-    return finish({
-        "episode": episode,
-        "seed": episode_seed,
-        "success": False,
-        "steps": control_attempts,
-        "control_attempts": control_attempts,
-        "reason": "horizon",
-        "invalid_actions": invalid_actions,
-    })
+        }
+    )
 
 
 def evaluate(args):
@@ -779,17 +805,13 @@ def _evaluate_reserved(args, output):
         "max_primary_action_attempts",
         DEFAULT_MAX_PRIMARY_ACTION_ATTEMPTS,
     )
-    video_capture_config = (
-        LightweightCaptureConfig() if video_capture_enabled else None
-    )
+    video_capture_config = LightweightCaptureConfig() if video_capture_enabled else None
     video_cell_dir = None
     video_cell_key = None
     episode_videos = []
     if video_capture_enabled:
         scenario = (
-            f"coordination_hand_{args.arm}"
-            if args.arm != "none"
-            else "local_baseline"
+            f"coordination_hand_{args.arm}" if args.arm != "none" else "local_baseline"
         )
         video_cell_dir, video_cell_key = _v4_video_cell(
             getattr(
@@ -859,6 +881,7 @@ def _evaluate_reserved(args, output):
                 variation=variation_schedule[episode],
                 verify_instance=False,
             )
+
             def run_formal_episode(formal_task_environment):
                 source_binding = bind_staged_source_plan(
                     formal_task_environment,
@@ -880,9 +903,7 @@ def _evaluate_reserved(args, output):
                     staged_source_binding=source_binding,
                 )
                 if hasattr(args, "final_settling_steps"):
-                    episode_kwargs["final_settling_steps"] = (
-                        args.final_settling_steps
-                    )
+                    episode_kwargs["final_settling_steps"] = args.final_settling_steps
                 if getattr(args, "release", "v3") == "v4":
                     episode_kwargs["release"] = "v4"
                 return _run_episode(
@@ -929,7 +950,9 @@ def _evaluate_reserved(args, output):
         "task": "bimanual_handover_item_dynamic",
         "policy_task_alias": POLICY_TASK,
         "result_family": "bimanual_coordination",
-        "scenario": (f"coordination_hand_{args.arm}" if args.arm != "none" else "local_baseline"),
+        "scenario": (
+            f"coordination_hand_{args.arm}" if args.arm != "none" else "local_baseline"
+        ),
         "episodes": len(episodes),
         "episodes_requested": args.episodes,
         "episodes_completed": len(episodes),
@@ -940,9 +963,7 @@ def _evaluate_reserved(args, output):
         "seed": args.seed,
         "horizon": args.horizon,
         "learned_policy_steps": policy_steps,
-        "evaluation_protocol_id": evaluation_protocol_id(
-            max_primary_action_attempts
-        ),
+        "evaluation_protocol_id": evaluation_protocol_id(max_primary_action_attempts),
         "controller": {
             **global_ik_controller_metadata(),
             "worker_clock_handshake_id": worker.policy_clock_semantics_id,
@@ -994,11 +1015,7 @@ def _evaluate_reserved(args, output):
                 if v4_coordination
                 else "LOCAL_EXPLICIT_DIAGNOSTIC_20260815"
             ),
-            **(
-                {"protocol_id": V4_COORDINATION_PROTOCOL_ID}
-                if v4_coordination
-                else {}
-            ),
+            **({"protocol_id": V4_COORDINATION_PROTOCOL_ID} if v4_coordination else {}),
             "paper_comparable": False,
             "protocol_valid": True,
             "perturbed_arm": args.arm,
@@ -1020,14 +1037,10 @@ def _evaluate_reserved(args, output):
                         else None
                     ),
                     "orientation": (
-                        "unmodified policy target"
-                        if args.arm != "none"
-                        else None
+                        "unmodified policy target" if args.arm != "none" else None
                     ),
                     "other_arm_and_grippers": (
-                        "unmodified policy targets"
-                        if args.arm != "none"
-                        else None
+                        "unmodified policy targets" if args.arm != "none" else None
                     ),
                     "smooth_fractions": "1/10 through 10/10",
                     "persistent_policy_target_offset": True,
@@ -1037,9 +1050,7 @@ def _evaluate_reserved(args, output):
                 else {}
             ),
             "legacy_one_third_trigger_disabled": True,
-            "trigger_reference_domain": (
-                "successfully_committed_policy_ticks"
-            ),
+            "trigger_reference_domain": ("successfully_committed_policy_ticks"),
             "trigger_policy_step": trigger,
             "trigger_authentication": trigger_authentication,
             "intervention_registry_schema": intervention_registry["schema"],
@@ -1061,8 +1072,7 @@ def _evaluate_reserved(args, output):
         "fresh_task_generation": {
             "required_per_formal_episode": True,
             "all_episodes_recorded": all(
-                isinstance(item.get("fresh_task_generation"), dict)
-                for item in episodes
+                isinstance(item.get("fresh_task_generation"), dict) for item in episodes
             ),
             "evidence": [item["fresh_task_generation"] for item in episodes],
         },
@@ -1082,9 +1092,7 @@ def _evaluate_reserved(args, output):
             "episodes_recorded": len(episode_videos),
             "capture_config": dict(video_capture_config.audit()),
             "paper_success_rate": (
-                V4_VIDEO_PAPER_TARGET
-                if args.arm in {"left", "right"}
-                else None
+                V4_VIDEO_PAPER_TARGET if args.arm in {"left", "right"} else None
             ),
         }
 
@@ -1096,9 +1104,7 @@ def _evaluate_reserved(args, output):
                 successes=successes,
                 episodes=args.episodes,
                 paper_success_rate=(
-                    V4_VIDEO_PAPER_TARGET
-                    if args.arm in {"left", "right"}
-                    else None
+                    V4_VIDEO_PAPER_TARGET if args.arm in {"left", "right"} else None
                 ),
                 cell_metadata={
                     "evaluator": "table_iii_coordination",
@@ -1107,6 +1113,7 @@ def _evaluate_reserved(args, output):
                     "formal_result": str(output),
                 },
             )
+
     else:
         video_capture_metadata = None
         finalize_videos = None

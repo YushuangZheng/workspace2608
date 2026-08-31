@@ -33,7 +33,7 @@ CLOSED_LOOP_GRIPPER_TIMING = {
     "rule": "committed_reference_state_command",
     "lookahead_source": "not_required_after_guarded_reference_commit",
     "authorization": "aligned_task_state_or_committed_boundary_transaction",
-    "executor_status_role": "physical_diagnostic_and_legacy_auxiliary_fallback_only",
+    "executor_status_role": "physical_diagnostic_only",
 }
 
 
@@ -164,6 +164,18 @@ class ClosedLoopPolicyServer:
     def _resolve(self, request: Mapping[str, Any], *, commit: bool) -> dict[str, Any]:
         if self._pending is None:
             raise RuntimeError("没有待处理的闭环动作事务")
+        allowed_fields = {"command", "transaction_id"}
+        if commit:
+            allowed_fields.update(
+                {
+                    "primary_action_status",
+                    "primary_action_statuses",
+                    "primary_action_applied",
+                }
+            )
+        unknown_fields = set(request).difference(allowed_fields)
+        if unknown_fields:
+            raise ValueError(f"闭环动作事务包含未知字段：{sorted(unknown_fields)}")
         transaction_id = request.get("transaction_id")
         if transaction_id != self._pending["transaction_id"]:
             raise RuntimeError("闭环动作事务编号不匹配")
@@ -172,22 +184,18 @@ class ClosedLoopPolicyServer:
             action_status = "aborted"
         else:
             explicit_status = request.get("primary_action_status")
-            legacy_succeeded = request.get("primary_action_succeeded")
-            if explicit_status is not None and legacy_succeeded is not None:
-                raise ValueError(
-                    "primary_action_status 与 primary_action_succeeded 不能同时提供"
-                )
             if explicit_status is None:
-                succeeded = True if legacy_succeeded is None else legacy_succeeded
-                if not isinstance(succeeded, bool):
-                    raise TypeError("primary_action_succeeded 必须为布尔值")
-                action_status = "reached" if succeeded else "failed"
-            else:
-                if not isinstance(explicit_status, str):
-                    raise TypeError("primary_action_status 必须为字符串")
-                action_status = explicit_status
-                if action_status not in {"reached", "progressed", "stopped"}:
-                    raise ValueError("primary_action_status 取值不受支持")
+                raise ValueError("commit 必须显式提供 primary_action_status")
+            if not isinstance(explicit_status, str):
+                raise TypeError("primary_action_status 必须为字符串")
+            action_status = explicit_status
+            if action_status not in {"reached", "progressed", "stopped"}:
+                raise ValueError("primary_action_status 取值不受支持")
+            primary_action_applied = request.get("primary_action_applied", True)
+            if not isinstance(primary_action_applied, bool):
+                raise TypeError("primary_action_applied 必须为布尔值")
+            if not primary_action_applied and action_status != "stopped":
+                raise ValueError("未应用主动作时 primary_action_status 必须为 stopped")
             explicit_statuses = request.get("primary_action_statuses")
             if explicit_statuses is None:
                 action_statuses = {arm: action_status for arm in self.arms}
@@ -205,15 +213,19 @@ class ClosedLoopPolicyServer:
                     status != "reached" for status in action_statuses.values()
                 ):
                     raise ValueError("整体 reached 要求所有机械臂均 reached")
+            if not primary_action_applied and any(
+                status != "stopped" for status in action_statuses.values()
+            ):
+                raise ValueError("未应用主动作时全部机械臂状态必须为 stopped")
             action_response = {
                 arm: status in {"reached", "progressed"}
                 for arm, status in action_statuses.items()
             }
             action_completed = {
-                arm: status == "reached" for arm, status in action_statuses.items()
+                arm: primary_action_applied and status == "reached"
+                for arm, status in action_statuses.items()
             }
-            command_issued = action_status != "failed"
-            command_applied = {arm: command_issued for arm in self.arms}
+            command_applied = {arm: primary_action_applied for arm in self.arms}
             self.policy.commit(
                 task_command_applied=command_applied,
                 absolute_target_completed=action_completed,
@@ -221,14 +233,14 @@ class ClosedLoopPolicyServer:
             self._previous_ee = self._pending["pre_action_ee"]
             self._previous_command = (
                 self._pending["commands"]
-                if command_issued
+                if primary_action_applied
                 else {
                     arm: self._pending["pre_action_ee"][arm].copy() for arm in self.arms
                 }
             )
             self._previous_command_covariance = (
                 self._pending["command_covariances"]
-                if command_issued
+                if primary_action_applied
                 else {arm: None for arm in self.arms}
             )
             self.policy.diagnostics.annotate_last(
@@ -236,7 +248,7 @@ class ClosedLoopPolicyServer:
                 {
                     "status": action_status,
                     "status_by_arm": dict(action_statuses),
-                    "command_issued": command_issued,
+                    "primary_action_applied": primary_action_applied,
                     "task_command_applied": dict(command_applied),
                     "action_response_observed": dict(action_response),
                     "absolute_target_completed": dict(action_completed),
@@ -254,6 +266,7 @@ class ClosedLoopPolicyServer:
             "aborted": not commit,
             "primary_action_status": action_status,
             "primary_action_statuses": (None if not commit else dict(action_statuses)),
+            "primary_action_applied": (None if not commit else primary_action_applied),
             "complete": self.policy.complete,
         }
 

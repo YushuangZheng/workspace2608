@@ -274,9 +274,11 @@ class _TransactionalWorker:
         self.policy_steps = 3
         self.next_transaction_id = 1
         self.requests = []
+        self.request_fields = []
 
     def request(self, command, observation=None, **fields):
         self.requests.append((command, fields.get("transaction_id")))
+        self.request_fields.append((command, dict(fields)))
         if command == "reset":
             return {"ok": True, "complete": False}
         if command == "act":
@@ -1294,6 +1296,14 @@ def test_bimanual_evaluator_commits_joint_hold_for_failed_primary(monkeypatch) -
         ("act", None),
         ("commit", 2),
     ]
+    assert worker.request_fields[2] == (
+        "commit",
+        {
+            "transaction_id": 1,
+            "primary_action_status": "stopped",
+            "primary_action_applied": False,
+        },
+    )
 
 
 def test_bimanual_diagnostic_can_continue_policy_after_latched_success(
@@ -1434,6 +1444,14 @@ def test_unimanual_evaluator_commits_joint_hold_for_failed_primary(monkeypatch) 
         ("act", None),
         ("commit", 2),
     ]
+    assert worker.request_fields[2] == (
+        "commit",
+        {
+            "transaction_id": 1,
+            "primary_action_status": "stopped",
+            "primary_action_applied": False,
+        },
+    )
 
 
 def test_coordination_evaluator_uses_the_shared_policy_transaction_protocol(
