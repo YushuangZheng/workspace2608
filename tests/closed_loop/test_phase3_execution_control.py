@@ -604,6 +604,63 @@ def test_formal_link_uses_learned_interval_motion_to_confirm_posterior_lag(
     assert snapshot.recovery_intents == ()
 
 
+def test_off_selected_formal_link_entry_is_monitored_before_posterior_catches_up(
+    phase3_model,
+    monkeypatch,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    state_id = anchor.linked_entry_states[0]
+    predecessor = model.state(state_id).topology.predecessors[0]
+    router = FrameRoleRouter(model)
+    monkeypatch.setattr(router, "_selected_frames", lambda *_args, **_kwargs: ())
+    router.route(
+        predecessor,
+        belief_for(
+            model,
+            demos,
+            tick=0,
+            nominal=predecessor,
+            estimated=predecessor,
+            posterior={predecessor: 1.0},
+            relation=relation_estimate(
+                "object",
+                (0.95, 0.05),
+                RelationDecision.EXTERNAL,
+                information_weight=0.0,
+            ),
+            static=True,
+        ),
+        mode_by_skill={predecessor.skill_index: event_id.mode},
+    )
+
+    snapshot = router.route(
+        state_id,
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=state_id,
+            estimated=predecessor,
+            posterior={predecessor: 1.0},
+            relation=relation_estimate(
+                "object",
+                (0.95, 0.05),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(1.0, 0.01),
+            ),
+        ),
+        mode_by_skill={state_id.skill_index: event_id.mode},
+    )
+
+    decision = snapshot.decisions["object"]
+    assert decision.selected_offline is False
+    assert decision.formal_link_confirmation_pending is True
+    assert decision.role == FrameRole.DEFER
+    assert decision.blocks_advance is False
+
+
 def test_formal_link_confirmation_requires_causal_entry_and_never_masks_drop(
     phase3_model,
 ) -> None:
@@ -761,6 +818,88 @@ def test_formal_link_natural_confirmation_uses_full_learned_interval(
     assert snapshot.blocks_advance is False
 
 
+def test_formal_link_confirmation_interval_expires_after_terminal_entry_action(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    router = FrameRoleRouter(model)
+    first = anchor.linked_entry_states[0]
+    predecessor = model.state(first).topology.predecessors[0]
+    route_states = (predecessor, *anchor.linked_entry_states)
+    snapshot = None
+    for tick, route_state in enumerate(route_states):
+        snapshot = router.route(
+            route_state,
+            belief_for(
+                model,
+                demos,
+                tick=tick,
+                nominal=route_state,
+                estimated=route_state,
+                relation=relation_estimate(
+                    "object",
+                    (0.9, 0.1),
+                    RelationDecision.EXTERNAL,
+                    information_weight=0.4,
+                    observation_likelihood=(0.01, 1.0),
+                ),
+            ),
+            mode_by_skill={route_state.skill_index: event_id.mode},
+        )
+    assert snapshot is not None
+    assert snapshot.decisions["object"].formal_link_confirmation_pending is True
+
+    terminal = anchor.linked_entry_states[-1]
+    predecessor_of_terminal = anchor.linked_entry_states[-2]
+    lagging = router.route(
+        terminal,
+        belief_for(
+            model,
+            demos,
+            tick=len(route_states),
+            nominal=terminal,
+            estimated=predecessor_of_terminal,
+            posterior={predecessor_of_terminal: 1.0},
+            relation=relation_estimate(
+                "object",
+                (0.9, 0.1),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(1.0, 0.01),
+            ),
+        ),
+        mode_by_skill={terminal.skill_index: event_id.mode},
+    )
+    assert lagging.decisions["object"].formal_link_confirmation_pending is True
+
+    expired = router.route(
+        terminal,
+        belief_for(
+            model,
+            demos,
+            tick=len(route_states) + 1,
+            nominal=terminal,
+            estimated=terminal,
+            relation=relation_estimate(
+                "object",
+                (0.9, 0.1),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(1.0, 0.01),
+            ),
+        ),
+        mode_by_skill={terminal.skill_index: event_id.mode},
+    )
+    decision = expired.decisions["object"]
+    assert decision.formal_link_confirmation_pending is False
+    # This fixture's next state is its learned UNLINK, so the existing causal
+    # opening allowance remains nonblocking after confirmation grace expires.
+    assert decision.role == FrameRole.DEFER
+    assert expired.blocks_advance is False
+    assert event_id in expired.rejected_link_events
+
+
 def test_weighted_poe_one_preserves_baseline_and_zero_removes_expert() -> None:
     first = GaussianMarginal("first", pose(0.0), np.eye(6) * 0.02)
     second = GaussianMarginal("second", pose(0.1), np.eye(6) * 0.03)
@@ -823,9 +962,7 @@ def test_pending_discrete_action_holds_same_reference_without_executor_gate(
         tick=1,
         nominal=current,
         estimated=current,
-        relation=relation_estimate(
-            "object", (0.95, 0.05), RelationDecision.EXTERNAL
-        ),
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
     )
 
     result = controller.update(
@@ -1559,21 +1696,17 @@ def test_blocked_proposed_state_contributes_persistent_relation_mismatch(
 ) -> None:
     model, demos = phase3_model
     event_id, anchor = next(iter(sorted(model.link_anchors.items())))
-    # Isolate the role-routing behavior inside one skill.  A real skill-terminal
-    # successor is correctly owned by the entry guard and would test a different
-    # mechanism before the proposed state's role is consulted.
     assert len(anchor.linked_entry_states) >= 2
     current = anchor.linked_entry_states[-2]
     successor = model.state(current).topology.successors[0]
     assert successor.skill_index == current.skill_index
-    assert successor == anchor.linked_entry_states[-1]
+    # Isolate proposed-state routing from the separately tested formal-event
+    # lifecycle: admit the shortened interval's terminal state once, while its
+    # direct successor is already outside that interval and must be rejected.
     model.link_anchors[event_id] = replace(
         anchor,
         linked_entry_states=anchor.linked_entry_states[:-1],
     )
-    # The synthetic skill's last state also precedes a learned UNLINK.  Remove
-    # that independent causal-release exception so this test exercises only
-    # the proposed-state LINK mismatch path.
     model.unlink_events.clear()
     force_relation_prior(model, current, linked=True)
     force_relation_prior(model, successor, linked=True)
@@ -1591,10 +1724,7 @@ def test_blocked_proposed_state_contributes_persistent_relation_mismatch(
     controller.reset(current)
     first_entry = model.link_anchors[event_id].linked_entry_states[0]
     predecessor = model.state(first_entry).topology.predecessors[0]
-    for tick, route_state in enumerate(
-        (predecessor, *model.link_anchors[event_id].linked_entry_states),
-        start=-len(model.link_anchors[event_id].linked_entry_states),
-    ):
+    for tick, route_state in enumerate((predecessor, first_entry), start=-2):
         controller.role_router.route(
             route_state,
             belief_for(

@@ -374,7 +374,6 @@ class FrameRoleRouter:
         state_id: StateId,
         estimate: RelationEstimate | None,
         belief: ClosedLoopBelief,
-        expected: RelationDecision,
         mode_by_skill: Mapping[int, int] | None,
     ) -> tuple[RelationEventId, ...]:
         """Admit learned linked-interval motion while a formal LINK catches up.
@@ -388,7 +387,7 @@ class FrameRoleRouter:
         Tracking must remain available and reliable throughout this window.
         """
 
-        if expected != RelationDecision.LINKED or estimate is None:
+        if estimate is None:
             return ()
         events = self._formal_link_confirmation_events(
             frame,
@@ -408,6 +407,21 @@ class FrameRoleRouter:
                     == state_id
                 )
         events = tuple(event for event in events if event in causally_entered)
+        # The final learned entry state remains available while beta still
+        # reports physical lag.  Once beta has reached it, re-evaluating that
+        # same state means the complete offline interval has been consumed;
+        # keeping the event pending would turn a bounded confirmation interval
+        # into an unbounded terminal-state grace period.
+        events = tuple(
+            event
+            for event in events
+            if not (
+                self._last_committed_state == state_id
+                and belief.progress.estimated_state == state_id
+                and self.task_model.link_anchors[event].linked_entry_states[-1]
+                == state_id
+            )
+        )
         if not events:
             return ()
         features = belief.runtime_features
@@ -598,14 +612,27 @@ class FrameRoleRouter:
             raise KeyError(f"流角色引用未知状态 {state_id}")
         selected_frames = self._selected_frames(state_id, mode_by_skill)
         selected = frozenset(selected_frames)
-        confirmed_monitors = tuple(
-            frame
-            for frame in self._confirmed_monitor_frames(
+        monitor_frames = set(
+            self._confirmed_monitor_frames(
                 belief.progress.posterior,
                 mode_by_skill,
             )
-            if frame not in selected
         )
+        # A newly queried LINK-entry state can lead the posterior by one
+        # control cycle.  Its physical frame must nevertheless be routed now,
+        # even when it is not an Eq.6 action stream; otherwise the causal
+        # confirmation window cannot activate until after the controller has
+        # already advanced past its first state.
+        monitor_frames.update(
+            frame
+            for frame in self.task_model.relation_frames
+            if self._formal_link_confirmation_events(
+                frame,
+                state_id,
+                mode_by_skill,
+            )
+        )
+        confirmed_monitors = tuple(sorted(monitor_frames.difference(selected)))
         decisions: dict[str, FrameRoleDecision] = {}
         recovery_intents = []
         confirmed_link_events: set[RelationEventId] = set()
@@ -671,7 +698,6 @@ class FrameRoleRouter:
                 state_id,
                 estimate,
                 belief,
-                expected,
                 mode_by_skill,
             )
             pending_link_confirmation_events.update(confirmation_events)
@@ -697,6 +723,7 @@ class FrameRoleRouter:
             )
             if (
                 not selected_offline
+                and not confirmation_events
                 and expected != RelationDecision.LINKED
                 and not (
                     expected == RelationDecision.UNKNOWN

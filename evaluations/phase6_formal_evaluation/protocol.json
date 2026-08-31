@@ -176,6 +176,32 @@
       "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v22"
     }
   },
+  "implementation_correction_after_invalidated_off_selected_link_entry_audit": {
+    "date_utc": "2026-08-31",
+    "implementation_parent_commit": "07b69b0d1a1015e4ac44f31077aee9b66c94863d",
+    "retained_formal_results_before_correction": false,
+    "observed_audit_scope": "approximately 135 early normal episodes; the entire partial attempt is invalidated",
+    "reason": "A queried formal-LINK entry state could lead beta by one control cycle while the linked physical frame was not an Eq.6 action stream. The old router derived off-selected monitoring only from beta or an already confirmed origin, so the causal confirmation interval could not collect evidence and dynamic roles held indefinitely on the following state.",
+    "resolution": "For the currently queried StateId, route every unresolved formal LINK occurrence inside its causally entered learned entry interval as a zero-weight relation monitor even when the frame is off-selected. The formal occurrence supplies the expected relation independently of lagging beta; the frame is not reintroduced into the action PoE. Keep the terminal entry state available while beta still lags, and expire confirmation when beta has reached that terminal and the same state is queried again.",
+    "invalidated_attempt_disposition": "All partial results and diagnostics from this audit attempt are excluded from statistics and removed from the formal result root before a complete restart from the repaired commit.",
+    "automated_validation": {
+      "targeted_tests_passed": 121,
+      "off_selected_entry_monitor_regression_exercised": true,
+      "terminal_entry_interval_expiration_regression_exercised": true,
+      "proposed_state_persistent_mismatch_regression_exercised": true
+    },
+    "real_simulator_validation": {
+      "task": "open_microwave",
+      "method": "progress_dynamic_roles",
+      "previous_failed_episode_indices": [0, 1, 2, 3],
+      "repaired_success_episode_indices": [0, 1, 3],
+      "repaired_success_steps": [161, 161, 161],
+      "invalid_actions": 0,
+      "episode_2_disposition": "Two isolated reruns stalled during CoppeliaSim scene loading before the first policy cycle and are not counted as method outcomes; the complete formal restart retains episode 2 and will evaluate it normally.",
+      "controller_profile": "stage6_hybrid_cartesian_executor_v18",
+      "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v22"
+    }
+  },
   "evaluation_set": {
     "id": "rlbench_eval_v2",
     "seed_start": 2608000000,
