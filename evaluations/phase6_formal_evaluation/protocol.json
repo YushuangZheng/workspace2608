@@ -194,10 +194,9 @@
       "task": "open_microwave",
       "method": "progress_dynamic_roles",
       "previous_failed_episode_indices": [0, 1, 2, 3],
-      "repaired_success_episode_indices": [0, 1, 3],
-      "repaired_success_steps": [161, 161, 161],
+      "repaired_success_episode_indices": [0, 1, 2, 3],
+      "repaired_success_steps": [161, 161, 196, 161],
       "invalid_actions": 0,
-      "episode_2_disposition": "Two isolated reruns stalled during CoppeliaSim scene loading before the first policy cycle and are not counted as method outcomes; the complete formal restart retains episode 2 and will evaluate it normally.",
       "controller_profile": "stage6_hybrid_cartesian_executor_v18",
       "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v22"
     }
