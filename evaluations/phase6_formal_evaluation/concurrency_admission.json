@@ -1,0 +1,33 @@
+{
+  "schema": "essay2608.phase6_concurrency_admission.v1",
+  "date_utc": "2026-08-31",
+  "admitted_workers": 48,
+  "gpu_indices": [0, 1, 2, 3, 4, 5, 6, 7],
+  "workers_per_gpu": 6,
+  "probe": {
+    "schema": "essay2608.phase6_concurrency_probe.v1",
+    "run_id": "20260831T084113Z-w48",
+    "horizon": 200,
+    "tasks": 8,
+    "jobs": 48,
+    "peak_active_workers": 48,
+    "runtime_seconds": 577.935464143753,
+    "all_workers_exit_zero_with_valid_diagnostic_result": true,
+    "fatal_log_patterns_absent": true,
+    "stale_result_locks_absent": true,
+    "minimum_system_memory_available_bytes": 1067480940544,
+    "maximum_one_minute_load_average": 20.99462890625,
+    "maximum_gpu_memory_used_mib": 1,
+    "raw_summary": "integrations/rlbench/results/phase6_concurrency_probe/20260831T084113Z-w48/summary.json",
+    "raw_summary_sha256": "31748c7c29b34e02e921678a6bc3cd1820572ee6e5050e77bf3b28fd30b6dcaf"
+  },
+  "allocation": {
+    "gpu_identity": "round_robin",
+    "cpu_affinity": "non_overlapping_numa_local_physical_cores_with_smt_siblings",
+    "minimum_physical_cores_per_worker": 1,
+    "render_backend": "xvfb_software_gl",
+    "resources_py_sha256": "96d9547734e92b8e75031645f25b9bd3627da4bd2601400d2ee4caffb9e778d4",
+    "concurrency_probe_py_sha256": "58c9800def438e0ded247adfaf71cc8c1d9b2052f3b4d6853eb2582d8069d6fb"
+  },
+  "decision": "48 workers admitted; no 36-worker fallback is required"
+}

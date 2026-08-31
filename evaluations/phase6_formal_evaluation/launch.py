@@ -20,6 +20,7 @@ from integrations.rlbench.rlbench_dynamac.core.records import atomic_json
 from integrations.rlbench.rlbench_dynamac.eval import v4_formal_launch
 
 from .run_cell import PROTOCOL, load_protocol
+from .resources import LaneSpec, build_lane_specs
 
 RESULTS_ROOT = REPOSITORY_ROOT / "integrations/rlbench/results/phase6_formal_v1"
 LAUNCH_ROOT = RESULTS_ROOT / "_launch"
@@ -38,19 +39,7 @@ DEFAULT_POLICY_PYTHON = Path(
     )
 )
 DEFAULT_GPUS = tuple(range(8))
-
-# GPU 0..2 are attached to NUMA node 0 and GPU 3..7 to node 1.  Partition all
-# 64 physical cores between the local lanes and include each core's SMT sibling.
-DEFAULT_CPU_SETS = (
-    tuple(range(0, 11)) + tuple(range(64, 75)),
-    tuple(range(11, 22)) + tuple(range(75, 86)),
-    tuple(range(22, 32)) + tuple(range(86, 96)),
-    tuple(range(32, 39)) + tuple(range(96, 103)),
-    tuple(range(39, 45)) + tuple(range(103, 109)),
-    tuple(range(45, 51)) + tuple(range(109, 115)),
-    tuple(range(51, 57)) + tuple(range(115, 121)),
-    tuple(range(57, 64)) + tuple(range(121, 128)),
-)
+DEFAULT_WORKERS = 48
 
 
 @dataclass(frozen=True)
@@ -218,19 +207,11 @@ def _validate_gpus(gpus: Sequence[int]) -> tuple[int, ...]:
     return values
 
 
-def _cpu_sets(gpus: Sequence[int]) -> tuple[tuple[int, ...], ...]:
-    online = set(os.sched_getaffinity(0))
-    result = []
-    for gpu in gpus:
-        if gpu >= len(DEFAULT_CPU_SETS):
-            raise RuntimeError(f"no NUMA-aware CPU map is registered for GPU {gpu}")
-        cpus = tuple(cpu for cpu in DEFAULT_CPU_SETS[gpu] if cpu in online)
-        if not cpus:
-            raise RuntimeError(f"GPU {gpu} CPU affinity is empty")
-        result.append(cpus)
-    if len(set().union(*(set(value) for value in result))) != sum(map(len, result)):
-        raise RuntimeError("formal CPU affinity sets overlap")
-    return tuple(result)
+def _lane_specs(gpus: Sequence[int], workers: int) -> tuple[LaneSpec, ...]:
+    try:
+        return build_lane_specs(gpus, workers)
+    except (ValueError, RuntimeError) as error:
+        raise RuntimeError(f"invalid formal worker allocation: {error}") from error
 
 
 def _environment(policy_python: Path, gpu: int, cpus: Sequence[int]) -> dict[str, str]:
@@ -316,13 +297,19 @@ def preflight(
     policy_python: Path,
     gpus: Sequence[int],
     require_clean: bool,
+    workers: int = DEFAULT_WORKERS,
 ) -> dict[str, Any]:
     sim = v4_formal_launch._regular_executable(sim_python, "simulator Python")
     policy = v4_formal_launch._regular_executable(policy_python, "policy Python")
     v4_formal_launch._regular_executable(v4_formal_launch.DEFAULT_XVFB_RUN, "xvfb-run")
     gpus = _validate_gpus(gpus)
-    cpus = _cpu_sets(gpus)
-    environment = _environment(policy, gpus[0], cpus[0])
+    configured_workers = int(protocol["resource_plan"]["parallel_lanes"])
+    if workers != configured_workers:
+        raise RuntimeError(
+            f"formal workers {workers} differ from frozen protocol {configured_workers}"
+        )
+    specs = _lane_specs(gpus, workers)
+    environment = _environment(policy, specs[0].gpu, specs[0].logical_cpus)
     v4_formal_launch._validate_python_runtime(
         sim,
         expected=(3, 8),
@@ -358,7 +345,9 @@ def preflight(
         "closed_loop_models": _tree_identity(CLOSED_LOOP_MODELS),
         "gpus": _gpu_inventory(),
         "selected_gpu_lanes": list(gpus),
-        "cpu_affinity": [list(value) for value in cpus],
+        "parallel_workers": workers,
+        "worker_lanes": [spec.to_dict() for spec in specs],
+        "cpu_affinity": [list(spec.logical_cpus) for spec in specs],
         "render_backend": protocol["resource_plan"]["render_backend"],
         "cells": _states(cells, commit),
     }
@@ -370,22 +359,24 @@ def render_plan(
     sim_python: Path,
     policy_python: Path,
     gpus: Sequence[int],
+    workers: int = DEFAULT_WORKERS,
 ) -> str:
-    cpus = _cpu_sets(gpus)
+    specs = _lane_specs(gpus, workers)
     lines = [
         "Stage-six preregistered formal plan (no simulator started)",
         f"protocol={PROTOCOL.relative_to(REPOSITORY_ROOT)} sha256={_sha256(PROTOCOL)}",
-        f"cells={len(cells)} episodes={sum(cell.episodes for cell in cells)} lanes={len(gpus)}",
+        f"cells={len(cells)} episodes={sum(cell.episodes for cell in cells)} workers={workers}",
         "renderer=xvfb_software_gl; CUDA identity is isolated per lane",
     ]
     for index, cell in enumerate(cells):
-        lane = index % len(gpus)
+        lane = index % len(specs)
+        spec = specs[lane]
         command = _xvfb_command(cell, lane, sim_python, policy_python)
         lines.extend(
             (
                 "",
                 f"[{index + 1}/{len(cells)}] {cell.cell_id}",
-                f"lane={lane} gpu={gpus[lane]} cpus={','.join(map(str, cpus[lane]))}",
+                f"lane={lane} gpu={spec.gpu} cpus={','.join(map(str, spec.logical_cpus))}",
                 " ".join(shlex.quote(value) for value in command),
                 f"result={cell.result}",
             )
@@ -419,6 +410,7 @@ def execute(
     sim_python: Path,
     policy_python: Path,
     gpus: Sequence[int],
+    workers: int = DEFAULT_WORKERS,
 ) -> dict[str, Any]:
     identity = preflight(
         protocol=protocol,
@@ -427,6 +419,7 @@ def execute(
         policy_python=policy_python,
         gpus=gpus,
         require_clean=True,
+        workers=workers,
     )
     pending = [cell for cell in cells if identity["cells"][cell.cell_id] == "PENDING"]
     if not pending:
@@ -446,9 +439,9 @@ def execute(
     processes: dict[str, tuple[subprocess.Popen, FormalCell, int]] = {}
     streams: dict[str, Any] = {}
     assignments: list[dict[str, Any]] = []
-    available = list(range(len(gpus)))
+    specs = _lane_specs(gpus, workers)
+    available = list(range(len(specs)))
     queue = list(pending)
-    cpus = _cpu_sets(gpus)
     started = time.time()
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         stream.write(f"pid={os.getpid()} run_id={run_id}\n")
@@ -456,6 +449,7 @@ def execute(
         os.fsync(stream.fileno())
 
     def launch(cell: FormalCell, lane: int) -> None:
+        spec = specs[lane]
         cell.result.parent.mkdir(parents=True, exist_ok=True)
         cell.diagnostics.mkdir(parents=True, exist_ok=True)
         log_path = run_root / f"{cell.name}.log"
@@ -464,12 +458,12 @@ def execute(
         command = _xvfb_command(cell, lane, sim_python, policy_python)
 
         def set_affinity() -> None:
-            os.sched_setaffinity(0, set(cpus[lane]))
+            os.sched_setaffinity(0, set(spec.logical_cpus))
 
         process = subprocess.Popen(
             command,
             cwd=REPOSITORY_ROOT,
-            env=_environment(policy_python, gpus[lane], cpus[lane]),
+            env=_environment(policy_python, spec.gpu, spec.logical_cpus),
             stdout=log_stream,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -480,8 +474,10 @@ def execute(
             {
                 "cell_id": cell.cell_id,
                 "lane": lane,
-                "gpu": gpus[lane],
-                "cpus": list(cpus[lane]),
+                "gpu": spec.gpu,
+                "numa_node": spec.numa_node,
+                "physical_cores": list(spec.physical_cores),
+                "cpus": list(spec.logical_cpus),
                 "pid": process.pid,
                 "command": list(command),
                 "started_unix": time.time(),
@@ -549,6 +545,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sim-python", type=Path, default=DEFAULT_SIM_PYTHON)
     parser.add_argument("--policy-python", type=Path, default=DEFAULT_POLICY_PYTHON)
     parser.add_argument("--gpus", type=_parse_gpus, default=DEFAULT_GPUS)
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     return parser
 
 
@@ -558,7 +555,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     cells = build_cells(protocol, args.section)
     if args.command == "plan":
         print(
-            render_plan(protocol, cells, args.sim_python, args.policy_python, args.gpus)
+            render_plan(
+                protocol,
+                cells,
+                args.sim_python,
+                args.policy_python,
+                args.gpus,
+                args.workers,
+            )
         )
         return 0
     if args.command == "preflight":
@@ -569,6 +573,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             policy_python=args.policy_python,
             gpus=args.gpus,
             require_clean=False,
+            workers=args.workers,
         )
     else:
         result = execute(
@@ -577,6 +582,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             sim_python=args.sim_python,
             policy_python=args.policy_python,
             gpus=args.gpus,
+            workers=args.workers,
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

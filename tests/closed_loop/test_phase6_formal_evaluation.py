@@ -31,6 +31,7 @@ def test_formal_protocol_freezes_full_normal_and_balanced_fault_ranges() -> None
         "full",
     )
     assert protocol["statistics"]["threshold_tuning_from_fault_results"] is False
+    assert protocol["resource_plan"]["parallel_lanes"] == 48
     assert (
         protocol["shared_execution"]["controller_profile"]
         == STAGE6_IK_CONTROLLER_PROFILE
@@ -86,11 +87,12 @@ def test_time_stall_freezes_both_arms_without_task_specific_policy_logic() -> No
         assert spec.motion_trigger_distance == 0.01
 
 
-def test_default_eight_lane_cpu_affinity_is_disjoint_and_complete() -> None:
-    affinity = launch._cpu_sets(tuple(range(8)))
+def test_default_48_worker_cpu_affinity_is_disjoint_and_complete() -> None:
+    specs = launch._lane_specs(tuple(range(8)), 48)
+    affinity = [spec.logical_cpus for spec in specs]
     flattened = [cpu for lane in affinity for cpu in lane]
 
-    assert len(affinity) == 8
+    assert len(affinity) == 48
     assert len(flattened) == len(set(flattened))
     assert set(flattened) == set(range(128))
     for lane in affinity:

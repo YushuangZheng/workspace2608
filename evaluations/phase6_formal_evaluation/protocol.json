@@ -151,14 +151,14 @@
     "fault_episode_index_range": [0, 49]
   },
   "tasks": [
-    "stack_wine",
+    "bimanual_handover_item",
+    "bimanual_lift_tray",
+    "bimanual_sweep_to_dustpan",
+    "bimanual_put_bottle_in_fridge",
     "place_cups",
     "open_microwave",
     "wipe_desk",
-    "bimanual_put_bottle_in_fridge",
-    "bimanual_handover_item",
-    "bimanual_lift_tray",
-    "bimanual_sweep_to_dustpan"
+    "stack_wine"
   ],
   "methods": {
     "dynamac_v4": {
@@ -267,11 +267,26 @@
     "threshold_tuning_from_fault_results": false
   },
   "resource_plan": {
-    "parallel_lanes": 8,
+    "parallel_lanes": 48,
     "gpu_indices": [0, 1, 2, 3, 4, 5, 6, 7],
     "render_backend": "xvfb_software_gl",
-    "gpu_assignment_semantics": "one isolated simulator lane per GPU identity; CUDA is available to GPU-capable components",
-    "cpu_affinity": "NUMA-aware physical-core partitions with SMT siblings",
+    "gpu_assignment_semantics": "48 isolated simulator workers reuse the eight GPU identities round-robin; CUDA identity is isolated per process and rendering remains software Xvfb",
+    "cpu_affinity": "non-overlapping NUMA-local physical-core partitions with each allocated core's SMT sibling; at least one physical core per worker",
+    "normal_matrix_effective_parallelism": "min(48, pending normal cells)",
+    "fault_matrix_effective_parallelism": "min(48, pending fault cells)",
+    "concurrency_admission": {
+      "schema": "essay2608.phase6_concurrency_probe.v1",
+      "run_id": "20260831T084113Z-w48",
+      "workers": 48,
+      "horizon": 200,
+      "peak_active_workers": 48,
+      "all_workers_valid": true,
+      "fatal_log_patterns_absent": true,
+      "stale_result_locks_absent": true,
+      "minimum_memory_available_gib": 994.2,
+      "admission_record": "evaluations/phase6_formal_evaluation/concurrency_admission.json",
+      "summary": "integrations/rlbench/results/phase6_concurrency_probe/20260831T084113Z-w48/summary.json"
+    },
     "hardware_rendering_admission": "rejected_before_formal_run",
     "hardware_rendering_probe": {
       "date_utc": "2026-08-29",
