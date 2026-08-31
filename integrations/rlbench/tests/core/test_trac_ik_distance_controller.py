@@ -231,11 +231,16 @@ class _PhysicallyStalledPathArm(_LinearPathArm):
 
     def get_path(self, position, **kwargs):
         self.path_calls.append((np.asarray(position).copy(), dict(kwargs)))
-        self.path_family_history.append("aware_nonlinear")
+        kind = (
+            "relaxed_nonlinear"
+            if kwargs["ignore_collisions"]
+            else "aware_nonlinear"
+        )
+        self.path_family_history.append(kind)
         return _TaggedPath(
             self,
             [float(position[0]), 0.0],
-            "aware_nonlinear",
+            kind,
         )
 
 
@@ -286,6 +291,17 @@ class _RelaxedPathOnlyScene(_Scene):
         self.steps += 1
         for arm in self.arms:
             if arm.last_path_kind == "relaxed_linear":
+                arm.velocity = (arm.target - arm.current) / 0.05
+                arm.current = arm.target.copy()
+            else:
+                arm.velocity = np.zeros_like(arm.current)
+
+
+class _RelaxedNonlinearOnlyScene(_Scene):
+    def step(self):
+        self.steps += 1
+        for arm in self.arms:
+            if arm.last_path_kind == "relaxed_nonlinear":
                 arm.velocity = (arm.target - arm.current) / 0.05
                 arm.current = arm.target.copy()
             else:
@@ -482,8 +498,9 @@ def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
     assert controller["path_fallback"]["order"] == (
         "collision_aware_linear_then_collision_aware_rrt_connect_"
         "after_measured_stall_or_for_far_targets_then_"
-        "collision_relaxed_linear"
+        "collision_relaxed_linear_then_collision_relaxed_rrt_connect"
     )
+    assert controller["path_fallback"]["collision_relaxed_nonlinear_enabled"] is True
     assert controller["path_fallback"]["near_nonlinear_entry_condition"] == (
         "same_target_measured_stall_exhausted_local_solver_tiers"
     )
@@ -1007,6 +1024,45 @@ def test_stage6_path_families_advance_after_physical_not_only_planning_stall():
     assert diagnostics[-2]["nonlinear_path_successes"] == 1
     assert diagnostics[-1]["linear_path_collision_relaxed_successes"] == 1
     assert max(row["physical_stall_solver_tier_max"] for row in diagnostics) == 6
+    assert arm.current[0] == pytest.approx(0.05)
+
+
+def test_stage6_uses_relaxed_nonlinear_path_only_after_all_other_tiers_stall():
+    arm = _PhysicallyStalledPathArm()
+    scene = _RelaxedNonlinearOnlyScene(arm)
+    factory = _Factory(RuntimeError("no external solution"))
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_raw_physics_steps=1,
+    )
+    statuses = []
+    diagnostics = []
+
+    for _ in range(8):
+        status, audit = _execute_stage6(
+            scene,
+            ((arm, _target(0.05)),),
+            factory,
+            config=config,
+        )
+        statuses.append(status)
+        diagnostics.append(audit)
+        if status == "reached":
+            break
+
+    assert statuses == ["stopped"] * 7 + ["reached"]
+    assert arm.path_family_history == [
+        "aware_linear",
+        "aware_linear",
+        "aware_linear",
+        "aware_linear",
+        "aware_linear",
+        "aware_nonlinear",
+        "relaxed_linear",
+        "relaxed_nonlinear",
+    ]
+    assert diagnostics[-1]["nonlinear_path_collision_relaxed_attempts"] == 1
+    assert diagnostics[-1]["nonlinear_path_collision_relaxed_successes"] == 1
+    assert max(row["physical_stall_solver_tier_max"] for row in diagnostics) == 7
     assert arm.current[0] == pytest.approx(0.05)
 
 

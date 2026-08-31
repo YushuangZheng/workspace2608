@@ -576,6 +576,39 @@ class ClosedLoopMultiStreamPolicy:
             return False
         return True
 
+    def _current_discrete_action_complete(
+        self,
+        arm: str,
+        observation: RuntimeObservation,
+    ) -> bool:
+        """Check whether the current StateNode's gripper command is present.
+
+        Continuous state completion remains exclusively beta/reference based.
+        This check only prevents the discrete half of an already reached task
+        state from being skipped when the controller selects its successor.
+        Non-final skill terminals remain owned by the boundary transaction,
+        which applies the committed entry state's gripper command.
+        """
+
+        reference = self.execution_controllers[arm].cursor.reference_state
+        node = self.task_models[arm].state(reference)
+        if node.topology.has_cross_skill_successor:
+            return True
+        mode = self._mode_by_arm_skill[arm].get(reference.skill_index)
+        if mode is None:
+            mode = int(
+                self.task_models[arm].base_policy.selected_mode_path[
+                    reference.skill_index
+                ]
+            )
+        if mode < 0 or mode >= len(node.gripper_commands):
+            raise IndexError("当前 StateNode 的夹爪模态索引无效")
+        target = np.asarray(node.gripper_commands[mode], dtype=np.float64)
+        current = np.asarray(observation.gripper_state, dtype=np.float64)
+        if target.shape != current.shape:
+            raise ValueError("当前 StateNode 与运行观测的夹爪维度不一致")
+        return bool(np.array_equal(target > 0.5, current > 0.5))
+
     @staticmethod
     def _verification_request(
         arm: str,
@@ -796,6 +829,9 @@ class ClosedLoopMultiStreamPolicy:
                     beliefs[arm],
                     dynamac[arm],
                     mode_by_skill=self._mode_by_arm_skill[arm],
+                    current_discrete_action_complete=(
+                        self._current_discrete_action_complete(arm, runtime[arm])
+                    ),
                     action_executed=action_executed,
                 )
                 executions[arm] = execution

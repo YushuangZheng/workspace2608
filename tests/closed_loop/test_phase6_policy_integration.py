@@ -393,6 +393,54 @@ def test_task_gripper_authorization_uses_alignment_and_boundary_transaction() ->
     assert authorization(final, final, ProgressStatus.LOW_CONFIDENCE) is False
 
 
+def test_current_state_gripper_transition_must_commit_before_successor() -> None:
+    current = StateId(0, 2)
+    terminal = StateId(1, 3)
+    policy = SimpleNamespace(
+        execution_controllers={
+            "right": SimpleNamespace(
+                cursor=SimpleNamespace(reference_state=current)
+            )
+        },
+        task_models={
+            "right": SimpleNamespace(
+                state=lambda state: {
+                    current: SimpleNamespace(
+                        topology=SimpleNamespace(
+                            has_cross_skill_successor=False
+                        ),
+                        gripper_commands=np.asarray([[-1.0]]),
+                    ),
+                    terminal: SimpleNamespace(
+                        topology=SimpleNamespace(
+                            has_cross_skill_successor=True
+                        ),
+                        gripper_commands=np.asarray([[-1.0]]),
+                    ),
+                }[state],
+                base_policy=SimpleNamespace(selected_mode_path=(0, 0)),
+            )
+        },
+        _mode_by_arm_skill={"right": {0: 0, 1: 0}},
+    )
+    open_observation = SimpleNamespace(gripper_state=np.asarray([1.0]))
+    closed_observation = SimpleNamespace(gripper_state=np.asarray([0.0]))
+
+    assert not ClosedLoopMultiStreamPolicy._current_discrete_action_complete(
+        policy, "right", open_observation
+    )
+    assert ClosedLoopMultiStreamPolicy._current_discrete_action_complete(
+        policy, "right", closed_observation
+    )
+
+    # A non-final skill terminal is owned by the boundary transaction and must
+    # not deadlock while waiting for its entry-state gripper command.
+    policy.execution_controllers["right"].cursor.reference_state = terminal
+    assert ClosedLoopMultiStreamPolicy._current_discrete_action_complete(
+        policy, "right", open_observation
+    )
+
+
 def test_rlbench_gripper_authorization_is_forwarded_to_action_mode() -> None:
     received = []
     environment = SimpleNamespace(

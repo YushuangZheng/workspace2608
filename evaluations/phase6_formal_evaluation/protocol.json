@@ -143,6 +143,39 @@
       "interpretation": "This targeted replay validates process safety at and beyond the former crash point; its horizon outcome is not a task-success result and is not included in formal statistics."
     }
   },
+  "implementation_correction_after_invalidated_causal_action_audit": {
+    "date_utc": "2026-08-31",
+    "implementation_parent_commit": "71d196665b23727e81bb768c4e9b856b1917dc83",
+    "retained_formal_results_before_correction": false,
+    "observed_audit_scope": "2511 of 6400 normal episodes and 10 complete cells; the entire attempt is invalidated",
+    "reason": "Two general causal sequencing gaps caused systematic closed-loop failure. A formal LINK predecessor could be blocked because the relation-establishing successor action had not yet created linked evidence, and smooth posterior advance could move the cursor before the current StateNode gripper command had appeared in the physical observation.",
+    "resolution": "Activate each learned formal-LINK entry interval only by causal traversal from its direct predecessor, allow that direct successor to establish the relation, and require the current StateNode discrete gripper action to be reflected in observation before advancing its reference. The posterior, relation state space, boundary model, task set, sample set, fault protocol, and statistical plan are unchanged. The shared executor also receives one final bounded collision-relaxed nonlinear path tier after all earlier general tiers fail or physically stall; it is task and state agnostic.",
+    "invalidated_attempt_disposition": "All results and diagnostics from the incomplete audit attempt are excluded from statistics and moved out of the formal result root before a complete restart from the repaired commit.",
+    "automated_validation": {
+      "targeted_tests_passed": 156,
+      "tests_skipped_by_environment": 1,
+      "causal_link_predecessor_regression_exercised": true,
+      "current_state_gripper_completion_regression_exercised": true
+    },
+    "real_simulator_validation": {
+      "sweep_dust": {
+        "episode_index_range": [0, 9],
+        "progress_dynamic_roles_successes": 10,
+        "full_successes": 10,
+        "episodes_per_method": 10
+      },
+      "lift_tray": {
+        "method": "full",
+        "episode_indices": [0, 1, 2, 3, 4],
+        "success_episode_indices": [1, 3, 4],
+        "shared_executor_baseline_success_episode_indices": [1, 3, 4],
+        "invalid_actions": 0,
+        "interpretation": "The repaired closed loop matches the paired shared-executor baseline success set on these sealed episodes; the two remaining physical failures are not treated as a method regression."
+      },
+      "controller_profile": "stage6_hybrid_cartesian_executor_v18",
+      "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v22"
+    }
+  },
   "evaluation_set": {
     "id": "rlbench_eval_v2",
     "seed_start": 2608000000,
@@ -180,6 +213,7 @@
   },
   "shared_execution": {
     "controller_profile": "stage6_hybrid_cartesian_executor_v18",
+    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v22",
     "scenario": "static",
     "horizon": 1000,
     "policy_timeout_seconds": 120.0,

@@ -593,6 +593,7 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
     cartesian_continuation_max_raw_physics_steps: int = 8
     linear_path_steps: int = 50
     allow_collision_relaxed_linear_path: bool = True
+    allow_collision_relaxed_nonlinear_path: bool = True
     allow_collision_relaxed_sampling: bool = True
 
     def __post_init__(self) -> None:
@@ -646,12 +647,16 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
             raise ValueError("linear_path_steps must be an integer of at least two")
         if not isinstance(self.allow_collision_relaxed_linear_path, bool):
             raise TypeError("allow_collision_relaxed_linear_path must be boolean")
+        if not isinstance(self.allow_collision_relaxed_nonlinear_path, bool):
+            raise TypeError(
+                "allow_collision_relaxed_nonlinear_path must be boolean"
+            )
         if not isinstance(self.allow_collision_relaxed_sampling, bool):
             raise TypeError("allow_collision_relaxed_sampling must be boolean")
 
     @property
     def protocol_id(self) -> str:
-        return "rlbench-stage6-hybrid-cartesian-continuation-v21"
+        return "rlbench-stage6-hybrid-cartesian-continuation-v22"
 
     def metadata(self) -> dict[str, Any]:
         value = super().metadata()
@@ -666,7 +671,8 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
                     "then_bounded_cartesian_continuation_"
                     "then_collision_aware_or_relaxed_sampling_"
                     "then_collision_aware_linear_then_bounded_nonlinear_path_"
-                    "then_collision_relaxed_linear"
+                    "then_collision_relaxed_linear_then_collision_relaxed_"
+                    "nonlinear_path"
                 ),
                 "primary_resolution_method": (
                     "current_seeded_coppeliasim_pseudo_inverse"
@@ -714,11 +720,15 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
                     "order": (
                         "collision_aware_linear_then_collision_aware_rrt_connect_"
                         "after_measured_stall_or_for_far_targets_then_"
-                        "collision_relaxed_linear"
+                        "collision_relaxed_linear_then_collision_relaxed_"
+                        "rrt_connect"
                     ),
                     "linear_steps": self.linear_path_steps,
                     "collision_relaxed_linear_enabled": (
                         self.allow_collision_relaxed_linear_path
+                    ),
+                    "collision_relaxed_nonlinear_enabled": (
+                        self.allow_collision_relaxed_nonlinear_path
                     ),
                     "nonlinear_minimum_translation_m": (
                         self.far_translation_threshold_m
@@ -959,7 +969,7 @@ def _release_configuration_path_motion_handle(
 
 _STAGE6_JOINT_CACHE_ATTRIBUTE = "_dynamac_stage6_joint_target_cache_v1"
 _STAGE6_SOLVER_TIER_ATTRIBUTE = "_dynamac_stage6_solver_tier_v1"
-_STAGE6_SOLVER_TIER_COUNT = 7
+_STAGE6_SOLVER_TIER_COUNT = 8
 
 
 def _same_stage6_cartesian_target(left: Array, right: Array) -> bool:
@@ -1095,7 +1105,7 @@ def _store_stage6_same_target_solver_tier(
     tier: int,
 ) -> None:
     if isinstance(tier, bool) or tier not in range(_STAGE6_SOLVER_TIER_COUNT):
-        raise ValueError("stage-six solver tier must be an integer in [0, 6]")
+        raise ValueError("stage-six solver tier must be an integer in [0, 7]")
     setattr(
         arm,
         _STAGE6_SOLVER_TIER_ATTRIBUTE,
@@ -1456,6 +1466,9 @@ def initialize_global_ik_controller_diagnostics() -> dict[str, Any]:
             "linear_path_collision_relaxed_attempts": 0,
             "linear_path_collision_relaxed_successes": 0,
             "linear_path_collision_relaxed_failures": 0,
+            "nonlinear_path_collision_relaxed_attempts": 0,
+            "nonlinear_path_collision_relaxed_successes": 0,
+            "nonlinear_path_collision_relaxed_failures": 0,
             "near_target_nonlinear_planner_skips": 0,
             "commands_prepared_before_physics": 0,
             "ik_group_baseline_restore_attempts": 0,
@@ -2845,7 +2858,7 @@ def _prepare_stage6_hybrid_command(
     if isinstance(minimum_solver_tier, bool) or minimum_solver_tier not in range(
         _STAGE6_SOLVER_TIER_COUNT
     ):
-        raise ValueError("minimum_solver_tier must be an integer in [0, 6]")
+        raise ValueError("minimum_solver_tier must be an integer in [0, 7]")
 
     current = np.asarray(arm.get_joint_positions(), dtype=np.float64)
     if current.ndim != 1 or not np.all(np.isfinite(current)):
@@ -2979,8 +2992,8 @@ def _prepare_collision_aware_path_command(
     allow_near_nonlinear: bool = False,
     minimum_path_tier: int = 0,
 ) -> PreparedEECommand | None:
-    if isinstance(minimum_path_tier, bool) or minimum_path_tier not in range(3):
-        raise ValueError("minimum_path_tier must be an integer in [0, 2]")
+    if isinstance(minimum_path_tier, bool) or minimum_path_tier not in range(4):
+        raise ValueError("minimum_path_tier must be an integer in [0, 3]")
     _set_ik_group_properties(
         arm,
         resolution_method=FROZEN_V4_IK_RESOLUTION_METHOD,
@@ -3063,7 +3076,11 @@ def _prepare_collision_aware_path_command(
         # desired endpoint itself touches a task object.  It must not pre-empt
         # a collision-aware detour after the same target has physically
         # stalled.
-        if callable(linear_path) and config.allow_collision_relaxed_linear_path:
+        if (
+            callable(linear_path)
+            and config.allow_collision_relaxed_linear_path
+            and minimum_path_tier <= 2
+        ):
             _increment_ik_diagnostic(
                 diagnostics, "linear_path_collision_relaxed_attempts"
             )
@@ -3082,6 +3099,47 @@ def _prepare_collision_aware_path_command(
             else:
                 _increment_ik_diagnostic(
                     diagnostics, "linear_path_collision_relaxed_successes"
+                )
+                return PreparedEECommand(
+                    arm=arm,
+                    target_pose=target,
+                    mode="planned_path",
+                    path=path,
+                )
+
+        # A contact-rich target can make every straight Cartesian path
+        # infeasible even when a valid joint-space route still exists.  Keep
+        # collision-relaxed nonlinear planning as the final, bounded solver
+        # family after measured stall has exhausted all collision-aware and
+        # linear alternatives.  This is a global executor fallback: it is not
+        # keyed by task, state, relation, or failure label.
+        if (
+            nonlinear_allowed
+            and config.allow_collision_relaxed_nonlinear_path
+            and minimum_path_tier <= 3
+        ):
+            _increment_ik_diagnostic(
+                diagnostics, "nonlinear_path_collision_relaxed_attempts"
+            )
+            try:
+                path = arm.get_path(
+                    target[:3],
+                    quaternion=target[3:],
+                    ignore_collisions=True,
+                    trials=config.planner_trials,
+                    max_configs=config.planner_max_configs,
+                    max_time_ms=config.planner_max_time_ms,
+                    trials_per_goal=config.planner_trials_per_goal,
+                    algorithm=path_algorithm,
+                    relative_to=None,
+                )
+            except configuration_path_error:
+                _increment_ik_diagnostic(
+                    diagnostics, "nonlinear_path_collision_relaxed_failures"
+                )
+            else:
+                _increment_ik_diagnostic(
+                    diagnostics, "nonlinear_path_collision_relaxed_successes"
                 )
                 return PreparedEECommand(
                     arm=arm,

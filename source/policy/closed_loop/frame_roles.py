@@ -117,6 +117,7 @@ class FrameRoleSnapshot:
     verification_requests: tuple[RelationVerificationRequest, ...] = ()
     confirmed_link_events: tuple[RelationEventId, ...] = ()
     rejected_link_events: tuple[RelationEventId, ...] = ()
+    pending_link_confirmation_events: tuple[RelationEventId, ...] = ()
 
     @property
     def execution_weights(self) -> dict[str, float]:
@@ -172,11 +173,18 @@ class FrameRoleRouter:
         # occurrence, later low-excitation cycles must not repeatedly restore
         # that occurrence's confirmation grace.
         self._rejected_link_events: set[RelationEventId] = set()
+        # A formal LINK confirmation window is only activated by causally
+        # traversing its immediate predecessor.  Merely resetting or reentering
+        # at a state whose offline prior is linked must not grant fresh grace.
+        self._pending_link_confirmation_events: set[RelationEventId] = set()
+        self._last_committed_state: StateId | None = None
 
     def reset(self) -> None:
         self._last_trusted_weights.clear()
         self._confirmed_link_events.clear()
         self._rejected_link_events.clear()
+        self._pending_link_confirmation_events.clear()
+        self._last_committed_state = None
 
     def commit(
         self,
@@ -187,6 +195,10 @@ class FrameRoleRouter:
 
         self._confirmed_link_events.update(snapshot.confirmed_link_events)
         self._rejected_link_events.update(snapshot.rejected_link_events)
+        self._pending_link_confirmation_events = set(
+            snapshot.pending_link_confirmation_events
+        )
+        self._last_committed_state = snapshot.state_id
 
         # Relation filtering observes every modeled physical frame even when
         # that frame is not selected by the current skill.  Cache its latest
@@ -367,12 +379,13 @@ class FrameRoleRouter:
     ) -> tuple[RelationEventId, ...]:
         """Admit learned linked-interval motion while a formal LINK catches up.
 
-        The binary posterior carries legitimate pre-event persistence, so its
-        first post-event external/Unknown decision is not automatically fresh
-        evidence that grasping failed.  The grace is unavailable when current
-        informative relative motion already supports external, when tracking
-        is unreliable, outside this event's offline learned linked interval,
-        or after this occurrence has once been confirmed linked.
+        The binary posterior carries legitimate pre-event persistence, and the
+        first samples in the learned LINK-entry interval include the causal
+        grasp/close command itself.  They therefore cannot be used to reject
+        the relation whose establishment they are still executing.  The
+        bounded offline entry interval supplies natural carrying motion; after
+        it ends, ordinary informative external evidence rejects the event.
+        Tracking must remain available and reliable throughout this window.
         """
 
         if expected != RelationDecision.LINKED or estimate is None:
@@ -384,6 +397,19 @@ class FrameRoleRouter:
         )
         if not events:
             return ()
+        causally_entered = set(self._pending_link_confirmation_events)
+        if self._last_committed_state is not None:
+            previous = self.task_model.state(self._last_committed_state)
+            if state_id in previous.topology.successors:
+                causally_entered.update(
+                    event_id
+                    for event_id in events
+                    if self.task_model.link_anchors[event_id].linked_entry_states[0]
+                    == state_id
+                )
+        events = tuple(event for event in events if event in causally_entered)
+        if not events:
+            return ()
         features = belief.runtime_features
         if (
             not features.frame_pair_available.get(frame, False)
@@ -393,11 +419,7 @@ class FrameRoleRouter:
             return ()
         if estimate.decision_state == RelationDecision.LINKED:
             return ()
-        likelihood = np.asarray(estimate.observation_likelihood, dtype=np.float64)
-        informative_external_evidence = bool(
-            estimate.informative and likelihood[0] >= likelihood[1]
-        )
-        return () if informative_external_evidence else events
+        return events
 
     def _planned_unlink_is_direct_successor(
         self,
@@ -428,6 +450,46 @@ class FrameRoleRouter:
                 and event_id.mode == candidate_mode
                 and metadata.release_state in successors
                 for event_id, metadata in self.task_model.unlink_events.items()
+            ):
+                return False
+        return True
+
+    def _planned_link_is_direct_successor(
+        self,
+        frame: str,
+        state_id: StateId,
+        mode_by_skill: Mapping[int, int] | None,
+    ) -> bool:
+        """Return whether the next normal command enters a learned LINK.
+
+        A relation-changing command cannot be gated by the relation that the
+        command itself is expected to establish.  In particular, the online
+        filter can still carry a valid pre-grasp ``external`` decision at the
+        predecessor of a demonstrated LINK.  Blocking that predecessor would
+        prevent the controller from ever entering the learned linked interval
+        whose natural motion supplies the confirming evidence.
+
+        The allowance is event-local and mode-specific: every active mode must
+        have a cross-demonstration LINK whose first legal linked state is an
+        immediate topology successor.  Earlier mismatches and post-event drops
+        therefore keep the ordinary RECOVER semantics.
+        """
+
+        successors = set(self.task_model.state(state_id).topology.successors)
+        mode = self._mode_for_state(state_id, mode_by_skill)
+        modes = (
+            range(len(self.task_model.state(state_id).mode_priors))
+            if mode is None
+            else (mode,)
+        )
+        for candidate_mode in modes:
+            if not any(
+                event_id.arm_id == self.task_model.arm_id
+                and event_id.frame_id == frame
+                and event_id.mode == candidate_mode
+                and bool(anchor.linked_entry_states)
+                and anchor.linked_entry_states[0] in successors
+                for event_id, anchor in self.task_model.link_anchors.items()
             ):
                 return False
         return True
@@ -548,6 +610,7 @@ class FrameRoleRouter:
         recovery_intents = []
         confirmed_link_events: set[RelationEventId] = set()
         rejected_link_events: set[RelationEventId] = set()
+        pending_link_confirmation_events: set[RelationEventId] = set()
         features = belief.runtime_features
 
         for frame in (*selected_frames, *confirmed_monitors):
@@ -603,8 +666,18 @@ class FrameRoleRouter:
             )
             if actual == RelationDecision.LINKED:
                 confirmed_link_events.update(current_link_events)
+            confirmation_events = self._formal_link_confirmation_pending(
+                frame,
+                state_id,
+                estimate,
+                belief,
+                expected,
+                mode_by_skill,
+            )
+            pending_link_confirmation_events.update(confirmation_events)
             if (
-                expected == RelationDecision.LINKED
+                not confirmation_events
+                and expected == RelationDecision.LINKED
                 and actual == RelationDecision.EXTERNAL
                 and estimate is not None
                 and estimate.informative
@@ -612,12 +685,9 @@ class FrameRoleRouter:
                 >= estimate.observation_likelihood[1]
             ):
                 rejected_link_events.update(current_link_events)
-            confirmation_events = self._formal_link_confirmation_pending(
+            planned_link = self._planned_link_is_direct_successor(
                 frame,
                 state_id,
-                estimate,
-                belief,
-                expected,
                 mode_by_skill,
             )
             planned_unlink = self._planned_unlink_is_direct_successor(
@@ -648,6 +718,20 @@ class FrameRoleRouter:
                 # itself the non-tactile relation probe.  This is distinct from
                 # LINK_PENDING/VERIFY_LINK: the offline event is already a
                 # formal LINK and no auxiliary execution mode is entered.
+                role = FrameRole.DEFER
+                weight = 0.0
+                monitor = True
+                blocks = False
+                intent = None
+            elif (
+                planned_link
+                and expected == RelationDecision.LINKED
+                and actual in {RelationDecision.UNKNOWN, RelationDecision.EXTERNAL}
+            ):
+                # The immediate successor is the learned relation-changing
+                # event.  Let that command run with the physical stream
+                # deferred; the event's linked interval then owns natural
+                # confirmation and any fresh external contradiction.
                 role = FrameRole.DEFER
                 weight = 0.0
                 monitor = True
@@ -776,6 +860,13 @@ class FrameRoleRouter:
             verification_requests=requests,
             confirmed_link_events=tuple(sorted(confirmed_link_events)),
             rejected_link_events=tuple(sorted(rejected_link_events)),
+            pending_link_confirmation_events=tuple(
+                sorted(
+                    pending_link_confirmation_events.difference(
+                        confirmed_link_events, rejected_link_events
+                    )
+                )
+            ),
         )
         if commit:
             self.commit(snapshot, belief)

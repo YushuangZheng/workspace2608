@@ -488,6 +488,67 @@ def test_confirmed_unlink_direct_successor_can_issue_causal_opening(
     assert early.blocks_advance is True
 
 
+@pytest.mark.parametrize(
+    "actual",
+    [RelationDecision.UNKNOWN, RelationDecision.EXTERNAL],
+)
+def test_confirmed_link_direct_successor_can_issue_causal_grasp(
+    phase3_model,
+    actual: RelationDecision,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    first_linked = anchor.linked_entry_states[0]
+    predecessor = model.state(first_linked).topology.predecessors[0]
+    assert first_linked in model.state(predecessor).topology.successors
+    force_relation_prior(model, predecessor, linked=True)
+    posterior = (0.5, 0.5) if actual == RelationDecision.UNKNOWN else (0.95, 0.05)
+    snapshot = FrameRoleRouter(model).route(
+        predecessor,
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=predecessor,
+            estimated=predecessor,
+            relation=relation_estimate(
+                "object",
+                posterior,
+                actual,
+                information_weight=(0.0 if actual == RelationDecision.UNKNOWN else 0.4),
+                observation_likelihood=(1.0, 0.01),
+            ),
+            static=actual == RelationDecision.UNKNOWN,
+        ),
+        mode_by_skill={predecessor.skill_index: event_id.mode},
+    )
+    decision = snapshot.decisions["object"]
+    assert decision.role == FrameRole.DEFER
+    assert decision.blocks_advance is False
+    assert snapshot.recovery_intents == ()
+
+    earlier = model.state(predecessor).topology.predecessors[0]
+    force_relation_prior(model, earlier, linked=True)
+    early = FrameRoleRouter(model).route(
+        earlier,
+        belief_for(
+            model,
+            demos,
+            tick=2,
+            nominal=earlier,
+            estimated=earlier,
+            relation=relation_estimate(
+                "object",
+                (0.95, 0.05),
+                RelationDecision.EXTERNAL,
+            ),
+        ),
+        mode_by_skill={earlier.skill_index: event_id.mode},
+    )
+    assert early.decisions["object"].role == FrameRole.RECOVER
+    assert early.blocks_advance is True
+
+
 def test_formal_link_uses_learned_interval_motion_to_confirm_posterior_lag(
     phase3_model,
 ) -> None:
@@ -496,6 +557,25 @@ def test_formal_link_uses_learned_interval_motion_to_confirm_posterior_lag(
     state_id = anchor.linked_entry_states[0]
     mode = event_id.mode
     router = FrameRoleRouter(model)
+    predecessor = model.state(state_id).topology.predecessors[0]
+    router.route(
+        predecessor,
+        belief_for(
+            model,
+            demos,
+            tick=0,
+            nominal=predecessor,
+            estimated=predecessor,
+            relation=relation_estimate(
+                "object",
+                (0.5, 0.5),
+                RelationDecision.UNKNOWN,
+                information_weight=0.0,
+            ),
+            static=True,
+        ),
+        mode_by_skill={predecessor.skill_index: mode},
+    )
     lagging = belief_for(
         model,
         demos,
@@ -524,7 +604,7 @@ def test_formal_link_uses_learned_interval_motion_to_confirm_posterior_lag(
     assert snapshot.recovery_intents == ()
 
 
-def test_formal_link_confirmation_never_masks_fresh_external_evidence_or_drop(
+def test_formal_link_confirmation_requires_causal_entry_and_never_masks_drop(
     phase3_model,
 ) -> None:
     model, demos = phase3_model
@@ -651,25 +731,31 @@ def test_formal_link_natural_confirmation_uses_full_learned_interval(
     assert len(anchor.linked_entry_states) >= 2
     state_id = anchor.linked_entry_states[-1]
     router = FrameRoleRouter(model)
-    unresolved = belief_for(
-        model,
-        demos,
-        tick=1,
-        nominal=state_id,
-        estimated=state_id,
-        relation=relation_estimate(
-            "object",
-            (0.5, 0.5),
-            RelationDecision.UNKNOWN,
-            information_weight=0.0,
-        ),
-        static=True,
-    )
-    snapshot = router.route(
-        state_id,
-        unresolved,
-        mode_by_skill={state_id.skill_index: event_id.mode},
-    )
+    first = anchor.linked_entry_states[0]
+    predecessor = model.state(first).topology.predecessors[0]
+    route_states = (predecessor, *anchor.linked_entry_states)
+    snapshot = None
+    for tick, route_state in enumerate(route_states):
+        snapshot = router.route(
+            route_state,
+            belief_for(
+                model,
+                demos,
+                tick=tick,
+                nominal=route_state,
+                estimated=route_state,
+                relation=relation_estimate(
+                    "object",
+                    (0.5, 0.5),
+                    RelationDecision.UNKNOWN,
+                    information_weight=0.0,
+                ),
+                static=True,
+            ),
+            mode_by_skill={route_state.skill_index: event_id.mode},
+        )
+    assert snapshot is not None
+    assert snapshot.state_id == state_id
     assert snapshot.decisions["object"].formal_link_confirmation_pending is True
     assert snapshot.decisions["object"].role == FrameRole.DEFER
     assert snapshot.blocks_advance is False
@@ -721,6 +807,38 @@ def test_controller_advances_after_current_reference_is_reached(phase3_model) ->
     assert result.cursor_after.reference_state == successor
     assert result.weighted_action.action is not None
     assert result.weighted_action.action.diagnostics["time_index"] == 1
+
+
+def test_pending_discrete_action_holds_same_reference_without_executor_gate(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    current = StateId(0, 0)
+    force_relation_prior(model, current, linked=False)
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(current)
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=current,
+        estimated=current,
+        relation=relation_estimate(
+            "object", (0.95, 0.05), RelationDecision.EXTERNAL
+        ),
+    )
+
+    result = controller.update(
+        belief,
+        dynamac_observation(model, demos, current),
+        mode_by_skill={0: 0},
+        current_discrete_action_complete=False,
+        action_executed=True,
+    )
+
+    assert result.decision == ExecutionDecision.HOLD
+    assert result.cursor_after.reference_state == current
+    assert "current_discrete_action_pending" in result.reasons
 
 
 def _install_control_targets(
@@ -1383,7 +1501,11 @@ def test_reliable_relation_mismatch_blocks_progress_and_emits_after_persistence(
     model, demos = phase3_model
     current = StateId(1, 0)
     successor = StateId(1, 1)
-    force_relation_prior(model, current, linked=True)
+    # Isolate ordinary mismatch persistence from the separate causal LINK
+    # successor allowance exercised above.
+    model.link_anchors.clear()
+    model.link_origins.clear()
+    force_relation_prior(model, current, linked=False)
     controller = ClosedLoopExecutionController(
         model,
         ClosedLoopExecutionConfig(
@@ -1467,6 +1589,30 @@ def test_blocked_proposed_state_contributes_persistent_relation_mismatch(
         ),
     )
     controller.reset(current)
+    first_entry = model.link_anchors[event_id].linked_entry_states[0]
+    predecessor = model.state(first_entry).topology.predecessors[0]
+    for tick, route_state in enumerate(
+        (predecessor, *model.link_anchors[event_id].linked_entry_states),
+        start=-len(model.link_anchors[event_id].linked_entry_states),
+    ):
+        controller.role_router.route(
+            route_state,
+            belief_for(
+                model,
+                demos,
+                tick=tick,
+                nominal=route_state,
+                estimated=route_state,
+                relation=relation_estimate(
+                    "object",
+                    (0.5, 0.5),
+                    RelationDecision.UNKNOWN,
+                    information_weight=0.0,
+                ),
+                static=True,
+            ),
+            mode_by_skill={route_state.skill_index: event_id.mode},
+        )
     relation = relation_estimate(
         "object",
         (0.95, 0.05),

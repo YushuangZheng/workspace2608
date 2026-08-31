@@ -574,7 +574,7 @@ class ClosedLoopExecutionController:
         belief: ClosedLoopBelief,
         roles: FrameRoleSnapshot,
         control_equivalence: ControlEquivalenceAssessment,
-        successor_ready: bool,
+        current_discrete_action_complete: bool,
         action_executed: bool,
     ) -> tuple[ExecutionDecision, StateId, tuple[str, ...]]:
         current = self._cursor.reference_state
@@ -593,8 +593,13 @@ class ClosedLoopExecutionController:
                 reasons.append("reliable_relation_mismatch")
             else:
                 reasons.append("critical_relation_unknown")
-        if not successor_ready:
-            reasons.append("successor_not_ready")
+        if not current_discrete_action_complete:
+            # The progress posterior explains the continuous robot state, but
+            # a discrete command stored on that same StateNode (currently the
+            # gripper value) must not be skipped by a smooth cursor advance.
+            # This is task-action sequencing, not an executor completion test:
+            # reached/progressed/stopped never enter this decision.
+            reasons.append("current_discrete_action_pending")
         if estimated.skill_index != current.skill_index:
             reasons.append("skill_boundary_requires_guard")
         if reasons:
@@ -700,7 +705,7 @@ class ClosedLoopExecutionController:
         observation: DynaMACObservation,
         *,
         mode_by_skill: Mapping[int, int] | None = None,
-        successor_ready: bool = True,
+        current_discrete_action_complete: bool = True,
         action_executed: bool = False,
     ) -> ExecutionCycleResult:
         if self._last_tick is not None and belief.tick <= self._last_tick:
@@ -727,7 +732,7 @@ class ClosedLoopExecutionController:
             belief,
             roles,
             control_equivalence,
-            successor_ready,
+            current_discrete_action_complete,
             action_executed,
         )
         if control_equivalence.accepted:
