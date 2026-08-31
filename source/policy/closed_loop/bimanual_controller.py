@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from .belief_updater import BeliefUpdater, ClosedLoopBelief
 from .boundary_runtime import (
     BoundaryRuntimeConfig,
     LocalCompletionResult,
+    TransitionPreparation,
     TransitionRequest,
 )
 from .entry_guard import EntryGuard
@@ -27,6 +28,7 @@ class BoundaryCycleResult:
     requests: dict[str, TransitionRequest]
     local_completion: dict[str, LocalCompletionResult]
     transaction: TransitionCommitResult | None
+    preparations: dict[str, TransitionPreparation] = field(default_factory=dict)
 
 
 class MultiArmBoundaryController:
@@ -61,6 +63,7 @@ class MultiArmBoundaryController:
             self.execution_controllers,
             self.belief_updaters,
         )
+        self._preparations: dict[str, TransitionPreparation] = {}
 
     def reset(self) -> None:
         for guard in self.guards.values():
@@ -70,6 +73,11 @@ class MultiArmBoundaryController:
             self.execution_controllers,
             self.belief_updaters,
         )
+        self._preparations.clear()
+
+    @property
+    def preparations(self) -> dict[str, TransitionPreparation]:
+        return dict(self._preparations)
 
     def evaluate(
         self,
@@ -118,11 +126,25 @@ class MultiArmBoundaryController:
             requests[arm] = request
             local_results[arm] = local
 
+            active = self._preparations.get(arm)
+            if active is not None and (
+                active.boundary_id != request.boundary_id
+                or source_state not in boundary.terminal_window
+            ):
+                self._preparations.pop(arm, None)
+                active = None
+            if active is None and request.preparation is not None:
+                self._preparations[arm] = request.preparation
+
+        for arm in selected_arms.difference(requests):
+            self._preparations.pop(arm, None)
+
         return BoundaryCycleResult(
             tick=tick,
             requests=requests,
             local_completion=local_results,
             transaction=None,
+            preparations=self.preparations,
         )
 
     def commit_requests(
@@ -141,11 +163,15 @@ class MultiArmBoundaryController:
                 externally_committed_arms=externally_committed_arms,
             )
         )
+        if transaction is not None:
+            for request in transaction.committed:
+                self._preparations.pop(request.arm_id, None)
         return BoundaryCycleResult(
             tick=evaluation.tick,
             requests=evaluation.requests,
             local_completion=evaluation.local_completion,
             transaction=transaction,
+            preparations=self.preparations,
         )
 
     def update(

@@ -19,8 +19,8 @@ from integrations.rlbench.rlbench_closed_loop.observation_adapter import (
     ClosedLoopObservationAdapter,
     commands_to_rlbench,
 )
-from integrations.rlbench.rlbench_dynamac.core.gripper_timing import (
-    global_gripper_timing_metadata,
+from integrations.rlbench.rlbench_closed_loop.protocol import (
+    closed_loop_gripper_timing_metadata,
 )
 from integrations.rlbench.rlbench_dynamac.data.direct_policy import (
     POLICY_CLOCK_SEMANTICS_ID,
@@ -28,13 +28,7 @@ from integrations.rlbench.rlbench_dynamac.data.direct_policy import (
 )
 
 
-CLOSED_LOOP_GRIPPER_TIMING = {
-    **global_gripper_timing_metadata(),
-    "rule": "committed_reference_state_command",
-    "lookahead_source": "not_required_after_guarded_reference_commit",
-    "authorization": "aligned_task_state_or_committed_boundary_transaction",
-    "executor_status_role": "physical_diagnostic_only",
-}
+CLOSED_LOOP_GRIPPER_TIMING = closed_loop_gripper_timing_metadata()
 
 
 class ClosedLoopPolicyServer:

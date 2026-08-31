@@ -592,6 +592,28 @@ class ClosedLoopMultiStreamPolicy:
 
         reference = self.execution_controllers[arm].cursor.reference_state
         node = self.task_models[arm].state(reference)
+        boundary_controller = getattr(self, "boundary_controller", None)
+        preparation = (
+            None
+            if boundary_controller is None
+            else boundary_controller.preparations.get(arm)
+        )
+        if preparation is not None:
+            learned_boundary = self.task_models[arm].boundaries[
+                preparation.boundary_id
+            ]
+            if reference in learned_boundary.terminal_window:
+                target = np.asarray(
+                    preparation.gripper_command, dtype=np.float64
+                )
+                current = np.asarray(
+                    observation.gripper_state, dtype=np.float64
+                )
+                if target.shape != current.shape:
+                    raise ValueError("边界转移准备与运行观测的夹爪维度不一致")
+                return bool(
+                    np.array_equal(target > 0.5, current > 0.5)
+                )
         if node.topology.has_cross_skill_successor:
             return True
         mode = self._mode_by_arm_skill[arm].get(reference.skill_index)
@@ -1154,14 +1176,29 @@ class ClosedLoopMultiStreamPolicy:
         arm_results = {}
         for arm in self.arms:
             mode_after = self.recovery_managers[arm].mode
+            preparation = self.boundary_controller.preparations.get(arm)
+            preparation_active = (
+                preparation is not None and mode_after == ExecutionMode.TASK
+            )
+            if preparation_active:
+                assert preparation is not None
+                commands[arm] = replace(
+                    commands[arm],
+                    gripper=preparation.gripper_command.copy(),
+                    gripper_authorized=True,
+                )
             commands[arm] = replace(
                 commands[arm],
-                gripper_authorized=self._task_gripper_authorized(
-                    arm,
-                    commands[arm],
-                    executions.get(arm),
-                    beliefs[arm],
-                    boundary,
+                gripper_authorized=(
+                    True
+                    if preparation_active
+                    else self._task_gripper_authorized(
+                        arm,
+                        commands[arm],
+                        executions.get(arm),
+                        beliefs[arm],
+                        boundary,
+                    )
                 ),
             )
             arm_results[arm] = ArmCycleResult(
@@ -1218,6 +1255,7 @@ class ClosedLoopMultiStreamPolicy:
         for arm, cycle in arms.items():
             belief = cycle.belief
             execution = cycle.execution
+            preparation = self.boundary_controller.preparations.get(arm)
             result["arms"][arm] = {
                 "observation": {
                     "ee_pose": runtime_observations[arm].ee_pose,
@@ -1306,6 +1344,7 @@ class ClosedLoopMultiStreamPolicy:
                     }
                 ),
                 "recovery": cycle.recovery,
+                "transition_preparation": preparation,
                 "action": cycle.command,
                 "failure_reason": cycle.failure_reason,
             }

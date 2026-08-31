@@ -15,6 +15,7 @@ from .boundary_runtime import (
     ConditionKind,
     ConditionResult,
     LocalCompletionResult,
+    TransitionPreparation,
     TransitionRequest,
 )
 from .frame_roles import RelationVerificationRequest
@@ -347,6 +348,74 @@ class EntryGuard:
             )
         return None
 
+    def _transition_preparation(
+        self,
+        *,
+        boundary: BoundaryModel,
+        source_state: StateId,
+        target_state: StateId,
+        belief: ClosedLoopBelief,
+        source_mode: int,
+        target_mode: int,
+        guard_results: list[ConditionResult],
+    ) -> TransitionPreparation | None:
+        """Build the edge action needed to make a LINK transition observable.
+
+        The target entry stores the post-transition gripper value, but this
+        preparation does not enter the target ``StateId``.  It is available
+        only after both commanded and estimated progress reach the learned
+        source terminal window and every independent entry guard is already
+        satisfied.  Local completion remains the subsequent commit criterion.
+        """
+
+        if (
+            source_state not in boundary.terminal_window
+            or belief.progress.estimated_state not in boundary.terminal_window
+            or any(not result.satisfied for result in guard_results)
+        ):
+            return None
+        source_node = self.task_model.state(source_state)
+        target_node = self.task_model.state(target_state)
+        if (
+            source_mode < 0
+            or source_mode >= len(source_node.gripper_commands)
+            or target_mode < 0
+            or target_mode >= len(target_node.gripper_commands)
+        ):
+            raise IndexError("边界转移准备的夹爪模态索引无效")
+        source_gripper = np.asarray(
+            source_node.gripper_commands[source_mode], dtype=np.float64
+        )
+        target_gripper = np.asarray(
+            target_node.gripper_commands[target_mode], dtype=np.float64
+        )
+        if source_gripper.shape != target_gripper.shape:
+            raise ValueError("边界转移两侧 StateNode 的夹爪维度不一致")
+        if not (
+            np.all(source_gripper > 0.5)
+            and np.all(target_gripper <= 0.5)
+        ):
+            return None
+
+        event_states = frozenset((*boundary.terminal_window, target_state))
+        events = {
+            event_id
+            for event_id, candidate in self.task_model.link_pending_events.items()
+            if candidate.candidate_state in event_states
+        }
+        events.update(
+            event_id
+            for event_id, anchor in self.task_model.link_anchors.items()
+            if event_states.intersection(anchor.linked_entry_states)
+        )
+        if not events:
+            return None
+        return TransitionPreparation(
+            boundary_id=boundary.boundary_id,
+            event_ids=tuple(sorted(events)),
+            gripper_command=target_gripper,
+        )
+
     def evaluate(
         self,
         boundary_id: BoundaryId,
@@ -567,6 +636,32 @@ class EntryGuard:
             local_done and all(result.satisfied for result in guard_results)
         )
         target_state = self.task_model.skill_states[boundary.target_skill][0]
+        target_mode_map = (
+            None if mode_by_arm_skill is None else mode_by_arm_skill.get(self.arm_id)
+        )
+        target_mode = (
+            int(target_mode_map[boundary.target_skill])
+            if target_mode_map is not None
+            and boundary.target_skill in target_mode_map
+            else int(
+                self.task_model.base_policy.selected_mode_path[
+                    boundary.target_skill
+                ]
+            )
+        )
+        preparation = (
+            None
+            if permitted
+            else self._transition_preparation(
+                boundary=boundary,
+                source_state=source_state,
+                target_state=target_state,
+                belief=own_belief,
+                source_mode=own_mode,
+                target_mode=target_mode,
+                guard_results=guard_results,
+            )
+        )
         return (
             TransitionRequest(
                 tick=tick,
@@ -579,6 +674,7 @@ class EntryGuard:
                 condition_results=condition_results,
                 verification_requests=tuple(verification_requests.values()),
                 transaction_group=boundary.transaction_group,
+                preparation=preparation,
             ),
             local,
         )

@@ -155,6 +155,19 @@ def test_formal_cell_paths_are_separate_from_v4_release_results() -> None:
         assert cell.result.is_relative_to(launch.RESULTS_ROOT)
 
 
+def test_retained_formal_results_are_explicit_content_addressed_and_exclude_handover_closed_loop() -> None:
+    protocol = run_cell.load_protocol()
+    cells = {cell.cell_id: cell for cell in launch.build_cells(protocol, "normal")}
+    records = launch._retained_records()
+
+    assert "normal/bimanual_handover_item/dynamac_v4" in records
+    assert "normal/bimanual_handover_item/progress_only" not in records
+    assert "normal/bimanual_handover_item/progress_dynamic_roles" not in records
+    assert "normal/bimanual_handover_item/full" not in records
+    for cell_id in records:
+        launch._validate_retained_result(cells[cell_id])
+
+
 def test_formal_statistics_helpers_match_known_binomial_cases() -> None:
     low, high = summarize._wilson(50, 100)
     assert low == pytest.approx(0.40383153)

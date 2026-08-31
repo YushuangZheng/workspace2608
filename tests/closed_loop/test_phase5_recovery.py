@@ -1324,15 +1324,21 @@ def test_reentry_alignment_routes_with_candidate_relation_without_mutating_beta(
     controller = ClosedLoopExecutionController(model)
     mode_by_skill = {1: 0}
 
-    # Ordinary TASK routing intentionally keeps using the real frozen beta:
-    # its linked expectation conflicts with the observed external relation.
+    # Ordinary TASK routing intentionally keeps using the real frozen beta,
+    # so its expected relation remains linked.  The learned direct-successor
+    # UNLINK allowance can make that ordinary route non-blocking; the
+    # important distinction here is which state's relation expectation owns
+    # the read-only recovery-alignment action.
     ordinary = controller._route_roles(
         candidate,
         belief,
         mode_by_skill=mode_by_skill,
         commit=False,
     )
-    assert ordinary.blocks_advance is True
+    assert (
+        ordinary.decisions["object"].expected_relation
+        == RelationDecision.LINKED
+    )
 
     calls = []
     expected = SimpleNamespace(action=object())
@@ -1357,6 +1363,10 @@ def test_reentry_alignment_routes_with_candidate_relation_without_mutating_beta(
     assert len(calls) == 1
     assert calls[0][1] == candidate
     assert calls[0][2].blocks_advance is False
+    assert (
+        calls[0][2].decisions["object"].expected_relation
+        == RelationDecision.EXTERNAL
+    )
     assert belief.progress.posterior == {frozen: 1.0}
     assert belief.progress.estimated_state == frozen
 

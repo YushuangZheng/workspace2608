@@ -16,6 +16,7 @@ from essay2608.policy.closed_loop import (
     ClosedLoopFeatureProfile,
     ExecutionDecision,
     ExecutionMode,
+    EntryGuard,
     PolicyLifecycle,
     ProgressStatus,
     RelationEventId,
@@ -23,7 +24,10 @@ from essay2608.policy.closed_loop import (
     RecoveryTriggerDecision,
     RuntimeObservation,
     StateId,
+    TransitionPreparation,
 )
+from essay2608.policy.closed_loop.boundary_model import BoundaryId
+from essay2608.policy.closed_loop.boundary_runtime import TransitionRequest
 from integrations.rlbench.rlbench_closed_loop.observation_adapter import (
     ClosedLoopObservationAdapter,
     commands_to_rlbench,
@@ -439,8 +443,9 @@ def test_task_gripper_authorization_uses_alignment_and_boundary_transaction() ->
             boundary,
         )
 
-    # A source-skill terminal cannot close/open the gripper before its entry
-    # guard transaction commits, even when the progress posterior is aligned.
+    # Ordinary entry-state gripper commands remain transaction-gated.  A
+    # learned relation-establishing close is handled separately by the causal
+    # boundary-link actuator tested below; it never changes this authorization.
     assert authorization(source, source, ProgressStatus.ALIGNED) is False
     # A committed boundary authorizes the entry-state command in the same
     # cycle although the posterior still describes the source terminal.
@@ -453,6 +458,141 @@ def test_task_gripper_authorization_uses_alignment_and_boundary_transaction() ->
     assert authorization(final, final, ProgressStatus.ALIGNED) is True
     assert authorization(final, entry, ProgressStatus.ALIGNED) is False
     assert authorization(final, final, ProgressStatus.LOW_CONFIDENCE) is False
+
+
+def test_learned_boundary_link_close_is_prepared_without_committing_progress() -> None:
+    source = StateId(5, 21)
+    earlier = StateId(5, 18)
+    entry = StateId(6, 0)
+    boundary_id = BoundaryId("right", 5, 6)
+    event_id = RelationEventId(
+        arm_id="right",
+        frame_id="item",
+        skill_index=6,
+        mode=0,
+        occurrence=0,
+        transition="link_pending",
+    )
+    boundary_model = SimpleNamespace(
+        boundary_id=boundary_id,
+        terminal_window=(StateId(5, 19), source),
+    )
+    nodes = {
+        source: SimpleNamespace(gripper_commands=np.asarray([[1.0]])),
+        entry: SimpleNamespace(gripper_commands=np.asarray([[-1.0]])),
+    }
+    model = SimpleNamespace(
+        link_pending_events={
+            event_id: SimpleNamespace(candidate_state=entry),
+        },
+        link_anchors={},
+        state=lambda state: nodes[state],
+    )
+    guard = SimpleNamespace(task_model=model)
+    request = TransitionRequest(
+        tick=7,
+        arm_id="right",
+        boundary_id=boundary_id,
+        permitted=False,
+        source_state=source,
+        target_state=entry,
+        local_done=False,
+        condition_results={},
+    )
+    belief = SimpleNamespace(
+        progress=SimpleNamespace(estimated_state=source),
+    )
+
+    preparation = EntryGuard._transition_preparation(
+        guard,
+        boundary=boundary_model,
+        source_state=source,
+        target_state=entry,
+        belief=belief,
+        source_mode=0,
+        target_mode=0,
+        guard_results=[],
+    )
+    assert preparation is not None
+    assert preparation.boundary_id == boundary_id
+    assert preparation.event_ids == (event_id,)
+    assert np.array_equal(preparation.gripper_command, np.asarray([-1.0]))
+    assert request.source_state == source
+
+    # The same close is not prepared before the terminal window, and removing
+    # its learned LINK/PENDING support removes the exception entirely.
+    early_belief = SimpleNamespace(
+        progress=SimpleNamespace(estimated_state=earlier),
+    )
+    assert (
+        EntryGuard._transition_preparation(
+            guard,
+            boundary=boundary_model,
+            source_state=source,
+            target_state=entry,
+            belief=early_belief,
+            source_mode=0,
+            target_mode=0,
+            guard_results=[],
+        )
+        is None
+    )
+    model.link_pending_events = {}
+    assert (
+        EntryGuard._transition_preparation(
+            guard,
+            boundary=boundary_model,
+            source_state=source,
+            target_state=entry,
+            belief=belief,
+            source_mode=0,
+            target_mode=0,
+            guard_results=[],
+        )
+        is None
+    )
+
+
+def test_boundary_transition_preparation_never_preexecutes_release() -> None:
+    source = StateId(2, 9)
+    entry = StateId(3, 0)
+    boundary_id = BoundaryId("left", 2, 3)
+    event_id = RelationEventId(
+        arm_id="left",
+        frame_id="item",
+        skill_index=3,
+        mode=0,
+        occurrence=0,
+        transition="link_pending",
+    )
+    nodes = {
+        source: SimpleNamespace(gripper_commands=np.asarray([[-1.0]])),
+        entry: SimpleNamespace(gripper_commands=np.asarray([[1.0]])),
+    }
+    boundary_model = SimpleNamespace(
+        boundary_id=boundary_id,
+        terminal_window=(source,),
+    )
+    model = SimpleNamespace(
+        link_pending_events={event_id: SimpleNamespace(candidate_state=entry)},
+        link_anchors={},
+        state=lambda state: nodes[state],
+    )
+    guard = SimpleNamespace(task_model=model)
+    belief = SimpleNamespace(progress=SimpleNamespace(estimated_state=source))
+    assert (
+        EntryGuard._transition_preparation(
+            guard,
+            boundary=boundary_model,
+            source_state=source,
+            target_state=entry,
+            belief=belief,
+            source_mode=0,
+            target_mode=0,
+            guard_results=[],
+        )
+        is None
+    )
 
 
 def test_current_state_gripper_transition_must_commit_before_successor() -> None:
@@ -494,6 +634,56 @@ def test_current_state_gripper_transition_must_commit_before_successor() -> None
     policy.execution_controllers["right"].cursor.reference_state = terminal
     assert ClosedLoopMultiStreamPolicy._current_discrete_action_complete(
         policy, "right", open_observation
+    )
+
+    # Once a learned edge preparation has closed the gripper, the source
+    # node's pre-transition open label must not reopen it or block continuous
+    # progress through the remainder of the terminal window.
+    preparation_source = StateId(0, 1)
+    preparation_boundary = BoundaryId("right", 0, 1)
+    preparation = TransitionPreparation(
+        boundary_id=preparation_boundary,
+        event_ids=(
+            RelationEventId(
+                arm_id="right",
+                frame_id="item",
+                skill_index=1,
+                mode=0,
+                occurrence=0,
+                transition="link_pending",
+            ),
+        ),
+        gripper_command=np.asarray([-1.0]),
+    )
+    prepared_policy = SimpleNamespace(
+        execution_controllers={
+            "right": SimpleNamespace(
+                cursor=SimpleNamespace(reference_state=preparation_source)
+            )
+        },
+        boundary_controller=SimpleNamespace(
+            preparations={"right": preparation}
+        ),
+        task_models={
+            "right": SimpleNamespace(
+                boundaries={
+                    preparation_boundary: SimpleNamespace(
+                        terminal_window=(preparation_source,)
+                    )
+                },
+                state=lambda _state: SimpleNamespace(
+                    topology=SimpleNamespace(has_cross_skill_successor=False),
+                    gripper_commands=np.asarray([[1.0]]),
+                ),
+            )
+        },
+        _mode_by_arm_skill={"right": {0: 0}},
+    )
+    assert ClosedLoopMultiStreamPolicy._current_discrete_action_complete(
+        prepared_policy, "right", closed_observation
+    )
+    assert not ClosedLoopMultiStreamPolicy._current_discrete_action_complete(
+        prepared_policy, "right", open_observation
     )
 
 

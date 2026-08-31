@@ -12,6 +12,7 @@ import numpy as np
 
 from .boundary_model import BoundaryId
 from .frame_roles import RelationVerificationRequest
+from .relation_events import RelationEventId
 from .state_index import StateId
 
 
@@ -97,6 +98,38 @@ class LocalCompletionResult:
 
 
 @dataclass(frozen=True)
+class TransitionPreparation:
+    """Discrete edge action used to establish a learned boundary relation.
+
+    The command is stored by the target entry ``StateNode`` but belongs to the
+    transition edge physically: executing it does not commit ``StateId`` or
+    bypass ``LocalDone``.  Only acquisition closes supported by a learned
+    LINK/LINK_PENDING occurrence are representable; release remains a
+    post-commit action.
+    """
+
+    boundary_id: BoundaryId
+    event_ids: tuple[RelationEventId, ...]
+    gripper_command: np.ndarray
+
+    def __post_init__(self) -> None:
+        command = np.asarray(self.gripper_command, dtype=np.float64)
+        if command.ndim != 1 or not len(command) or not np.all(np.isfinite(command)):
+            raise ValueError("边界转移准备夹爪命令必须是一维有限向量")
+        if not np.all(command <= 0.5):
+            raise ValueError("边界转移准备只允许建立关系的闭爪命令")
+        if not self.event_ids:
+            raise ValueError("边界转移准备必须由离线 LINK 事件支持")
+        if any(
+            event.arm_id != self.boundary_id.arm_id
+            or event.transition not in {"link", "link_pending"}
+            for event in self.event_ids
+        ):
+            raise ValueError("边界转移准备事件与边界机械臂或 LINK 语义不一致")
+        object.__setattr__(self, "gripper_command", command.copy())
+
+
+@dataclass(frozen=True)
 class TransitionRequest:
     tick: int
     arm_id: str
@@ -108,6 +141,7 @@ class TransitionRequest:
     condition_results: dict[ConditionId, ConditionResult]
     verification_requests: tuple[RelationVerificationRequest, ...] = ()
     transaction_group: str | None = None
+    preparation: TransitionPreparation | None = None
 
     def __post_init__(self) -> None:
         if self.tick < 0 or not self.arm_id:
@@ -127,6 +161,11 @@ class TransitionRequest:
             in {ConditionKind.GUARD_RELATION, ConditionKind.GUARD_SCENE}
         ):
             raise ValueError("守卫必要条件未满足时不能生成跨界许可")
+        if self.preparation is not None:
+            if self.preparation.boundary_id != self.boundary_id:
+                raise ValueError("转移准备动作与转换请求边界不一致")
+            if self.permitted:
+                raise ValueError("边界已经允许提交时不应再生成未提交准备动作")
 
 
 @dataclass(frozen=True)
@@ -253,5 +292,6 @@ __all__ = [
     "ConditionKind",
     "ConditionResult",
     "LocalCompletionResult",
+    "TransitionPreparation",
     "TransitionRequest",
 ]

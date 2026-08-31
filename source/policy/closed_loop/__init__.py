@@ -14,6 +14,7 @@ from .boundary_runtime import (
     ConditionKind,
     ConditionResult,
     LocalCompletionResult,
+    TransitionPreparation,
     TransitionRequest,
 )
 from .bimanual_controller import (

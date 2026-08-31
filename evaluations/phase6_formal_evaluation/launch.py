@@ -24,6 +24,7 @@ from .resources import LaneSpec, build_lane_specs
 
 RESULTS_ROOT = REPOSITORY_ROOT / "integrations/rlbench/results/phase6_formal_v1"
 LAUNCH_ROOT = RESULTS_ROOT / "_launch"
+RETAINED_RESULTS = Path(__file__).with_name("retained_results.json")
 CLOSED_LOOP_MODELS = REPOSITORY_ROOT / "integrations/rlbench/models/closed_loop_v1"
 RUNNER_MODULE = "evaluations.phase6_formal_evaluation.run_cell"
 DEFAULT_SIM_PYTHON = Path(
@@ -275,6 +276,54 @@ def _validate_result(cell: FormalCell, commit: Optional[str] = None) -> None:
         raise RuntimeError(f"formal result has incomplete episode rows: {cell.result}")
 
 
+def _retained_records() -> dict[str, dict[str, str]]:
+    try:
+        payload = json.loads(RETAINED_RESULTS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"cannot read retained formal-result manifest: {RETAINED_RESULTS}"
+        ) from error
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema",
+        "protocol_sha256",
+        "reason",
+        "records",
+    }:
+        raise RuntimeError("retained formal-result manifest has invalid fields")
+    if payload.get("schema") != "essay2608.phase6_retained_results.v1":
+        raise RuntimeError("retained formal-result manifest has invalid schema")
+    if payload.get("protocol_sha256") != _sha256(PROTOCOL):
+        raise RuntimeError("retained formal results belong to a different protocol")
+    if not isinstance(payload.get("reason"), str) or not payload["reason"].strip():
+        raise RuntimeError("retained formal-result manifest must state its reason")
+    records = payload.get("records")
+    if not isinstance(records, dict):
+        raise RuntimeError("retained formal-result records must be an object")
+    for cell_id, record in records.items():
+        if (
+            not isinstance(cell_id, str)
+            or not isinstance(record, dict)
+            or set(record) != {"path", "git_commit", "sha256"}
+            or any(not isinstance(record[name], str) for name in record)
+        ):
+            raise RuntimeError("retained formal-result record is invalid")
+    return records
+
+
+def _validate_retained_result(cell: FormalCell) -> None:
+    record = _retained_records().get(cell.cell_id)
+    if record is None:
+        raise RuntimeError(
+            f"old-commit result is not explicitly retained: {cell.result}"
+        )
+    expected_path = cell.result.relative_to(RESULTS_ROOT).as_posix()
+    if record["path"] != expected_path:
+        raise RuntimeError(f"retained result path differs: {cell.result}")
+    if record["sha256"] != _sha256(cell.result):
+        raise RuntimeError(f"retained result content differs: {cell.result}")
+    _validate_result(cell, record["git_commit"])
+
+
 def _states(cells: Sequence[FormalCell], commit: Optional[str]) -> dict[str, str]:
     result = {}
     for cell in cells:
@@ -282,8 +331,14 @@ def _states(cells: Sequence[FormalCell], commit: Optional[str]) -> dict[str, str
         if lock.exists():
             raise RuntimeError(f"formal result has an active/stale lock: {lock}")
         if cell.result.exists():
-            _validate_result(cell, commit)
-            result[cell.cell_id] = "COMPLETED_VALIDATED"
+            _validate_result(cell)
+            payload = json.loads(cell.result.read_text(encoding="utf-8"))
+            result_commit = payload["stage6_formal_evaluation"]["git_commit"]
+            if commit is None or result_commit == commit:
+                result[cell.cell_id] = "COMPLETED_VALIDATED"
+            else:
+                _validate_retained_result(cell)
+                result[cell.cell_id] = "COMPLETED_RETAINED"
         else:
             result[cell.cell_id] = "PENDING"
     return result

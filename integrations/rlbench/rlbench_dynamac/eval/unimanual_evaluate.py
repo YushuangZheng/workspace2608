@@ -43,6 +43,9 @@ from integrations.rlbench.rlbench_dynamac.core.gripper_timing import (
     GLOBAL_GRIPPER_TIMING_PROTOCOL_ID,
     global_gripper_timing_metadata,
 )
+from integrations.rlbench.rlbench_closed_loop.protocol import (
+    closed_loop_gripper_timing_metadata,
+)
 from integrations.rlbench.rlbench_dynamac.core.records import (
     atomic_json,
     reserve_output,
@@ -890,11 +893,7 @@ class PolicyProcess:
                         "policy worker gripper timing does not match evaluator"
                     )
             elif (
-                not isinstance(self.gripper_timing, dict)
-                or self.gripper_timing.get("protocol_id")
-                != GLOBAL_GRIPPER_TIMING_PROTOCOL_ID
-                or self.gripper_timing.get("rule")
-                != "committed_reference_state_command"
+                self.gripper_timing != closed_loop_gripper_timing_metadata()
                 or response.get("policy_type") != self.policy_type
             ):
                 raise RuntimeError("closed-loop policy worker timing identity mismatch")
