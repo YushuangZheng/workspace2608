@@ -119,6 +119,30 @@
       "interpretation": "same sealed environments succeeded without normal-task regression; simulator nondeterminism avoided the old final alignment branch, whose direct evidence remains the targeted regression"
     }
   },
+  "implementation_correction_after_invalidated_verification_direction_audit": {
+    "date_utc": "2026-08-31",
+    "implementation_parent_commit": "38f593bfdd2bc5e983e67ae617d96aced94e8fe4",
+    "retained_formal_results_before_correction": false,
+    "observed_audit_scope": "4737 of 6400 normal episodes and 19 complete cells; the entire attempt is invalidated",
+    "reason": "A pending relation could satisfy the visibility, tracking, uncertainty, and retry prerequisites while the recent TASK trajectory had no estimable nonzero approach direction. VERIFY_LINK then entered even though its fixed reverse-probe template was undefined and raised an unhandled policy exception.",
+    "resolution": "Treat availability of the existing approach direction as an inherent VERIFY_LINK entry prerequisite. If the recent actual TASK trajectory is stationary, insufficient, or has near-zero net displacement, remain in TASK/HOLD and let the existing nominal or mismatch-recovery chain continue; no state, threshold, task branch, relation model, or recovery target is added.",
+    "invalidated_attempt_disposition": "All results and diagnostics from the incomplete audit attempt are excluded from statistics and moved out of the formal result root before a complete restart from the repaired commit.",
+    "automated_validation": {
+      "phase5_and_phase6_tests_passed": 40,
+      "stationary_task_history_nonentry_regression_exercised": true,
+      "execution_mode_remains_task": true
+    },
+    "real_simulator_validation": {
+      "task": "bimanual_handover_item",
+      "method": "full",
+      "episode_index": 112,
+      "previous_outcome": "unhandled policy exception at VERIFY_LINK start near tick 756",
+      "repaired_outcome": "valid horizon result without policy exception",
+      "committed_policy_steps": 1000,
+      "invalid_actions": 0,
+      "interpretation": "This targeted replay validates process safety at and beyond the former crash point; its horizon outcome is not a task-success result and is not included in formal statistics."
+    }
+  },
   "evaluation_set": {
     "id": "rlbench_eval_v2",
     "seed_start": 2608000000,

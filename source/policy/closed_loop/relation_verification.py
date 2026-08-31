@@ -240,6 +240,21 @@ class RelationVerificationController:
             raise ValueError("最近 TASK 实际轨迹不足以确定抓取接近方向")
         return displacement / norm
 
+    def approach_direction_available(self, poses: Sequence[Array]) -> bool:
+        """Whether the existing reverse-probe template is currently defined.
+
+        A Pending request may remain active while TASK is holding a nearly
+        stationary terminal pose.  That is a normal unavailable prerequisite,
+        not a policy exception: VERIFY_LINK cannot safely start until its
+        direction can be estimated from the actual TASK path.
+        """
+
+        try:
+            self._approach_from_history(poses)
+        except ValueError:
+            return False
+        return True
+
     def start(
         self,
         request: RelationVerificationRequest,

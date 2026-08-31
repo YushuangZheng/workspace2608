@@ -1067,6 +1067,9 @@ class ClosedLoopRecoveryManager:
             >= self.verification.config.minimum_tracking_reliability
             and estimate.information_weight
             < self.verification.config.minimum_information_weight
+            and self.verification.approach_direction_available(
+                self._task_pose_history
+            )
             and self.verification.can_attempt(
                 candidate,
                 task_state=task_state,

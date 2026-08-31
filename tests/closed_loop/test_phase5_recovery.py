@@ -1539,6 +1539,46 @@ def test_manager_modes_pending_activation_and_persistent_recovery_trigger(
         grasp_event=1,
     )
 
+
+def test_pending_verification_waits_when_task_approach_direction_is_unavailable(
+    phase5_case,
+) -> None:
+    model, demonstrations, pending = phase5_case
+    manager = ClosedLoopRecoveryManager(model)
+    stationary = pose(0.02)
+    manager.record_task_pose(stationary)
+    manager.record_task_pose(stationary)
+    belief = belief_for(
+        model,
+        demonstrations,
+        pending.candidate_state,
+        relation(RelationDecision.UNKNOWN, information=0.0),
+        motion=0.0,
+    )
+    belief = replace(
+        belief,
+        runtime_features=replace(
+            belief.runtime_features,
+            frame_pair_available={pending.frame_id: True},
+            paired_tracking_reliability={pending.frame_id: 1.0},
+            relation_information_weight={pending.frame_id: 0.0},
+        ),
+    )
+    request = RelationVerificationRequest(
+        pending.arm_id,
+        pending.frame_id,
+        "linked",
+        pending.event_id,
+    )
+
+    assert not manager.can_begin_verification(
+        request,
+        belief,
+        task_state=pending.candidate_state,
+        grasp_event=0,
+    )
+    assert manager.mode == ExecutionMode.TASK
+
     tracker = RecoveryTriggerTracker({"single": model})
     intent = RelationRecoveryIntent(
         "single",
