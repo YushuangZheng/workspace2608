@@ -300,9 +300,7 @@ def _mark_result(
     rows = payload.get("results")
     if not isinstance(rows, list) or len(rows) != len(episode_indices):
         raise RuntimeError("formal result episode accounting is incomplete")
-    for local_index, (row, formal_index) in enumerate(
-        zip(rows, episode_indices, strict=True)
-    ):
+    for local_index, (row, formal_index) in enumerate(zip(rows, episode_indices)):
         if not isinstance(row, dict):
             raise RuntimeError("formal episode result must be an object")
         row["shard_local_episode"] = local_index

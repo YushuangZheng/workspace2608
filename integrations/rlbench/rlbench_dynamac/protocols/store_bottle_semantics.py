@@ -134,6 +134,7 @@ class StoreBottleSemanticSpec:
             paper_scenarios=("static", "dynamic_unspecified"),
             pose_chunks=self.pose_chunks,
             configuration_chunks=(),
+            structural_bindings={},
             source_expression=self.source_expression,
             source_status=self.source_status,
             candidate_frame_policy=CANDIDATE_FRAME_POLICY,

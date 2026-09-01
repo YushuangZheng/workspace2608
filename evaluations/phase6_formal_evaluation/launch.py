@@ -813,22 +813,43 @@ def render_plan(
     return "\n".join(lines)
 
 
+def _process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def _terminate(processes: Iterable[subprocess.Popen]) -> None:
     active = [process for process in processes if process.poll() is None]
-    for process in active:
+    process_groups = [process.pid for process in active]
+    for process_group in process_groups:
         try:
-            os.killpg(process.pid, signal.SIGTERM)
+            os.killpg(process_group, signal.SIGTERM)
         except ProcessLookupError:
             pass
     deadline = time.monotonic() + 15.0
-    while active and time.monotonic() < deadline:
-        active = [process for process in active if process.poll() is None]
-        if active:
+    remaining_groups = process_groups
+    while remaining_groups and time.monotonic() < deadline:
+        for process in active:
+            process.poll()
+        remaining_groups = [
+            process_group
+            for process_group in remaining_groups
+            if _process_group_exists(process_group)
+        ]
+        if remaining_groups:
             time.sleep(0.25)
+    for process_group in remaining_groups:
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     for process in active:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
             pass
 
 
