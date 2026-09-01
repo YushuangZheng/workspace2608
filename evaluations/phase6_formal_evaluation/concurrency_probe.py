@@ -124,7 +124,10 @@ def _command(
         "--policy-python",
         str(policy_python),
         "--closed-loop-models-dir",
-        str(REPOSITORY_ROOT / "integrations/rlbench/models/closed_loop_v1"),
+        str(
+            REPOSITORY_ROOT
+            / "integrations/rlbench/models/closed_loop_phase6_v1"
+        ),
         "--horizon",
         str(horizon),
     )

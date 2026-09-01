@@ -35,6 +35,9 @@ TAPAS_GRIPPER_THRESHOLD = 0.2
 TAPAS_MAX_INDEX_DISTANCE = 4
 TAPAS_MIN_CLUSTER_LENGTH = 1
 TAPAS_MIN_END_DISTANCE = 10
+TAPAS_DIRECTION_REVERSAL_THRESHOLD_DEGREES = 120.0
+
+
 @dataclass(frozen=True)
 class TAPASSegmentationConfig:
     """Author-clarified defaults plus preserved TAPAS parameter provenance.
@@ -49,6 +52,7 @@ class TAPASSegmentationConfig:
     distance_based: bool = False
     gripper_based: bool = True
     velocity_based: bool = True
+    direction_reversal_based: bool = False
     distance_threshold: float = TAPAS_DISTANCE_THRESHOLD
     repeat_first_step: int = 0
     repeat_final_step: int = 0
@@ -57,6 +61,9 @@ class TAPASSegmentationConfig:
     velocity_threshold: float = TAPAS_VELOCITY_THRESHOLD
     gripper_threshold: float = TAPAS_GRIPPER_THRESHOLD
     max_idx_distance: int = TAPAS_MAX_INDEX_DISTANCE
+    direction_reversal_threshold_degrees: float = (
+        TAPAS_DIRECTION_REVERSAL_THRESHOLD_DEGREES
+    )
     gripper_min_end_distance: int | None = None
     candidate_merge_fraction: float = 0.0
     boundary_selection: str = "all"
@@ -64,9 +71,21 @@ class TAPASSegmentationConfig:
     provenance: Mapping[str, Any] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
-        if self.distance_based and (self.gripper_based or self.velocity_based):
-            raise ValueError("distance segmentation cannot be combined with velocity/gripper")
-        if not any((self.distance_based, self.gripper_based, self.velocity_based)):
+        if self.distance_based and (
+            self.gripper_based or self.velocity_based or self.direction_reversal_based
+        ):
+            raise ValueError(
+                "distance segmentation cannot be combined with velocity/gripper/"
+                "direction reversal"
+            )
+        if not any(
+            (
+                self.distance_based,
+                self.gripper_based,
+                self.velocity_based,
+                self.direction_reversal_based,
+            )
+        ):
             raise ValueError("at least one TAPAS segmentation signal must be enabled")
         if self.min_len < 1:
             raise ValueError("min_len must be at least one")
@@ -95,19 +114,25 @@ class TAPASSegmentationConfig:
             self.distance_threshold,
             self.velocity_threshold,
             self.gripper_threshold,
+            self.direction_reversal_threshold_degrees,
         )
         if any(not np.isfinite(value) or value < 0.0 for value in thresholds):
             raise ValueError("TAPAS segmentation thresholds must be finite and non-negative")
+        if self.direction_reversal_threshold_degrees > 180.0:
+            raise ValueError("direction reversal threshold must not exceed 180 degrees")
 
     @property
     def strategy(self) -> str:
         if self.distance_based:
             return "distance"
-        if self.velocity_based and self.gripper_based:
-            return "velocity_gripper_union"
+        signals = []
+        if self.velocity_based:
+            signals.append("velocity")
         if self.gripper_based:
-            return "gripper"
-        return "velocity"
+            signals.append("gripper")
+        if self.direction_reversal_based:
+            signals.append("direction_reversal")
+        return "_".join(signals) + ("_union" if len(signals) > 1 else "")
 
     @classmethod
     def velocity_defaults(cls, **overrides: Any) -> TAPASSegmentationConfig:
@@ -142,6 +167,7 @@ class TAPASSegmentationConfig:
             "distance_based",
             "gripper_based",
             "velocity_based",
+            "direction_reversal_based",
             "distance_threshold",
             "repeat_first_step",
             "repeat_final_step",
@@ -150,13 +176,19 @@ class TAPASSegmentationConfig:
             "velocity_threshold",
             "gripper_threshold",
             "max_idx_distance",
+            "direction_reversal_threshold_degrees",
             "gripper_min_end_distance",
             "candidate_merge_fraction",
             "boundary_selection",
             "expected_boundary_count",
         }
         kwargs = {name: raw[name] for name in operational if name in raw}
-        strategy_fields = {"distance_based", "gripper_based", "velocity_based"}
+        strategy_fields = {
+            "distance_based",
+            "gripper_based",
+            "velocity_based",
+            "direction_reversal_based",
+        }
         if strategy_fields.intersection(raw) and any(
             bool(raw.get(name, False)) for name in strategy_fields
         ):
@@ -184,6 +216,7 @@ class TAPASSegmentationConfig:
             "distance_based": self.distance_based,
             "gripper_based": self.gripper_based,
             "velocity_based": self.velocity_based,
+            "direction_reversal_based": self.direction_reversal_based,
             "distance_threshold": self.distance_threshold,
             "repeat_first_step": self.repeat_first_step,
             "repeat_final_step": self.repeat_final_step,
@@ -192,6 +225,9 @@ class TAPASSegmentationConfig:
             "velocity_threshold": self.velocity_threshold,
             "gripper_threshold": self.gripper_threshold,
             "max_idx_distance": self.max_idx_distance,
+            "direction_reversal_threshold_degrees": (
+                self.direction_reversal_threshold_degrees
+            ),
             "gripper_min_end_distance": self.gripper_min_end_distance,
             "candidate_merge_fraction": self.candidate_merge_fraction,
             "boundary_selection": self.boundary_selection,
@@ -219,6 +255,7 @@ class TAPASSegmentationConfig:
             "distance_based",
             "gripper_based",
             "velocity_based",
+            "direction_reversal_based",
             "distance_threshold",
             "repeat_first_step",
             "repeat_final_step",
@@ -227,6 +264,7 @@ class TAPASSegmentationConfig:
             "velocity_threshold",
             "gripper_threshold",
             "max_idx_distance",
+            "direction_reversal_threshold_degrees",
             "gripper_min_end_distance",
             "candidate_merge_fraction",
             "boundary_selection",
@@ -307,6 +345,83 @@ def tapas_velocity_boundaries(
         center
         for center in centers
         if center > min_end_distance and center < len(magnitude) - min_end_distance
+    )
+
+
+def translation_direction_reversal_boundaries(
+    ee_pose: Any,
+    *,
+    angle_threshold_degrees: float = TAPAS_DIRECTION_REVERSAL_THRESHOLD_DEGREES,
+    window: int = TAPAS_MAX_INDEX_DISTANCE + 1,
+    max_idx_distance: int = TAPAS_MAX_INDEX_DISTANCE,
+    min_end_distance: int = TAPAS_MIN_END_DISTANCE,
+    min_chord_length: float = 0.0,
+) -> tuple[int, ...]:
+    """Find genuine translational reversals in a demonstrated EE trajectory.
+
+    Velocity-stop segmentation cannot expose a task-authored path that turns
+    continuously without pausing.  This complementary, environment-independent
+    signal compares the incoming and outgoing displacement over a short local
+    window, groups the adjacent samples belonging to one bend, and retains the
+    maximum-angle sample.  It operates only on demonstrated motion; it does not
+    inspect task names, simulator waypoints, success state, or policy outputs.
+    """
+
+    pose = _pose_trajectory(ee_pose, label="EE pose")
+    if isinstance(window, bool) or window < 1:
+        raise ValueError("direction reversal window must be a positive integer")
+    if max_idx_distance < 0 or min_end_distance < 0:
+        raise ValueError("direction reversal index distances must be non-negative")
+    if (
+        not np.isfinite(angle_threshold_degrees)
+        or angle_threshold_degrees < 0.0
+        or angle_threshold_degrees > 180.0
+    ):
+        raise ValueError("direction reversal angle must be in [0, 180]")
+    if not np.isfinite(min_chord_length) or min_chord_length < 0.0:
+        raise ValueError("minimum direction reversal chord length must be non-negative")
+    if len(pose) <= 2 * window:
+        return ()
+
+    position = pose[:, :3]
+    incoming = position[window:-window] - position[: -2 * window]
+    outgoing = position[2 * window :] - position[window:-window]
+    incoming_norm = np.linalg.norm(incoming, axis=1)
+    outgoing_norm = np.linalg.norm(outgoing, axis=1)
+    valid = (incoming_norm > min_chord_length) & (outgoing_norm > min_chord_length)
+    angles = np.full(len(incoming), -np.inf, dtype=np.float64)
+    denominator = incoming_norm[valid] * outgoing_norm[valid]
+    angles[valid] = np.degrees(
+        np.arccos(
+            np.clip(
+                np.sum(incoming[valid] * outgoing[valid], axis=1) / denominator,
+                -1.0,
+                1.0,
+            )
+        )
+    )
+    candidates = np.flatnonzero(angles >= angle_threshold_degrees) + window
+    if not len(candidates):
+        return ()
+    splits = np.flatnonzero(np.diff(candidates) > max_idx_distance) + 1
+    clusters = np.split(candidates, splits)
+    peaks = []
+    for cluster in clusters:
+        local_angles = angles[cluster - window]
+        best_angle = float(np.max(local_angles))
+        tied = cluster[np.isclose(local_angles, best_angle, atol=1.0e-9, rtol=0.0)]
+        # A mathematically sharp reversal can give adjacent samples the same
+        # angle.  Prefer the sample supported by the larger motion chord on
+        # both sides, i.e. the geometric apex rather than its approach sample.
+        support = np.minimum(
+            incoming_norm[tied - window],
+            outgoing_norm[tied - window],
+        )
+        peaks.append(int(tied[int(np.argmax(support))]))
+    return tuple(
+        index
+        for index in peaks
+        if index > min_end_distance and index < len(pose) - min_end_distance
     )
 
 
@@ -778,6 +893,20 @@ def _raw_segment_boundaries(
                 max_idx_distance=config.max_idx_distance,
                 min_cluster_len=config.min_len,
                 min_end_distance=config.min_end_distance,
+            )
+            for item in poses
+        )
+    if config.direction_reversal_based:
+        components["ee_translation_direction_reversal"] = tuple(
+            translation_direction_reversal_boundaries(
+                item,
+                angle_threshold_degrees=(
+                    config.direction_reversal_threshold_degrees
+                ),
+                window=config.max_idx_distance + 1,
+                max_idx_distance=config.max_idx_distance,
+                min_end_distance=config.min_end_distance,
+                min_chord_length=config.velocity_threshold,
             )
             for item in poses
         )

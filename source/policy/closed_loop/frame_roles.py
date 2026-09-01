@@ -190,15 +190,27 @@ class FrameRoleRouter:
         self,
         snapshot: FrameRoleSnapshot,
         belief: ClosedLoopBelief | None = None,
+        *,
+        causal_state: StateId | None = None,
     ) -> None:
-        """Commit only stable role weights after the controller validates a cycle."""
+        """Commit stable roles and the state causally established by the cycle.
+
+        Ordinary execution establishes ``snapshot.state_id``.  A guarded
+        cross-skill transaction is different: its continuous bridge is still
+        queried from the source terminal state, while the transaction has
+        already established the target entry state.  ``causal_state`` lets
+        that caller record the committed entry without mislabelling the
+        source bridge as the current task state.
+        """
 
         self._confirmed_link_events.update(snapshot.confirmed_link_events)
         self._rejected_link_events.update(snapshot.rejected_link_events)
         self._pending_link_confirmation_events = set(
             snapshot.pending_link_confirmation_events
         )
-        self._last_committed_state = snapshot.state_id
+        if causal_state is not None and causal_state not in self.task_model.states:
+            raise KeyError(f"流角色提交未知因果状态 {causal_state}")
+        self._last_committed_state = causal_state or snapshot.state_id
 
         # Relation filtering observes every modeled physical frame even when
         # that frame is not selected by the current skill.  Cache its latest

@@ -725,6 +725,61 @@ def test_formal_link_confirmation_requires_causal_entry_and_never_masks_drop(
     assert dropped.blocks_advance is True
 
 
+def test_role_commit_can_record_boundary_entry_as_the_causal_state(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    linked_state = anchor.linked_entry_states[0]
+    predecessor = model.state(linked_state).topology.predecessors[0]
+    source_state = model.state(predecessor).topology.predecessors[0]
+    modes = {linked_state.skill_index: event_id.mode}
+    router = FrameRoleRouter(model)
+
+    source_belief = belief_for(
+        model,
+        demos,
+        tick=0,
+        nominal=source_state,
+        estimated=source_state,
+        relation=relation_estimate(
+            "object",
+            (0.95, 0.05),
+            RelationDecision.EXTERNAL,
+        ),
+    )
+    source_roles = router.route(
+        source_state,
+        source_belief,
+        mode_by_skill=modes,
+        commit=False,
+    )
+    router.commit(source_roles, source_belief, causal_state=predecessor)
+
+    linked_roles = router.route(
+        linked_state,
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=linked_state,
+            estimated=predecessor,
+            posterior={predecessor: 1.0},
+            relation=relation_estimate(
+                "object",
+                (0.95, 0.05),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(1.0, 0.01),
+            ),
+        ),
+        mode_by_skill=modes,
+    )
+
+    assert linked_roles.decisions["object"].formal_link_confirmation_pending is True
+    assert linked_roles.decisions["object"].blocks_advance is False
+
+
 def test_formal_link_rejection_persists_across_later_low_excitation_cycle(
     phase3_model,
 ) -> None:

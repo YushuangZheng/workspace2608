@@ -48,9 +48,11 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     unimanual_observation_from_rlbench,
 )
 from integrations.rlbench.rlbench_dynamac.core.task_specs import (
+    TRAINING_MANIFEST_SCHEMA_STATIC_V1,
     TaskSpec,
     get_task_spec,
     load_task_specs,
+    task_spec_identity,
 )
 from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
     bimanual_checkpoint_trigger_audit,
@@ -73,6 +75,7 @@ AUTHENTICATED_TRAINING_MANIFEST_SCHEMAS = frozenset(
         TRAINING_MANIFEST_SCHEMA_V2,
         TRAINING_MANIFEST_SCHEMA_V3,
         TRAINING_MANIFEST_SCHEMA_V4,
+        TRAINING_MANIFEST_SCHEMA_STATIC_V1,
     }
 )
 V3_ADAPTER_PROTOCOL = {
@@ -330,6 +333,8 @@ def _train_task_into(
     summary["checkpoint_trigger_audit"] = checkpoint_audit
     if training_identity is not None:
         summary["training_identity"] = deepcopy(dict(training_identity))
+    if manifest_schema == TRAINING_MANIFEST_SCHEMA_STATIC_V1:
+        summary["task_spec_identity"] = task_spec_identity(spec)
     if manifest_schema == TRAINING_MANIFEST_SCHEMA_V4:
         summary["quaternion_batch_gauge"] = v4_quaternion_batch_gauge_identity()
     if manifest_schema == TRAINING_MANIFEST_SCHEMA_V3:
@@ -389,8 +394,13 @@ def _validate_published_model(
     if manifest_schema in {
         TRAINING_MANIFEST_SCHEMA_V3,
         TRAINING_MANIFEST_SCHEMA_V4,
+        TRAINING_MANIFEST_SCHEMA_STATIC_V1,
     }:
         _validate_v3_adapter_protocol(summary)
+    if manifest_schema == TRAINING_MANIFEST_SCHEMA_STATIC_V1:
+        expected_spec = task_spec_identity(get_task_spec(task))
+        if summary.get("task_spec_identity") != expected_spec:
+            raise RuntimeError("static training task-spec identity mismatch")
     if manifest_schema == TRAINING_MANIFEST_SCHEMA_V4:
         identity = summary.get("training_identity")
         if not isinstance(identity, dict):
@@ -615,6 +625,10 @@ class PolicyServer:
         if "training_identity" in manifest:
             self.model_identity["training_identity"] = deepcopy(
                 manifest["training_identity"]
+            )
+        if manifest.get("manifest_schema") == TRAINING_MANIFEST_SCHEMA_STATIC_V1:
+            self.model_identity["task_spec_identity"] = deepcopy(
+                manifest["task_spec_identity"]
             )
         self._pending_transaction: dict[str, Any] | None = None
         self._next_transaction_id = 1
@@ -870,6 +884,11 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
     train.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     train.add_argument("--demonstrations", type=int, default=5)
+    train.add_argument(
+        "--manifest-schema",
+        choices=(TRAINING_MANIFEST_SCHEMA_V3, TRAINING_MANIFEST_SCHEMA_STATIC_V1),
+        default=TRAINING_MANIFEST_SCHEMA_V3,
+    )
 
     worker = subparsers.add_parser("serve", help="run JSON-lines policy worker")
     worker.add_argument("--task", required=True)
@@ -888,6 +907,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             models_dir=args.models_dir,
             config_path=args.config,
             demonstration_count=args.demonstrations,
+            manifest_schema=args.manifest_schema,
         )
         if summary["bimanual"]:
             detail = (

@@ -2,6 +2,7 @@ from argparse import Namespace
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -148,6 +149,33 @@ def test_episode_indices_reject_duplicates_and_out_of_range():
     with pytest.raises(ValueError, match="consecutive and ascending"):
         diagnostic._normalized_episode_indices((2, 1))
     assert diagnostic._normalized_episode_indices((2, 3, 4)) == (2, 3, 4)
+
+
+def test_static_scenario_uses_one_task_independent_no_trigger_protocol():
+    args = Namespace(
+        task="stack_wine",
+        scenario="static",
+        smooth_steps=10,
+        intervention_attempts=100,
+        final_settling_steps=10,
+    )
+    worker = SimpleNamespace(
+        model_identity={
+            "training_manifest_schema": "dynamac-direct-training-v3",
+            "manifest_authenticated": True,
+        }
+    )
+
+    _, authentication = unimanual_evaluate._authenticated_intervention_protocol(
+        args, worker
+    )
+
+    assert authentication == {
+        "schema": "v3-static-no-dynamic-trigger-v1",
+        "applicable": False,
+        "trigger_step": None,
+        "reason": "the static scenario does not apply a dynamic intervention",
+    }
 
 
 @pytest.mark.parametrize("protocol_key", ["scenario_protocol", "protocol"])

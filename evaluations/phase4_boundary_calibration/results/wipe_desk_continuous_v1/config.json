@@ -1,0 +1,15 @@
+{
+  "schema": "essay2608-phase4-boundary-calibration-config-v2",
+  "claim_boundary": "本标定只使用修正后连续 CartesianPath 的五条正常 WipeDesk 示范及正常末端保持回放，不使用故障样本。theta_local 由正常末端保持支持与边界前支持确定；逐边界 H 取正常边界前最长偶发就绪连续段加一，并由正常末端稳定保持能力复核。",
+  "tasks": ["wipe_desk"],
+  "demonstration_indices": [0, 1, 2, 3, 4],
+  "control_period_seconds": 0.05,
+  "control_period_source": "RLBench/rlbench/task_environment.py::_DT",
+  "terminal_hold_seconds": 2.0,
+  "terminal_settling_seconds": 0.25,
+  "positive_floor_fraction": 0.8,
+  "default_relation_probability": 0.7,
+  "minimum_tracking_reliability": 0.25,
+  "minimum_scene_reliability": 0.25,
+  "minimum_information_weight": 0.1
+}

@@ -694,12 +694,25 @@ def _relation_trace(
     return result, trace
 
 
-def _load_cases(task: str, demonstration_count: int) -> list[ArmCase]:
-    paths = tuple(demonstration_paths(DATA_ROOT, task, demonstration_count))
+def _load_cases(
+    task: str,
+    demonstration_count: int,
+    *,
+    data_root: Path = DATA_ROOT,
+    model_root: Path = MODEL_ROOT,
+) -> list[ArmCase]:
+    """Load one task from explicit benchmark artifact roots.
+
+    The defaults preserve the frozen V4 component experiments.  Explicit
+    roots let a corrected benchmark task reuse the identical offline builder
+    and calibration code without changing global module constants or adding a
+    task-specific branch.
+    """
+
+    paths = tuple(demonstration_paths(data_root, task, demonstration_count))
     episodes = load_low_dim_obs_pickles(paths)
     names = [path.parent.name for path in paths]
     builder = ClosedLoopTaskModelBuilder()
-    model_path = MODEL_PATHS[task]
     if task == STORE_BOTTLE:
         spec = store_bottle_semantic_task_spec()
         converted = make_store_bottle_semantic_demonstrations(episodes, names=names)
@@ -710,6 +723,11 @@ def _load_cases(task: str, demonstration_count: int) -> list[ArmCase]:
             if spec.bimanual
             else make_unimanual_demonstrations(episodes, spec, names=names)
         )
+    model_path = (
+        model_root / task
+        if spec.bimanual
+        else model_root / task / "model.npz"
+    )
     recoverable = spec.recoverable_relation_frames
     if not spec.bimanual:
         policy = DynaMAC.load(model_path)

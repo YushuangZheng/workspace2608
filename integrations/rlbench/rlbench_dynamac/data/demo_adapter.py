@@ -312,6 +312,8 @@ class ArmEpisodeArrays:
     ee_pose: Array
     gripper_state: Array
     frames: dict[str, Array]
+    scene_entity_poses: dict[str, Array]
+    entity_configurations: dict[str, dict[str, Array]]
 
 
 @dataclass(frozen=True)
@@ -343,10 +345,33 @@ def extract_unimanual_episode(episode: Any, task: str | TaskSpec) -> ArmEpisodeA
         spec.extract_pose_chunks(_field(observation, "task_low_dim_state"))
         for observation in observations
     ]
-    frames = {
+    configuration_samples = [
+        spec.extract_entity_configurations(
+            _field(observation, "task_low_dim_state")
+        )
+        for observation in observations
+    ]
+    all_poses = {
         name: np.stack([sample[name] for sample in frame_samples]) for name in spec.frame_names
     }
-    return ArmEpisodeArrays(ee_pose=ee_pose, gripper_state=gripper, frames=frames)
+    frames = {name: all_poses[name] for name in spec.action_frame_names}
+    scene_entity_poses = {
+        name: all_poses[name] for name in spec.scene_entity_names
+    }
+    configurations = {
+        entity: {
+            field: np.stack([sample[entity][field] for sample in configuration_samples])
+            for field in fields
+        }
+        for entity, fields in spec.configuration_schema.items()
+    }
+    return ArmEpisodeArrays(
+        ee_pose=ee_pose,
+        gripper_state=gripper,
+        frames=frames,
+        scene_entity_poses=scene_entity_poses,
+        entity_configurations=configurations,
+    )
 
 
 def extract_bimanual_episode(episode: Any, task: str | TaskSpec) -> BimanualEpisodeArrays:
@@ -360,8 +385,25 @@ def extract_bimanual_episode(episode: Any, task: str | TaskSpec) -> BimanualEpis
         spec.extract_pose_chunks(_field(observation, "task_low_dim_state"))
         for observation in observations
     ]
-    frames = {
+    configuration_samples = [
+        spec.extract_entity_configurations(
+            _field(observation, "task_low_dim_state")
+        )
+        for observation in observations
+    ]
+    all_poses = {
         name: np.stack([sample[name] for sample in frame_samples]) for name in spec.frame_names
+    }
+    frames = {name: all_poses[name] for name in spec.action_frame_names}
+    scene_entity_poses = {
+        name: all_poses[name] for name in spec.scene_entity_names
+    }
+    configurations = {
+        entity: {
+            field: np.stack([sample[entity][field] for sample in configuration_samples])
+            for field in fields
+        }
+        for entity, fields in spec.configuration_schema.items()
     }
 
     def arm_arrays(arm: str) -> ArmEpisodeArrays:
@@ -375,6 +417,13 @@ def extract_bimanual_episode(episode: Any, task: str | TaskSpec) -> BimanualEpis
             ee_pose=ee_pose,
             gripper_state=gripper,
             frames={name: value.copy() for name, value in frames.items()},
+            scene_entity_poses={
+                name: value.copy() for name, value in scene_entity_poses.items()
+            },
+            entity_configurations={
+                entity: {field: value.copy() for field, value in fields.items()}
+                for entity, fields in configurations.items()
+            },
         )
 
     return BimanualEpisodeArrays(left=arm_arrays("left"), right=arm_arrays("right"))
@@ -508,6 +557,9 @@ def make_unimanual_demonstrations(
                 action_pose=episode.ee_pose.copy(),
                 gripper=gripper_action,
                 frames=episode.frames,
+                entity_configurations=episode.entity_configurations,
+                scene_entity_poses=episode.scene_entity_poses,
+                structural_bindings=spec.structural_bindings,
                 skill=labels,
                 name=name,
             )
@@ -518,7 +570,8 @@ def make_unimanual_demonstrations(
         "bimanual": False,
         "demonstration_names": demo_names,
         "trajectory_lengths": [len(episode.ee_pose) for episode in arrays],
-        "frame_names": list(spec.frame_names),
+        "frame_names": list(spec.action_frame_names),
+        "scene_entity_names": list(spec.scene_entity_names),
         "task_frame_source_status": spec.source_status,
         "candidate_frame_policy": spec.candidate_frame_policy,
         "candidate_frame_policy_source_status": spec.candidate_frame_policy_source_status,
@@ -604,6 +657,9 @@ def make_bimanual_demonstrations(
                     :, None
                 ],
                 frames=episode.left.frames,
+                entity_configurations=episode.left.entity_configurations,
+                scene_entity_poses=episode.left.scene_entity_poses,
+                structural_bindings=spec.structural_bindings,
                 skill=segmentation.left.labels_for(index),
                 name=f"{name}_left",
             )
@@ -616,6 +672,9 @@ def make_bimanual_demonstrations(
                     :, None
                 ],
                 frames=episode.right.frames,
+                entity_configurations=episode.right.entity_configurations,
+                scene_entity_poses=episode.right.scene_entity_poses,
+                structural_bindings=spec.structural_bindings,
                 skill=segmentation.right.labels_for(index),
                 name=f"{name}_right",
             )
@@ -626,7 +685,8 @@ def make_bimanual_demonstrations(
         "bimanual": True,
         "demonstration_names": demo_names,
         "trajectory_lengths": [len(episode.left.ee_pose) for episode in arrays],
-        "frame_names": list(spec.frame_names),
+        "frame_names": list(spec.action_frame_names),
+        "scene_entity_names": list(spec.scene_entity_names),
         "task_frame_source_status": spec.source_status,
         "candidate_frame_policy": spec.candidate_frame_policy,
         "candidate_frame_policy_source_status": spec.candidate_frame_policy_source_status,

@@ -1,12 +1,12 @@
 {
-  "schema": "rlbench-dynamac-task-specs-v2",
+  "schema": "rlbench-dynamac-task-specs-v3",
   "source": {
     "repository": "https://github.com/vonHartz/RLBench",
     "branch": "tapas",
     "commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
     "status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE"
   },
-  "claim_boundary": "All get_low_dim_state frames are candidates. StoreBottle uses independent arm segmentation; HandOver uses the shared union. LiftTray and SweepDust coordination remain local choices pending author confirmation.",
+  "claim_boundary": "All get_low_dim_state frames are candidates. WipeDesk locally restores the existing dirt_boundary pose to the standard fixed-width interface while preserving the upstream continuous CartesianPath; it adds no policy-only state. StoreBottle uses independent arm segmentation; HandOver uses the shared union. LiftTray and SweepDust coordination remain local choices pending author confirmation.",
   "tasks": {
     "stack_wine": {
       "paper_task_name": "StackWine",
@@ -68,20 +68,21 @@
     },
     "wipe_desk": {
       "paper_task_name": "WipeDesk",
-      "module": "rlbench.tasks.wipe_desk",
-      "class_name": "WipeDesk",
+      "module": "integrations.rlbench.rlbench_dynamac.wipe_desk_task_frames",
+      "class_name": "WipeDeskTaskFrames",
       "bimanual": false,
       "paper_evaluation_group": "Unimanual",
       "paper_scenarios": ["static", "smooth", "teleport"],
-      "source_expression": "WipeDesk.get_low_dim_state: [sponge]",
-      "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "source_expression": "WipeDeskTaskFrames.get_low_dim_state: [sponge, dirt_boundary]",
+      "source_status": "LOCAL_RLBENCH_TASK_INTERFACE_ONLY_CONTINUOUS_EXPERT_PATH_20260901",
       "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER",
       "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
       "segmentation_coordination": "single",
       "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE",
       "segmentation_debug_plots_required": true,
       "pose_chunks": [
-        {"name": "sponge", "role": "operated_tool"}
+        {"name": "sponge", "role": "operated_tool"},
+        {"name": "dirt_boundary", "role": "environment_reference"}
       ]
     },
     "bimanual_put_bottle_in_fridge": {

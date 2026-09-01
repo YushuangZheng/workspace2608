@@ -2,8 +2,8 @@
   "schema": "essay2608.phase6_formal_protocol.v1",
   "status": "preregistered_active",
   "active_implementation": {
-    "controller_profile": "stage6_hybrid_cartesian_executor_v18",
-    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v22",
+    "controller_profile": "stage6_hybrid_cartesian_executor_v19",
+    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v23",
     "validated_mechanism_parent_commit": "a7b3682ef35d3cf03ab300cef201b3e3fb7368d9",
     "retained_formal_results_before_activation": false
   },
@@ -43,8 +43,12 @@
     }
   },
   "shared_execution": {
-    "controller_profile": "stage6_hybrid_cartesian_executor_v18",
-    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v22",
+    "controller_profile": "stage6_hybrid_cartesian_executor_v19",
+    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v23",
+    "base_models_dir": "integrations/rlbench/models/phase6_v1",
+    "base_models_fingerprint": "c0d93377ca84fc7ac1db7814572de03afe279bb71ffa8bf6a3c5377d24b88d3b",
+    "closed_loop_models_dir": "integrations/rlbench/models/closed_loop_phase6_v1",
+    "closed_loop_models_fingerprint": "d50c59ccc24bac87dca71cf1333076e3ea471d1aecb0870e461c4db0761674f8",
     "scenario": "static",
     "horizon": 1000,
     "policy_timeout_seconds": 120.0,

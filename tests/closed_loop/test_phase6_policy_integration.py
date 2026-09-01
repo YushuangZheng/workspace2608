@@ -790,6 +790,37 @@ def test_rlbench_adapter_preserves_shared_snapshot_and_opposite_ee_frames() -> N
     assert wire[7] == wire[16] == 1.0
 
 
+def test_rlbench_adapter_exposes_wipe_physical_task_frames_uniformly() -> None:
+    spec = get_task_spec("wipe_desk")
+    task_state = np.concatenate(
+        (
+            _pose_xyzw(1.0),
+            _pose_xyzw(2.0),
+        )
+    )
+    batch = ClosedLoopObservationAdapter(spec).build(
+        {
+            "gripper_pose": _pose_xyzw(0.0),
+            "gripper_open": 1.0,
+            "task_low_dim_state": task_state,
+        },
+        tick=1,
+        previous_ee_pose={"single": None},
+        previous_command_pose={"single": None},
+    )
+    assert tuple(batch.dynamac["single"].frames) == spec.action_frame_names
+    assert tuple(batch.dynamac["single"].frames) == (
+        "sponge",
+        "dirt_boundary",
+    )
+    assert set(batch.runtime["single"].frame_poses) == {
+        "sponge",
+        "dirt_boundary",
+        "single_ee",
+    }
+    assert batch.runtime["single"].entity_configurations == {}
+
+
 def test_top_policy_bootstrap_abort_and_rejected_action_do_not_advance() -> None:
     bundle = BUNDLE_ROOT / "stack_wine"
     checkpoint = BASE_ROOT / "stack_wine/model.npz"

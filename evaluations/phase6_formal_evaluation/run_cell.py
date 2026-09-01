@@ -47,6 +47,17 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _model_tree_fingerprint(root: Path) -> str:
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    if not files:
+        raise ValueError(f"formal model tree is empty: {root}")
+    digest = hashlib.sha256()
+    for path in files:
+        name = path.relative_to(REPOSITORY_ROOT).as_posix()
+        digest.update(f"{name}\0{_sha256(path)}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
 def load_protocol(path: Path = PROTOCOL) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict) or value.get("schema") != (
@@ -98,6 +109,21 @@ def load_protocol(path: Path = PROTOCOL) -> dict[str, Any]:
         or active.get("protocol_id") != shared.get("protocol_id")
     ):
         raise ValueError("formal active implementation and shared executor differ")
+    for field in ("base_models_dir", "closed_loop_models_dir"):
+        model_root = shared.get(field)
+        if not isinstance(model_root, str) or Path(model_root).is_absolute():
+            raise ValueError(f"formal {field} must be a repository-relative path")
+        resolved = (REPOSITORY_ROOT / model_root).resolve()
+        if not resolved.is_relative_to(REPOSITORY_ROOT) or not resolved.is_dir():
+            raise ValueError(f"formal {field} does not identify a model directory")
+        fingerprint_field = field.replace("_dir", "_fingerprint")
+        expected_fingerprint = shared.get(fingerprint_field)
+        if (
+            not isinstance(expected_fingerprint, str)
+            or len(expected_fingerprint) != 64
+            or _model_tree_fingerprint(resolved) != expected_fingerprint
+        ):
+            raise ValueError(f"formal {field} content differs from the frozen model")
     tasks = value.get("tasks")
     methods = value.get("methods")
     faults = value.get("faults")
@@ -140,6 +166,28 @@ def _index_range(protocol: Mapping[str, Any], experiment: str) -> tuple[int, ...
     if not 0 <= start <= stop < FIXED_EVAL_EPISODES:
         raise ValueError("formal episode range lies outside sealed evaluation set")
     return tuple(range(start, stop + 1))
+
+
+def _parse_episode_indices(
+    value: str | None,
+    *,
+    allowed: tuple[int, ...],
+) -> tuple[int, ...]:
+    """Parse one deterministic contiguous shard inside the sealed range."""
+
+    if value is None:
+        return allowed
+    try:
+        indices = tuple(int(item) for item in value.split(","))
+    except ValueError as error:
+        raise ValueError("episode indices must be comma-separated integers") from error
+    if not indices or len(indices) != len(set(indices)):
+        raise ValueError("episode shard must contain unique indices")
+    if indices != tuple(range(indices[0], indices[-1] + 1)):
+        raise ValueError("episode shard indices must be sorted and contiguous")
+    if any(index not in allowed for index in indices):
+        raise ValueError("episode shard lies outside the sealed formal range")
+    return indices
 
 
 def _install_preregistered_subset(
@@ -242,6 +290,14 @@ def _mark_result(
     rows = payload.get("results")
     if not isinstance(rows, list) or len(rows) != len(episode_indices):
         raise RuntimeError("formal result episode accounting is incomplete")
+    for local_index, (row, formal_index) in enumerate(
+        zip(rows, episode_indices, strict=True)
+    ):
+        if not isinstance(row, dict):
+            raise RuntimeError("formal episode result must be an object")
+        row["shard_local_episode"] = local_index
+        row["formal_episode_index"] = formal_index
+        row["formal_episode_seed"] = GLOBAL_EVAL_SEED_START + formal_index
     triggered = None
     if fault_spec is not None:
         evidence = [row.get("physical_fault") for row in rows]
@@ -279,14 +335,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", required=True)
     parser.add_argument("--method", required=True)
     parser.add_argument("--fault", default=None)
+    parser.add_argument(
+        "--episode-indices",
+        default=None,
+        help="Contiguous comma-separated subset of the sealed formal range.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--diagnostics-dir", type=Path, required=True)
     parser.add_argument("--policy-python", type=Path, required=True)
-    parser.add_argument(
-        "--closed-loop-models-dir",
-        type=Path,
-        default=Path("integrations/rlbench/models/closed_loop_v1"),
-    )
     return parser
 
 
@@ -299,7 +355,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("normal formal cell cannot contain a fault")
     if args.experiment == "fault" and args.fault not in protocol["faults"]:
         raise ValueError("fault formal cell requires a frozen fault kind")
-    episode_indices = _index_range(protocol, args.experiment)
+    episode_indices = _parse_episode_indices(
+        args.episode_indices,
+        allowed=_index_range(protocol, args.experiment),
+    )
     evaluator = _evaluator(args.task)
     _install_preregistered_subset(evaluator, episode_indices)
     spec = None
@@ -311,10 +370,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--task",
         args.task,
         "--models-dir",
-        "integrations/rlbench/models/v4",
+        str(shared["base_models_dir"]),
         *_method_args(protocol, args.method),
         "--closed-loop-models-dir",
-        str(args.closed_loop_models_dir),
+        str(shared["closed_loop_models_dir"]),
         "--policy-diagnostics-dir",
         str(args.diagnostics_dir),
         "--controller-profile",

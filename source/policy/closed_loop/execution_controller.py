@@ -889,7 +889,11 @@ class ClosedLoopExecutionController:
                 participating_frames=source_weighted.participating_frames,
                 action=bridge_action,
             )
-        self.role_router.commit(source_roles, belief)
+        # The queried continuous bridge belongs to the source terminal, but
+        # the guarded transaction has already committed the target entry.
+        # Record that causal entry so the next state's LINK confirmation logic
+        # sees its true predecessor instead of the old skill terminal.
+        self.role_router.commit(source_roles, belief, causal_state=target)
         reasons: tuple[str, ...] = (
             "entry_guard_transaction_committed",
             "dynamac_boundary_terminal_bridge",

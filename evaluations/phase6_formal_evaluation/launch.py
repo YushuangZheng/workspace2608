@@ -18,6 +18,7 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 from integrations.rlbench.rlbench_dynamac.core.paths import REPOSITORY_ROOT
 from integrations.rlbench.rlbench_dynamac.core.records import atomic_json
 from integrations.rlbench.rlbench_dynamac.eval import v4_formal_launch
+from integrations.rlbench.rlbench_dynamac.eval.eval_set import GLOBAL_EVAL_SEED_START
 
 from .run_cell import PROTOCOL, load_protocol
 from .resources import LaneSpec, build_lane_specs
@@ -25,7 +26,10 @@ from .resources import LaneSpec, build_lane_specs
 RESULTS_ROOT = REPOSITORY_ROOT / "integrations/rlbench/results/phase6_formal_v1"
 LAUNCH_ROOT = RESULTS_ROOT / "_launch"
 RETAINED_RESULTS = Path(__file__).with_name("retained_results.json")
-CLOSED_LOOP_MODELS = REPOSITORY_ROOT / "integrations/rlbench/models/closed_loop_v1"
+BASE_MODELS = REPOSITORY_ROOT / "integrations/rlbench/models/phase6_v1"
+CLOSED_LOOP_MODELS = (
+    REPOSITORY_ROOT / "integrations/rlbench/models/closed_loop_phase6_v1"
+)
 RUNNER_MODULE = "evaluations.phase6_formal_evaluation.run_cell"
 DEFAULT_SIM_PYTHON = Path(
     os.environ.get(
@@ -41,6 +45,7 @@ DEFAULT_POLICY_PYTHON = Path(
 )
 DEFAULT_GPUS = tuple(range(8))
 DEFAULT_WORKERS = 48
+DEFAULT_SHARD_SIZE = 4
 
 
 @dataclass(frozen=True)
@@ -93,12 +98,93 @@ class FormalCell:
             str(self.diagnostics),
             "--policy-python",
             str(policy_python),
-            "--closed-loop-models-dir",
-            str(CLOSED_LOOP_MODELS),
         ]
         if self.fault is not None:
             values.extend(("--fault", self.fault))
         return tuple(values)
+
+
+@dataclass(frozen=True)
+class FormalShard:
+    """One resumable contiguous episode shard from a formal logical cell."""
+
+    cell: FormalCell
+    episode_indices: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not self.episode_indices or self.episode_indices != tuple(
+            range(self.episode_indices[0], self.episode_indices[-1] + 1)
+        ):
+            raise ValueError("formal shard indices must be non-empty and contiguous")
+
+    @property
+    def shard_id(self) -> str:
+        return (
+            f"{self.cell.cell_id}/episodes_"
+            f"{self.episode_indices[0]:04d}_{self.episode_indices[-1]:04d}"
+        )
+
+    @property
+    def name(self) -> str:
+        return self.shard_id.replace("/", "__")
+
+    @property
+    def result(self) -> Path:
+        return (
+            RESULTS_ROOT
+            / "_shards"
+            / self.cell.name
+            / f"episodes_{self.episode_indices[0]:04d}_{self.episode_indices[-1]:04d}.json"
+        )
+
+    @property
+    def diagnostics(self) -> Path:
+        return RESULTS_ROOT / "diagnostics" / "_shards" / self.name
+
+    def command(self, sim_python: Path, policy_python: Path) -> tuple[str, ...]:
+        values = list(self.cell.command(sim_python, policy_python))
+        output_index = values.index("--output") + 1
+        diagnostics_index = values.index("--diagnostics-dir") + 1
+        values[output_index] = str(self.result)
+        values[diagnostics_index] = str(self.diagnostics)
+        values.extend(
+            ("--episode-indices", ",".join(map(str, self.episode_indices)))
+        )
+        return tuple(values)
+
+
+def build_shards(
+    cells: Sequence[FormalCell],
+    protocol: Mapping[str, Any],
+    *,
+    shard_size: int = DEFAULT_SHARD_SIZE,
+) -> tuple[FormalShard, ...]:
+    """Partition every cell into deterministic contiguous queue jobs."""
+
+    if shard_size < 1:
+        raise ValueError("formal shard size must be positive")
+    by_cell: list[list[FormalShard]] = []
+    for cell in cells:
+        key = f"{cell.experiment}_episode_index_range"
+        first, last = (int(value) for value in protocol["evaluation_set"][key])
+        expected = tuple(range(first, last + 1))
+        if len(expected) != cell.episodes:
+            raise ValueError(f"formal cell episode count differs: {cell.cell_id}")
+        by_cell.append(
+            [
+                FormalShard(cell, expected[offset : offset + shard_size])
+                for offset in range(0, len(expected), shard_size)
+            ]
+        )
+    # Round-robin cells so the initial 48 slots cover every pending logical
+    # cell.  Once launched, all freed slots still draw from this one global
+    # queue; no lane is reserved for a task or method.
+    shards = []
+    for round_index in range(max((len(value) for value in by_cell), default=0)):
+        shards.extend(
+            value[round_index] for value in by_cell if round_index < len(value)
+        )
+    return tuple(shards)
 
 
 def build_cells(protocol: Mapping[str, Any], section: str) -> tuple[FormalCell, ...]:
@@ -231,7 +317,7 @@ def _environment(policy_python: Path, gpu: int, cpus: Sequence[int]) -> dict[str
 
 
 def _xvfb_command(
-    cell: FormalCell, lane: int, sim: Path, policy: Path
+    cell: FormalCell | FormalShard, lane: int, sim: Path, policy: Path
 ) -> tuple[str, ...]:
     xvfb_log = LAUNCH_ROOT / "active" / f"{cell.name}.xvfb.log"
     return (
@@ -274,6 +360,291 @@ def _validate_result(cell: FormalCell, commit: Optional[str] = None) -> None:
     rows = payload.get("results")
     if not isinstance(rows, list) or len(rows) != cell.episodes:
         raise RuntimeError(f"formal result has incomplete episode rows: {cell.result}")
+
+
+def _validate_shard(shard: FormalShard, commit: Optional[str] = None) -> None:
+    try:
+        payload = json.loads(shard.result.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"cannot read formal shard result: {shard.result}") from error
+    metadata = payload.get("stage6_formal_evaluation")
+    if not isinstance(metadata, dict) or metadata.get("schema") != (
+        "essay2608.phase6_formal_result.v1"
+    ):
+        raise RuntimeError(f"formal shard has no identity: {shard.result}")
+    expected = {
+        "experiment": shard.cell.experiment,
+        "task": shard.cell.task,
+        "method": shard.cell.method,
+        "fault": shard.cell.fault,
+        "episode_indices": list(shard.episode_indices),
+        "episodes_completed": len(shard.episode_indices),
+        "protocol_sha256": _sha256(PROTOCOL),
+    }
+    for name, value in expected.items():
+        if metadata.get(name) != value:
+            raise RuntimeError(f"formal shard {name} differs: {shard.result}")
+    if commit is not None and metadata.get("git_commit") != commit:
+        raise RuntimeError(f"formal shard commit differs: {shard.result}")
+    rows = payload.get("results")
+    if not isinstance(rows, list) or len(rows) != len(shard.episode_indices):
+        raise RuntimeError(f"formal shard rows are incomplete: {shard.result}")
+    observed = [row.get("formal_episode_index") for row in rows]
+    if observed != list(shard.episode_indices):
+        raise RuntimeError(f"formal shard row indices differ: {shard.result}")
+
+
+def _merge_ik_diagnostics(payloads: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    keys = set(payloads[0])
+    if any(set(payload) != keys for payload in payloads[1:]):
+        raise RuntimeError("formal shards expose different IK diagnostic fields")
+    result: dict[str, Any] = {}
+    for key in sorted(keys):
+        values = [payload[key] for payload in payloads]
+        first = values[0]
+        if isinstance(first, bool) or isinstance(first, str) or first is None:
+            if any(value != first for value in values[1:]):
+                raise RuntimeError(f"formal shard IK identity differs at {key}")
+            result[key] = first
+        elif isinstance(first, dict):
+            if any(value != first for value in values[1:]):
+                raise RuntimeError(f"formal shard IK config differs at {key}")
+            result[key] = first
+        elif isinstance(first, list):
+            result[key] = sorted(
+                {item for value in values for item in value}
+            )
+        elif isinstance(first, (int, float)):
+            if key.endswith("_max") or key.endswith("_tier_max"):
+                result[key] = max(values)
+            elif key.endswith("_min"):
+                result[key] = min(values)
+            else:
+                result[key] = sum(values)
+        else:
+            raise RuntimeError(f"unsupported IK diagnostic type at {key}")
+    return result
+
+
+def _merge_episode_accounting(
+    payloads: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    schemas = {payload.get("schema") for payload in payloads}
+    if len(schemas) != 1:
+        raise RuntimeError("formal shard episode-accounting schemas differ")
+    result: dict[str, Any] = {"schema": next(iter(schemas))}
+    rate_keys = {
+        "success_rate_all_planned_episodes",
+        "success_rate_in_complete_intervention_subset",
+    }
+    keys = set(payloads[0])
+    if any(set(payload) != keys for payload in payloads[1:]):
+        raise RuntimeError("formal shard episode-accounting fields differ")
+    for key in sorted(keys.difference({"schema", *rate_keys})):
+        values = [payload[key] for payload in payloads]
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+            raise RuntimeError(f"episode-accounting field {key} is not a count")
+        result[key] = sum(values)
+    denominator = result["planned_episode_denominator"]
+    result["success_rate_all_planned_episodes"] = (
+        result["successes_in_planned_denominator"] / float(denominator)
+    )
+    complete = result["complete_intervention_subset_count"]
+    result["success_rate_in_complete_intervention_subset"] = (
+        result["successes_in_complete_intervention_subset"] / float(complete)
+        if complete
+        else None
+    )
+    return result
+
+
+_PROTOCOL_COUNT_FIELDS = frozenset(
+    {
+        "episodes_intervention_eligible",
+        "episodes_pre_intervention_terminal",
+        "episodes_dynamic_condition_unexercised",
+        "pre_trigger_successes",
+        "planned_episode_denominator",
+        "completed_episode_count",
+        "episodes_with_intervention",
+        "episodes_with_effective_intervention",
+        "episodes_with_complete_intervention",
+        "successes_in_complete_intervention_subset",
+    }
+)
+
+
+def _merge_protocol_summary(
+    payloads: Sequence[Mapping[str, Any]],
+    episode_indices: tuple[int, ...],
+) -> dict[str, Any]:
+    result = json.loads(json.dumps(payloads[0]))
+    for field in _PROTOCOL_COUNT_FIELDS:
+        if field in result:
+            result[field] = sum(int(payload[field]) for payload in payloads)
+    complete = int(result.get("episodes_with_complete_intervention", 0))
+    if "success_rate_in_complete_intervention_subset" in result:
+        result["success_rate_in_complete_intervention_subset"] = (
+            int(result["successes_in_complete_intervention_subset"]) / float(complete)
+            if complete
+            else None
+        )
+    for field in (
+        "all_episodes_intervened",
+        "all_interventions_effective",
+        "all_eligible_interventions_effective",
+        "protocol_valid",
+    ):
+        if field not in result:
+            continue
+        values = [payload[field] for payload in payloads]
+        result[field] = None if all(value is None for value in values) else all(
+            value is not False for value in values
+        )
+    cache = result.get("staged_motion_plan_cache")
+    if isinstance(cache, dict):
+        caches = [payload["staged_motion_plan_cache"] for payload in payloads]
+        cache["plan_fingerprints"] = [
+            item
+            for value in caches
+            for item in value.get("plan_fingerprints", [])
+        ]
+        key = cache.get("cache_key")
+        if isinstance(key, dict):
+            key["base_seed"] = GLOBAL_EVAL_SEED_START + episode_indices[0]
+            key["episodes"] = len(episode_indices)
+            if "variation_schedule" in key:
+                key["variation_schedule"] = [
+                    item
+                    for value in caches
+                    for item in value.get("cache_key", {}).get(
+                        "variation_schedule", []
+                    )
+                ]
+    return result
+
+
+def _validate_merge_identity(payloads: Sequence[Mapping[str, Any]]) -> None:
+    fields = (
+        "schema",
+        "release",
+        "policy_type",
+        "closed_loop_feature_profile",
+        "protocol_label",
+        "task",
+        "scenario",
+        "horizon",
+        "evaluation_protocol_id",
+        "fixed_eval_set",
+        "controller",
+        "model_identity",
+        "gripper_protocol",
+        "gripper_timing",
+        "final_settling_protocol",
+        "motion_plan_batch_fingerprint",
+    )
+    for field in fields:
+        values = [payload.get(field) for payload in payloads]
+        if any(value != values[0] for value in values[1:]):
+            raise RuntimeError(f"formal shard runtime identity differs at {field}")
+
+
+def merge_formal_cell(
+    cell: FormalCell,
+    shards: Sequence[FormalShard],
+    *,
+    commit: str,
+) -> None:
+    """Strictly merge complete shard coverage into the canonical cell result."""
+
+    ordered = tuple(sorted(shards, key=lambda shard: shard.episode_indices[0]))
+    for shard in ordered:
+        _validate_shard(shard, commit)
+    indices = tuple(index for shard in ordered for index in shard.episode_indices)
+    if indices != tuple(range(cell.episodes)):
+        raise RuntimeError(f"formal shard coverage is incomplete for {cell.cell_id}")
+    payloads = [json.loads(shard.result.read_text(encoding="utf-8")) for shard in ordered]
+    _validate_merge_identity(payloads)
+    rows = [row for payload in payloads for row in payload["results"]]
+    observed = [row.get("formal_episode_index") for row in rows]
+    if observed != list(indices) or len(observed) != len(set(observed)):
+        raise RuntimeError(f"formal shard rows overlap or have gaps for {cell.cell_id}")
+    for row, index in zip(rows, indices, strict=True):
+        row["episode"] = index
+    result = json.loads(json.dumps(payloads[0]))
+    result["results"] = rows
+    result["episodes"] = cell.episodes
+    result["episodes_requested"] = cell.episodes
+    result["episodes_completed"] = cell.episodes
+    result["seed"] = GLOBAL_EVAL_SEED_START + indices[0]
+    result["variation_schedule"] = [
+        item for payload in payloads for item in payload.get("variation_schedule", [])
+    ]
+    successes = sum(bool(row.get("success")) for row in rows)
+    result["successes"] = successes
+    result["success_rate"] = successes / float(cell.episodes)
+    result["episode_accounting"] = _merge_episode_accounting(
+        [payload["episode_accounting"] for payload in payloads]
+    )
+    result["ik_execution_diagnostics"] = _merge_ik_diagnostics(
+        [payload["ik_execution_diagnostics"] for payload in payloads]
+    )
+    protocol_key = "protocol" if "protocol" in result else "scenario_protocol"
+    result[protocol_key] = _merge_protocol_summary(
+        [payload[protocol_key] for payload in payloads], indices
+    )
+    result["fresh_task_generation"] = {
+        "required_per_formal_episode": True,
+        "all_episodes_recorded": all(
+            payload["fresh_task_generation"]["all_episodes_recorded"]
+            for payload in payloads
+        ),
+        "evidence": [
+            item
+            for payload in payloads
+            for item in payload["fresh_task_generation"]["evidence"]
+        ],
+    }
+    if "store_mode_subgroups" in result and result["store_mode_subgroups"] is not None:
+        merged_groups = {}
+        for mode in result["store_mode_subgroups"]:
+            values = [payload["store_mode_subgroups"][mode] for payload in payloads]
+            counts = {
+                key: sum(int(value[key]) for value in values)
+                for key in values[0]
+                if key != "success_rate"
+            }
+            counts["success_rate"] = (
+                counts["successes"] / float(counts["completed"])
+                if counts["completed"]
+                else None
+            )
+            merged_groups[mode] = counts
+        result["store_mode_subgroups"] = merged_groups
+    metadata = result["stage6_formal_evaluation"]
+    metadata["episode_indices"] = list(indices)
+    metadata["episode_seeds"] = [GLOBAL_EVAL_SEED_START + index for index in indices]
+    metadata["episodes_completed"] = cell.episodes
+    triggered_values = [
+        payload["stage6_formal_evaluation"].get("episodes_fault_triggered")
+        for payload in payloads
+    ]
+    metadata["episodes_fault_triggered"] = (
+        None
+        if all(value is None for value in triggered_values)
+        else sum(int(value or 0) for value in triggered_values)
+    )
+    metadata["shard_merge"] = {
+        "schema": "essay2608.phase6_formal_shard_merge.v1",
+        "shard_count": len(ordered),
+        "shard_results": [
+            shard.result.relative_to(RESULTS_ROOT).as_posix() for shard in ordered
+        ],
+        "exact_nonoverlapping_coverage": True,
+    }
+    cell.result.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(cell.result, result)
+    _validate_result(cell, commit)
 
 
 def _retained_records() -> dict[str, dict[str, str]]:
@@ -396,7 +767,8 @@ def preflight(
         "git_commit": commit or _git("rev-parse", "HEAD"),
         "worktree_clean_required": require_clean,
         "evaluation_set": v4_formal_launch._validate_evaluation_set(),
-        "v4_models": v4_formal_launch._validate_model_release(),
+        "frozen_v4_release": v4_formal_launch._validate_model_release(),
+        "phase6_base_models": _tree_identity(BASE_MODELS),
         "closed_loop_models": _tree_identity(CLOSED_LOOP_MODELS),
         "gpus": _gpu_inventory(),
         "selected_gpu_lanes": list(gpus),
@@ -415,25 +787,27 @@ def render_plan(
     policy_python: Path,
     gpus: Sequence[int],
     workers: int = DEFAULT_WORKERS,
+    shard_size: int = DEFAULT_SHARD_SIZE,
 ) -> str:
     specs = _lane_specs(gpus, workers)
+    shards = build_shards(cells, protocol, shard_size=shard_size)
     lines = [
         "Stage-six preregistered formal plan (no simulator started)",
         f"protocol={PROTOCOL.relative_to(REPOSITORY_ROOT)} sha256={_sha256(PROTOCOL)}",
-        f"cells={len(cells)} episodes={sum(cell.episodes for cell in cells)} workers={workers}",
+        f"cells={len(cells)} shards={len(shards)} episodes={sum(cell.episodes for cell in cells)} workers={workers}",
         "renderer=xvfb_software_gl; CUDA identity is isolated per lane",
     ]
-    for index, cell in enumerate(cells):
+    for index, shard in enumerate(shards):
         lane = index % len(specs)
         spec = specs[lane]
-        command = _xvfb_command(cell, lane, sim_python, policy_python)
+        command = _xvfb_command(shard, lane, sim_python, policy_python)
         lines.extend(
             (
                 "",
-                f"[{index + 1}/{len(cells)}] {cell.cell_id}",
+                f"[{index + 1}/{len(shards)}] {shard.shard_id}",
                 f"lane={lane} gpu={spec.gpu} cpus={','.join(map(str, spec.logical_cpus))}",
                 " ".join(shlex.quote(value) for value in command),
-                f"result={cell.result}",
+                f"result={shard.result}",
             )
         )
     return "\n".join(lines)
@@ -466,6 +840,7 @@ def execute(
     policy_python: Path,
     gpus: Sequence[int],
     workers: int = DEFAULT_WORKERS,
+    shard_size: int = DEFAULT_SHARD_SIZE,
 ) -> dict[str, Any]:
     identity = preflight(
         protocol=protocol,
@@ -476,9 +851,33 @@ def execute(
         require_clean=True,
         workers=workers,
     )
-    pending = [cell for cell in cells if identity["cells"][cell.cell_id] == "PENDING"]
-    if not pending:
+    pending_cells = [
+        cell for cell in cells if identity["cells"][cell.cell_id] == "PENDING"
+    ]
+    if not pending_cells:
         return {"status": "nothing_to_run", **identity}
+    all_shards = build_shards(
+        pending_cells,
+        protocol,
+        shard_size=shard_size,
+    )
+    shards_by_cell = {
+        cell.cell_id: tuple(
+            shard for shard in all_shards if shard.cell.cell_id == cell.cell_id
+        )
+        for cell in pending_cells
+    }
+    pending_shards = []
+    resumed_shards = []
+    for shard in all_shards:
+        lock_path = shard.result.with_name(shard.result.name + ".lock")
+        if lock_path.exists():
+            raise RuntimeError(f"formal shard has an active/stale lock: {lock_path}")
+        if shard.result.exists():
+            _validate_shard(shard, identity["git_commit"])
+            resumed_shards.append(shard.shard_id)
+        else:
+            pending_shards.append(shard)
     RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
     LAUNCH_ROOT.mkdir(parents=True, exist_ok=True)
     lock = LAUNCH_ROOT / "execute.lock"
@@ -491,26 +890,26 @@ def execute(
     active_root = LAUNCH_ROOT / "active"
     run_root.mkdir(parents=True, exist_ok=False)
     active_root.mkdir(parents=True, exist_ok=True)
-    processes: dict[str, tuple[subprocess.Popen, FormalCell, int]] = {}
+    processes: dict[str, tuple[subprocess.Popen, FormalShard, int]] = {}
     streams: dict[str, Any] = {}
     assignments: list[dict[str, Any]] = []
     specs = _lane_specs(gpus, workers)
     available = list(range(len(specs)))
-    queue = list(pending)
+    queue = list(pending_shards)
     started = time.time()
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         stream.write(f"pid={os.getpid()} run_id={run_id}\n")
         stream.flush()
         os.fsync(stream.fileno())
 
-    def launch(cell: FormalCell, lane: int) -> None:
+    def launch(shard: FormalShard, lane: int) -> None:
         spec = specs[lane]
-        cell.result.parent.mkdir(parents=True, exist_ok=True)
-        cell.diagnostics.mkdir(parents=True, exist_ok=True)
-        log_path = run_root / f"{cell.name}.log"
+        shard.result.parent.mkdir(parents=True, exist_ok=True)
+        shard.diagnostics.mkdir(parents=True, exist_ok=True)
+        log_path = run_root / f"{shard.name}.log"
         log_stream = log_path.open("xb")
-        streams[cell.cell_id] = log_stream
-        command = _xvfb_command(cell, lane, sim_python, policy_python)
+        streams[shard.shard_id] = log_stream
+        command = _xvfb_command(shard, lane, sim_python, policy_python)
 
         def set_affinity() -> None:
             os.sched_setaffinity(0, set(spec.logical_cpus))
@@ -524,10 +923,12 @@ def execute(
             start_new_session=True,
             preexec_fn=set_affinity,
         )
-        processes[cell.cell_id] = (process, cell, lane)
+        processes[shard.shard_id] = (process, shard, lane)
         assignments.append(
             {
-                "cell_id": cell.cell_id,
+                "cell_id": shard.cell.cell_id,
+                "shard_id": shard.shard_id,
+                "episode_indices": list(shard.episode_indices),
                 "lane": lane,
                 "gpu": spec.gpu,
                 "numa_node": spec.numa_node,
@@ -543,23 +944,22 @@ def execute(
         while queue or processes:
             while queue and available:
                 launch(queue.pop(0), available.pop(0))
-            for cell_id, (process, cell, lane) in list(processes.items()):
+            for shard_id, (process, shard, lane) in list(processes.items()):
                 return_code = process.poll()
                 if return_code is None:
                     continue
-                del processes[cell_id]
+                del processes[shard_id]
                 available.append(lane)
                 available.sort()
-                streams[cell_id].flush()
+                streams[shard_id].flush()
                 if return_code != 0:
                     _terminate(entry[0] for entry in processes.values())
                     raise RuntimeError(
-                        f"formal cell {cell_id} exited {return_code}; see {run_root}"
+                        f"formal shard {shard_id} exited {return_code}; see {run_root}"
                     )
-                _validate_result(cell, identity["git_commit"])
-                identity["cells"][cell_id] = "COMPLETED_VALIDATED"
+                _validate_shard(shard, identity["git_commit"])
                 row = next(
-                    value for value in assignments if value["cell_id"] == cell_id
+                    value for value in assignments if value["shard_id"] == shard_id
                 )
                 row["finished_unix"] = time.time()
             if queue or processes:
@@ -576,6 +976,14 @@ def execute(
             if not target.exists():
                 shutil.move(str(path), target)
 
+    for cell in pending_cells:
+        merge_formal_cell(
+            cell,
+            shards_by_cell[cell.cell_id],
+            commit=identity["git_commit"],
+        )
+        identity["cells"][cell.cell_id] = "COMPLETED_VALIDATED"
+
     summary = {
         "schema": "essay2608.phase6_formal_launch.v1",
         "status": "completed",
@@ -583,6 +991,14 @@ def execute(
         "started_unix": started,
         "finished_unix": time.time(),
         "assignments": assignments,
+        "scheduler": {
+            "schema": "essay2608.phase6_global_shard_queue.v1",
+            "workers": workers,
+            "shard_size": shard_size,
+            "work_conserving_global_queue": True,
+            "resumed_shards": resumed_shards,
+            "new_shards_completed": len(assignments),
+        },
         **identity,
     }
     atomic_json(run_root / "launch_summary.json", summary)
@@ -601,6 +1017,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--policy-python", type=Path, default=DEFAULT_POLICY_PYTHON)
     parser.add_argument("--gpus", type=_parse_gpus, default=DEFAULT_GPUS)
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    parser.add_argument("--shard-size", type=int, default=DEFAULT_SHARD_SIZE)
     return parser
 
 
@@ -617,6 +1034,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.policy_python,
                 args.gpus,
                 args.workers,
+                args.shard_size,
             )
         )
         return 0
@@ -638,6 +1056,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             policy_python=args.policy_python,
             gpus=args.gpus,
             workers=args.workers,
+            shard_size=args.shard_size,
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

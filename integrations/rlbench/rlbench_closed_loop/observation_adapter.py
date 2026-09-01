@@ -61,7 +61,16 @@ class ClosedLoopObservationAdapter:
         previous_command_covariance: Mapping[str, np.ndarray | None] | None = None,
     ) -> AdaptedObservationBatch:
         task_state = payload.get("task_low_dim_state")
-        frames = self.task_spec.extract_pose_chunks(task_state)
+        all_poses = self.task_spec.extract_pose_chunks(task_state)
+        frames = {
+            name: all_poses[name] for name in self.task_spec.action_frame_names
+        }
+        scene_entity_poses = {
+            name: all_poses[name] for name in self.task_spec.scene_entity_names
+        }
+        entity_configurations = self.task_spec.extract_entity_configurations(
+            task_state
+        )
         ee = {
             arm: xyzw_to_wxyz(
                 np.asarray(_arm_payload(payload, arm)["gripper_pose"], dtype=np.float64)
@@ -80,8 +89,9 @@ class ClosedLoopObservationAdapter:
             if self.task_spec.bimanual:
                 opposite = "right" if arm == "left" else "left"
                 arm_frames[f"{opposite}_ee"] = ee[opposite].copy()
-            visible = {name: True for name in arm_frames}
-            reliable = {name: 1.0 for name in arm_frames}
+            runtime_frames = {**arm_frames, **scene_entity_poses}
+            visible = {name: True for name in runtime_frames}
+            reliable = {name: 1.0 for name in runtime_frames}
             current = DynaMACObservation(ee[arm], arm_frames)
             dynamac[arm] = current
             runtime[arm] = RuntimeObservation.from_dynamac(
@@ -97,7 +107,11 @@ class ClosedLoopObservationAdapter:
                 previous_ee_pose=previous_ee_pose.get(arm),
                 tracking_reliability=reliable,
                 frame_visibility=visible,
-                additional_frame_poses={f"{arm}_ee": ee[arm]},
+                additional_frame_poses={
+                    **scene_entity_poses,
+                    f"{arm}_ee": ee[arm],
+                },
+                entity_configurations=entity_configurations,
             )
         return AdaptedObservationBatch(dynamac, runtime)
 

@@ -321,17 +321,33 @@ class ClosedLoopTaskModelBuilder:
         mode: int,
         radius: int,
     ) -> tuple[FactorId, ...]:
-        references = self._active_reference_entities(policy, state_id, mode, radius)
-        return self._factors_for_references(data, references)
+        action_references = self._active_reference_entities(
+            policy, state_id, mode, radius
+        )
+        # Additional scene entities are explicitly separated from DynaMAC
+        # action references by the task adapter.  They remain task-state
+        # candidates for the sparse offline factor screen without becoming
+        # PoE action streams.
+        return self._factors_for_references(
+            data,
+            action_references,
+            scene_entities=tuple(
+                name
+                for name in data.scene_entity_poses
+                if name in data.entity_configurations
+            ),
+        )
 
     def _factors_for_references(
         self,
         data: _AlignedSkillData,
         references: Sequence[str],
+        *,
+        scene_entities: Sequence[str] = (),
     ) -> tuple[FactorId, ...]:
         """Build the shared sparse library from task refs and one-hop structure."""
 
-        reference_entities = set(references)
+        reference_entities = set(references).union(scene_entities)
         direct_bindings = {
             (child, parent)
             for child, parent in data.structural_bindings.items()

@@ -74,6 +74,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     initialize_fresh_task_generation,
     initialize_global_ik_controller_diagnostics,
     initialize_ik_solver_diagnostics,
+    load_staged_motion_plan_batch,
     run_final_settling,
     policy_action_execution_status,
     policy_action_execution_statuses,
@@ -92,17 +93,16 @@ from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
 
 from integrations.rlbench.rlbench_dynamac.core.paths import REPOSITORY_ROOT
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
+from integrations.rlbench.rlbench_dynamac.core.task_specs import (
+    TRAINING_MANIFEST_SCHEMA_STATIC_V1,
+    get_task_spec,
+)
 
 DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
 DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v3"
 CLOSED_LOOP_MODELS_DIR = INTEGRATION_ROOT / "models" / "closed_loop_v1"
 DEFAULT_POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", "python3.10"))
-TASKS = {
-    "stack_wine": ("rlbench.tasks.stack_wine", "StackWine"),
-    "place_cups": ("rlbench.tasks.place_cups", "PlaceCups"),
-    "open_microwave": ("rlbench.tasks.open_microwave", "OpenMicrowave"),
-    "wipe_desk": ("rlbench.tasks.wipe_desk", "WipeDesk"),
-}
+TASKS = ("stack_wine", "place_cups", "open_microwave", "wipe_desk")
 SCENARIOS = {
     "static": "static",
     "smooth": "smooth_task_motion",
@@ -255,6 +255,30 @@ def _authenticated_v3_dynamic_trigger(args, worker):
         raise RuntimeError(
             "authenticated V3 trigger lies outside the loaded policy clock"
         )
+    return protocol, authentication
+
+
+def _authenticated_intervention_protocol(args, worker):
+    """Authenticate dynamic triggers only when the scenario can apply one."""
+
+    if args.scenario != "static":
+        return _authenticated_v3_dynamic_trigger(args, worker)
+    protocol = _validate_v3_protocol_budgets(args)
+    identity = worker.model_identity
+    accepted_schemas = {
+        "dynamac-direct-training-v3",
+        TRAINING_MANIFEST_SCHEMA_STATIC_V1,
+    }
+    if identity.get("manifest_authenticated") is not True or identity.get(
+        "training_manifest_schema"
+    ) not in accepted_schemas:
+        raise RuntimeError("static evaluation requires an authenticated model")
+    authentication = {
+        "schema": "v3-static-no-dynamic-trigger-v1",
+        "applicable": False,
+        "trigger_step": None,
+        "reason": "the static scenario does not apply a dynamic intervention",
+    }
     return protocol, authentication
 
 
@@ -1347,12 +1371,49 @@ def _motion_plan_cache_path(args):
 
 
 def _load_fixed_motion_plans(args):
-    """Read one preregistered batch; formal runs never generate or repair it."""
+    """Read either the sealed formal set or an explicit fixed qualification set."""
 
+    if args.eval_set_id is None and args.motion_plans is not None:
+        path = Path(args.motion_plans)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        plans = load_staged_motion_plan_batch(payload)
+        if (
+            payload.get("task_name") != args.task
+            or payload.get("base_seed") != args.seed
+            or payload.get("episodes") != args.episodes
+            or payload.get("variation_schedule") != [args.variation] * args.episodes
+        ):
+            raise RuntimeError("fixed qualification plan schedule does not match")
+        if any(
+            plan.validation.get("goal_sampling_max_attempts")
+            != args.intervention_attempts
+            for plan in plans
+        ):
+            raise RuntimeError("fixed qualification goal-sampling budget differs")
+        fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest = {
+            "payload": {
+                "evaluation_set_id": "local_fixed_qualification",
+                "spec": {"sha256": fingerprint},
+                "environment_plan_batches": {
+                    args.task: {"sha256": fingerprint}
+                },
+            },
+            "manifest_sha256": fingerprint,
+        }
+        return manifest, {
+            "payload": payload,
+            "plans": plans,
+            "formal_access": "explicit_fixed_qualification_read_only",
+        }
     if args.eval_set_id is None:
-        raise RuntimeError("formal evaluation requires --eval-set-id")
+        raise RuntimeError(
+            "evaluation requires --eval-set-id or an explicit --motion-plans batch"
+        )
     if args.motion_plans is not None:
-        raise RuntimeError("--motion-plans is not allowed for fixed formal evaluation")
+        raise RuntimeError(
+            "--motion-plans cannot be combined with a sealed --eval-set-id"
+        )
     if args.seed != GLOBAL_EVAL_SEED_START or args.episodes != FIXED_EVAL_EPISODES:
         raise RuntimeError(
             "formal evaluation seed/episode count differs from the fixed eval set"
@@ -1384,8 +1445,10 @@ def _evaluate_reserved(args):
 
     # Reject noncanonical budgets before a staging child can create a cache.
     _validate_v3_protocol_budgets(args)
-    module_name, class_name = TASKS[args.task]
-    task_class = getattr(importlib.import_module(module_name), class_name)
+    task_spec = get_task_spec(args.task)
+    task_class = getattr(
+        importlib.import_module(task_spec.module), task_spec.class_name
+    )
     eval_set, selected_batch = _load_fixed_motion_plans(args)
     selected_motion_plan_payload = selected_batch["payload"]
     motion_plan_payload = (
@@ -1456,7 +1519,7 @@ def _evaluate_reserved(args):
             ),
         )
         intervention_registry, trigger_authentication = (
-            _authenticated_v3_dynamic_trigger(args, worker)
+            _authenticated_intervention_protocol(args, worker)
         )
         args.trigger_step = (
             None
@@ -1607,7 +1670,9 @@ def _evaluate_reserved(args):
             "selected_batch_fingerprint": selected_motion_plan_payload[
                 "batch_fingerprint"
             ],
-            "formal_access": "canonical_id_read_only_no_generation",
+            "formal_access": selected_batch.get(
+                "formal_access", "canonical_id_read_only_no_generation"
+            ),
         },
         "controller": {
             **global_ik_controller_metadata(controller_config),
@@ -1944,8 +2009,10 @@ def main(argv=None):
             or args.intervention_attempts < 1
         ):
             raise ValueError("staging episode parameters are invalid")
-        module_name, class_name = TASKS[args.task]
-        task_class = getattr(importlib.import_module(module_name), class_name)
+        task_spec = get_task_spec(args.task)
+        task_class = getattr(
+            importlib.import_module(task_spec.module), task_spec.class_name
+        )
         with reserve_output(args.stage_motion_plans_output):
             _stage_motion_plan_batch(args, task_class)
         return 0

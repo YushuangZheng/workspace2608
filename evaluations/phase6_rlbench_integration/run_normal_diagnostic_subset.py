@@ -9,6 +9,7 @@ current tasks and dispatches to the existing uni- or bimanual evaluator.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from types import ModuleType
@@ -22,6 +23,9 @@ from integrations.rlbench.rlbench_dynamac.eval import (
 from integrations.rlbench.rlbench_dynamac.eval.eval_set import (
     FIXED_EVAL_EPISODES,
     GLOBAL_EVAL_SEED_START,
+)
+from integrations.rlbench.rlbench_dynamac.core.runtime import (
+    load_staged_motion_plan_batch,
 )
 from integrations.rlbench.rlbench_dynamac.protocols.store_bottle_eval_v4 import (
     load_v4_store_intervention_protocol,
@@ -66,6 +70,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("integrations/rlbench/models/closed_loop_v1"),
     )
     parser.add_argument(
+        "--models-dir",
+        type=Path,
+        default=Path("integrations/rlbench/models/v4"),
+    )
+    parser.add_argument(
+        "--motion-plans",
+        type=Path,
+        default=None,
+        help="Optional authenticated fixed qualification batch.",
+    )
+    parser.add_argument("--controller-profile", default="auto")
+    parser.add_argument(
         "--closed-loop-feature-profile",
         choices=("progress_only", "progress_dynamic_roles", "full"),
         default="full",
@@ -84,13 +100,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _normalized_episode_indices(values: Iterable[int]) -> tuple[int, ...]:
+def _normalized_episode_indices(
+    values: Iterable[int], *, total_episodes: int = FIXED_EVAL_EPISODES
+) -> tuple[int, ...]:
     indices = tuple(int(value) for value in values)
     if not indices:
         raise ValueError("at least one episode index is required")
     if len(set(indices)) != len(indices):
         raise ValueError("episode indices must be unique")
-    if any(not 0 <= index < FIXED_EVAL_EPISODES for index in indices):
+    if any(not 0 <= index < total_episodes for index in indices):
         raise ValueError("episode index lies outside the sealed 200-episode set")
     expected = tuple(range(indices[0], indices[0] + len(indices)))
     if indices != expected:
@@ -135,7 +153,37 @@ def _episode_protocol_args(
     return []
 
 
-def _diagnostic_loader(evaluator: ModuleType, episode_indices: tuple[int, ...]):
+def _diagnostic_loader(
+    evaluator: ModuleType,
+    episode_indices: tuple[int, ...],
+    *,
+    motion_plans: Path | None = None,
+):
+    if motion_plans is not None:
+        payload = json.loads(motion_plans.read_text(encoding="utf-8"))
+        plans = load_staged_motion_plan_batch(payload)
+        fingerprint = hashlib.sha256(motion_plans.read_bytes()).hexdigest()
+
+        def load_qualification(_args: Any):
+            return (
+                {
+                    "payload": {
+                        "evaluation_set_id": "local_fixed_qualification",
+                        "spec": {"sha256": fingerprint},
+                        "environment_plan_batches": {
+                            payload["task_name"]: {"sha256": fingerprint}
+                        },
+                    },
+                    "manifest_sha256": fingerprint,
+                },
+                {
+                    "payload": payload,
+                    "plans": [plans[index] for index in episode_indices],
+                    "formal_access": "explicit_fixed_qualification_read_only",
+                },
+            )
+
+        return load_qualification
     original = evaluator._load_fixed_motion_plans
 
     def load(args: Any):
@@ -184,23 +232,33 @@ def _mark_diagnostic(
     *,
     task: str,
     episode_indices: tuple[int, ...],
+    base_seed: int = GLOBAL_EVAL_SEED_START,
+    qualification_batch: Path | None = None,
 ) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    payload["diagnostic_subset"] = {
+    diagnostic_subset = {
         "schema": "rlbench-fixed-eval-read-only-normal-subset-v1",
         "task": task,
         "episode_indices": list(episode_indices),
-        "episode_seeds": [GLOBAL_EVAL_SEED_START + value for value in episode_indices],
+        "episode_seeds": [base_seed + value for value in episode_indices],
         "formal_result": False,
         "paper_comparable": False,
         "plan_regenerated": False,
     }
+    if qualification_batch is not None:
+        diagnostic_subset["qualification_batch"] = {
+            "path": str(qualification_batch),
+            "sha256": hashlib.sha256(qualification_batch.read_bytes()).hexdigest(),
+        }
+    payload["diagnostic_subset"] = diagnostic_subset
     payload["evaluation_protocol_id"] = (
         f"{payload['evaluation_protocol_id']}+normal-diagnostic-subset-v1"
     )
-    payload["fixed_eval_set"][
-        "formal_access"
-    ] = "canonical_id_read_only_normal_diagnostic_subset"
+    payload["fixed_eval_set"]["formal_access"] = (
+        "canonical_id_read_only_normal_diagnostic_subset"
+        if qualification_batch is None
+        else "explicit_fixed_qualification_read_only"
+    )
     scenario_protocol = payload.get("scenario_protocol")
     if isinstance(scenario_protocol, dict):
         scenario_protocol["paper_comparable"] = False
@@ -214,7 +272,26 @@ def _mark_diagnostic(
 
 def main() -> int:
     args = build_parser().parse_args()
-    episode_indices = _normalized_episode_indices(args.episode_index)
+    qualification_payload = None
+    if args.motion_plans is not None:
+        qualification_payload = json.loads(args.motion_plans.read_text(encoding="utf-8"))
+        load_staged_motion_plan_batch(qualification_payload)
+        if qualification_payload.get("task_name") != args.task:
+            raise ValueError("qualification batch task does not match")
+    total_episodes = (
+        FIXED_EVAL_EPISODES
+        if qualification_payload is None
+        else int(qualification_payload["episodes"])
+    )
+    base_seed = (
+        GLOBAL_EVAL_SEED_START
+        if qualification_payload is None
+        else int(qualification_payload["base_seed"])
+    )
+    episode_indices = _normalized_episode_indices(
+        args.episode_index,
+        total_episodes=total_episodes,
+    )
     if args.horizon < 1:
         raise ValueError("horizon must be positive")
     evaluator = _evaluator_for_task(args.task)
@@ -236,12 +313,13 @@ def main() -> int:
     evaluator._load_fixed_motion_plans = _diagnostic_loader(
         evaluator,
         episode_indices,
+        motion_plans=args.motion_plans,
     )
     evaluator_args = [
         "--task",
         args.task,
         "--models-dir",
-        "integrations/rlbench/models/v4",
+        str(args.models_dir),
         "--policy-type",
         args.policy_type,
         "--closed-loop-models-dir",
@@ -251,13 +329,13 @@ def main() -> int:
         "--policy-diagnostics-dir",
         str(args.diagnostics_dir),
         "--controller-profile",
-        "auto",
+        str(args.controller_profile),
         "--policy-python",
         str(args.policy_python),
         "--episodes",
         str(len(episode_indices)),
         "--seed",
-        str(GLOBAL_EVAL_SEED_START + episode_indices[0]),
+        str(base_seed + episode_indices[0]),
         "--horizon",
         str(args.horizon),
         "--scenario",
@@ -272,12 +350,16 @@ def main() -> int:
     ]
     evaluator_args.extend(_task_protocol_args(args.task))
     evaluator_args.extend(_episode_protocol_args(evaluator, episode_indices))
+    if args.motion_plans is not None:
+        evaluator_args.extend(("--motion-plans", str(args.motion_plans)))
     result = evaluator.main(evaluator_args)
     if result == 0:
         _mark_diagnostic(
             args.output,
             task=args.task,
             episode_indices=episode_indices,
+            base_seed=base_seed,
+            qualification_batch=args.motion_plans,
         )
     return result
 

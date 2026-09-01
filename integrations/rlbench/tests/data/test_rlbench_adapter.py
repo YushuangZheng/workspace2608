@@ -15,6 +15,7 @@ from essay2608.policy.tapas_segmentation import (
     gripper_change_boundaries,
     segment_bimanual_trajectories,
     segment_trajectories,
+    translation_direction_reversal_boundaries,
 )
 
 from integrations.rlbench.rlbench_dynamac.data.demo_adapter import (
@@ -120,6 +121,17 @@ def test_default_config_is_author_clarified_velocity_gripper_union() -> None:
         "AUTHOR_ATTACHMENTS"
     )
 
+    wipe = config.for_task("wipe_desk")
+    assert wipe.boundary_selection == "temporal_consensus_require_gripper"
+    assert wipe.expected_boundary_count == 8
+    assert wipe.velocity_threshold == 0.002
+    assert wipe.direction_reversal_based is True
+    assert wipe.direction_reversal_threshold_degrees == 120.0
+    assert wipe.candidate_merge_fraction == 0.04
+    assert wipe.provenance["active_task_profile_source_status"].startswith(
+        "CONTINUOUS_CARTESIAN_PATH"
+    )
+
     handover = config.for_task("bimanual_handover_item")
     assert handover.expected_boundary_count == 6
     assert handover.candidate_merge_fraction == 0.05
@@ -190,6 +202,43 @@ def test_current_gripper_target_uses_current_state_at_the_same_pose_sample() -> 
     assert result.audit["action_timing"] == DYNAMAC_CURRENT_STATE_TIMING
 
 
+def test_wipe_desk_uses_standard_physical_task_frames() -> None:
+    spec = get_task_spec("wipe_desk")
+    assert spec.frame_names == ("sponge", "dirt_boundary")
+    assert spec.action_frame_names == spec.frame_names
+    assert spec.scene_entity_names == ()
+    assert spec.configuration_schema == {}
+    assert spec.structural_bindings == {}
+    states = [
+        np.concatenate(
+            (
+                _xyzw_pose(float(index)),
+                _xyzw_pose(10.0),
+            )
+        )
+        for index in range(4)
+    ]
+    episode = [
+        SimpleNamespace(
+            gripper_pose=_xyzw_pose(float(index)),
+            gripper_open=1.0,
+            task_low_dim_state=(state,),
+        )
+        for index, state in enumerate(states)
+    ]
+    result = make_unimanual_demonstrations(
+        [episode],
+        spec,
+        segmentation=align_tapas_boundaries(((),), (len(episode),)),
+    )
+    demo = result.demonstrations[0]
+    assert tuple(demo.frames) == spec.action_frame_names
+    assert tuple(demo.frames) == ("sponge", "dirt_boundary")
+    assert tuple(demo.scene_entity_poses) == ()
+    assert demo.structural_bindings == {}
+    assert demo.entity_configurations == {}
+
+
 def test_velocity_and_gripper_change_candidates_are_unioned() -> None:
     gripper = np.ones(24, dtype=np.float64)
     gripper[10:14] = 0.0
@@ -206,6 +255,58 @@ def test_velocity_and_gripper_change_candidates_are_unioned() -> None:
         "gripper_change": [[10, 14]],
     }
     assert result.audit["no_boundary_truncation"] is True
+
+
+def test_direction_reversal_candidates_find_continuous_fold_without_stop() -> None:
+    x = np.concatenate(
+        [
+            np.linspace(0.0, 1.0, 16, endpoint=False),
+            np.linspace(1.0, 0.0, 17),
+        ]
+    )
+    poses = np.asarray(
+        [[value, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0] for value in x],
+        dtype=np.float64,
+    )
+
+    assert translation_direction_reversal_boundaries(
+        poses,
+        angle_threshold_degrees=120.0,
+        window=3,
+        max_idx_distance=2,
+        min_end_distance=2,
+        min_chord_length=0.01,
+    ) == (16,)
+
+
+def test_direction_reversal_signal_is_generic_and_audited_as_component() -> None:
+    x = np.concatenate(
+        [
+            np.linspace(0.0, 1.0, 16, endpoint=False),
+            np.linspace(1.0, 0.0, 17),
+        ]
+    )
+    poses = np.asarray(
+        [[value, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0] for value in x],
+        dtype=np.float64,
+    )
+    config = TAPASSegmentationConfig(
+        distance_based=False,
+        velocity_based=False,
+        gripper_based=False,
+        direction_reversal_based=True,
+        direction_reversal_threshold_degrees=120.0,
+        velocity_threshold=0.01,
+        max_idx_distance=2,
+        min_end_distance=2,
+    )
+
+    result = segment_trajectories([poses], config=config)
+
+    assert result.boundaries == ((16,),)
+    assert result.boundary_components["ee_translation_direction_reversal"] == (
+        (16,),
+    )
 
 
 def test_cross_demo_boundary_count_mismatch_never_prefix_truncates() -> None:

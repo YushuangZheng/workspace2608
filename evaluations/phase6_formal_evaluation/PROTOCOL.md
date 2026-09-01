@@ -2,9 +2,11 @@
 
 本协议在正式结果产生前冻结。评测只读取封存集合 `rlbench_eval_v2`，不重新生成样本，也不允许根据结果删选 episode、修改故障位置或调节技术路线参数。
 
-当前唯一有效的运行身份是 `stage6_hybrid_cartesian_executor_v18` 与 `rlbench-stage6-hybrid-cartesian-continuation-v22`。机器可读的 `protocol.json` 只包含当前正式矩阵及该活动身份；加载器会拒绝旧修订分区、未知分区以及执行器身份不一致的协议，避免历史审计口径参与运行。此前九轮无效审计及其通用修复过程仅保留在 `开发日志.md` 和 Git 历史中，不进入正式执行配置；所有无效批次均不纳入统计。
+当前唯一有效的运行身份是 `stage6_hybrid_cartesian_executor_v19` 与 `rlbench-stage6-hybrid-cartesian-continuation-v23`。机器可读的 `protocol.json` 只包含当前正式矩阵及该活动身份；加载器会拒绝旧修订分区、未知分区以及执行器身份不一致的协议，避免历史审计口径参与运行。此前无效审计及其通用修复过程仅保留在 `开发日志.md` 和 Git 历史中，不进入正式执行配置；所有无效批次均不纳入统计。
 
-正常矩阵运行中确认 Handover 的关系建立闭爪应采用统一的边界转移准备语义。该修复只重跑 Handover 的三种闭环方法和原本尚未完成的单元；已完成且不受该路径影响的15个同协议单元按用户确认继续保留。`retained_results.json` 对每个保留结果固定原 Git 提交、相对路径和文件 SHA256，调度器只接受逐项列出的原始文件；Handover 的闭环结果未列入且必须重新生成。保留不改写结果内的 Git 元数据，最终汇总可明确区分原提交结果和修复后结果。
+正式启动前又确认了两个会影响比较口径的通用问题：WipeDesk 连续轨迹的真正几何反向点没有在五条示范中一致对齐，以及共享执行器把内部笛卡尔小步上限误当成原始策略目标完成上限。两项修复分别改变 WipeDesk 学习模型和全部方法共用的物理执行协议，因此旧正式结果不再复用；`retained_results.json` 当前必须为空，整个正常矩阵由本协议身份重新生成。
+
+四种方法统一读取 `integrations/rlbench/models/phase6_v1`。该目录保持冻结 DynaMAC V4 算法和其余七个任务模型不变，只将 WipeDesk 替换为由同样五条正常示范、同一通用训练链学习的纠正模型；三种闭环方法读取匹配的 `integrations/rlbench/models/closed_loop_phase6_v1` sidecar。模型根路径属于协议本身，单元运行器不接受命令行覆盖，避免冻结 V4、旧 WipeDesk 与新 sidecar 混用。WipeDesk 使用任务无关的 `dynamac-direct-static-training-v1` 清单：它与标准 V3 使用同一学习器和示范适配器，只是不声称携带与旧技能长度绑定的 V3 动态干预锚点；任意重训的静态任务都可使用该清单。
 
 ## 实验矩阵
 

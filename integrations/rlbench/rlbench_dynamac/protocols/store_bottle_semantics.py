@@ -133,6 +133,7 @@ class StoreBottleSemanticSpec:
             paper_evaluation_group="Bimanual",
             paper_scenarios=("static", "dynamic_unspecified"),
             pose_chunks=self.pose_chunks,
+            configuration_chunks=(),
             source_expression=self.source_expression,
             source_status=self.source_status,
             candidate_frame_policy=CANDIDATE_FRAME_POLICY,

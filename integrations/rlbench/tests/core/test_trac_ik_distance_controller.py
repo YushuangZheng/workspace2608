@@ -536,8 +536,8 @@ def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
         "translation_step_m": pytest.approx(0.005),
         "rotation_step_rad": pytest.approx(np.deg2rad(2.0)),
         "backoff_factors": [1.0, 0.5, 0.25, 0.125],
-        "max_segments_per_policy_action": 8,
-        "max_raw_physics_steps_per_policy_action": 8,
+        "max_segments_per_policy_action": 64,
+        "max_raw_physics_steps_per_policy_action": 64,
         "interpolation": "linear_translation_shortest_xyzw_slerp",
         "progress_feedback": "physical_pose_reobserved_between_segments",
         "commit_semantics": (
@@ -574,12 +574,16 @@ def test_stage6_continues_toward_a_target_outside_local_ik_basin():
     arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
     factory = _LocalStepFactory(maximum_cartesian_step=0.005)
     scene = _Scene(arm)
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_segments=8,
+        cartesian_continuation_max_raw_physics_steps=64,
+    )
 
     first_status, first_diagnostics = _execute_stage6(
-        scene, ((arm, _target(0.05)),), factory
+        scene, ((arm, _target(0.05)),), factory, config=config
     )
     second_status, second_diagnostics = _execute_stage6(
-        scene, ((arm, _target(0.05)),), factory
+        scene, ((arm, _target(0.05)),), factory, config=config
     )
 
     assert first_status == "progressed"
@@ -587,7 +591,10 @@ def test_stage6_continues_toward_a_target_outside_local_ik_basin():
     assert arm.current[0] == pytest.approx(0.05)
     assert first_diagnostics["cartesian_continuation_attempts"] == 8
     assert first_diagnostics["cartesian_continuation_successes"] == 8
-    assert first_diagnostics["cartesian_policy_action_physics_budget_exhaustions"] == 1
+    assert first_diagnostics.get(
+        "cartesian_policy_action_physics_budget_exhaustions", 0
+    ) == 0
+    assert first_diagnostics["cartesian_multi_pass_limit_exhaustions"] == 1
     assert second_diagnostics["cartesian_continuation_attempts"] == 1
     assert second_diagnostics["cartesian_multi_pass_goals_completed"] == 1
     assert second_diagnostics["cartesian_continuation_fraction_min"] == pytest.approx(
@@ -599,11 +606,19 @@ def test_stage6_continues_toward_a_target_outside_local_ik_basin():
 def test_stage6_continuation_backs_off_before_global_sampling():
     arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
     factory = _LocalStepFactory(maximum_cartesian_step=0.00125)
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_segments=8,
+        cartesian_continuation_max_raw_physics_steps=64,
+    )
 
     scene = _Scene(arm)
     runs = []
     for _ in range(5):
-        runs.append(_execute_stage6(scene, ((arm, _target(0.05)),), factory))
+        runs.append(
+            _execute_stage6(
+                scene, ((arm, _target(0.05)),), factory, config=config
+            )
+        )
 
     assert [status for status, _ in runs] == [
         "progressed",
@@ -634,12 +649,16 @@ def test_stage6_reobserves_between_bounded_cartesian_continuation_steps():
     arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
     scene = _Scene(arm)
     factory = _LocalStepFactory(maximum_cartesian_step=0.005)
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_segments=8,
+        cartesian_continuation_max_raw_physics_steps=64,
+    )
 
     first_status, _first_diagnostics = _execute_stage6(
-        scene, ((arm, _target(0.05)),), factory
+        scene, ((arm, _target(0.05)),), factory, config=config
     )
     second_status, second_diagnostics = _execute_stage6(
-        scene, ((arm, _target(0.05)),), factory
+        scene, ((arm, _target(0.05)),), factory, config=config
     )
 
     assert first_status == "progressed"
@@ -669,10 +688,17 @@ def test_stage6_converged_execution_continues_across_bounded_policy_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     factory = _Factory(lambda _target: [0.2, 0.0])
     scene = _SlowScene(arm)
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_raw_physics_steps=8
+    )
 
     runs = []
     for _ in range(10):
-        runs.append(_execute_stage6(scene, ((arm, _target(0.2)),), factory))
+        runs.append(
+            _execute_stage6(
+                scene, ((arm, _target(0.2)),), factory, config=config
+            )
+        )
         if runs[-1][0] == "reached":
             break
 
@@ -731,12 +757,15 @@ def test_stage6_slow_motion_converges_across_bounded_policy_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _SlowScene(arm)
     factory = _Factory(lambda target: [target[0], 0.0])
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_raw_physics_steps=8
+    )
 
     first_status, first_diagnostics = _execute_stage6(
-        scene, ((arm, _target(0.05)),), factory
+        scene, ((arm, _target(0.05)),), factory, config=config
     )
     second_status, second_diagnostics = _execute_stage6(
-        scene, ((arm, _target(0.05)),), factory
+        scene, ((arm, _target(0.05)),), factory, config=config
     )
 
     assert first_status == "progressed"
@@ -751,11 +780,17 @@ def test_stage6_small_observed_motion_is_reobserved_between_bounded_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _SlowScene(arm, step=0.0015)
     factory = _Factory(lambda target: [target[0], 0.0])
-    config = Stage6IKControllerConfig()
+    config = Stage6IKControllerConfig(
+        cartesian_continuation_max_raw_physics_steps=8
+    )
 
     runs = []
     for _ in range(10):
-        runs.append(_execute_stage6(scene, ((arm, _target(0.05)),), factory))
+        runs.append(
+            _execute_stage6(
+                scene, ((arm, _target(0.05)),), factory, config=config
+            )
+        )
         if runs[-1][0] == "reached":
             break
 

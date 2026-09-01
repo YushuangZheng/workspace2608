@@ -18,13 +18,9 @@ from pathlib import Path
 import numpy as np
 
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
+from integrations.rlbench.rlbench_dynamac.core.task_specs import get_task_spec
 DEFAULT_DATA_ROOT = INTEGRATION_ROOT / "data" / "training" / "main"
-TASKS = {
-    "stack_wine": ("rlbench.tasks.stack_wine", "StackWine"),
-    "place_cups": ("rlbench.tasks.place_cups", "PlaceCups"),
-    "open_microwave": ("rlbench.tasks.open_microwave", "OpenMicrowave"),
-    "wipe_desk": ("rlbench.tasks.wipe_desk", "WipeDesk"),
-}
+TASKS = ("stack_wine", "place_cups", "open_microwave", "wipe_desk")
 
 
 def _make_environment(headless):
@@ -57,8 +53,8 @@ def _episode_path(data_root, task, episode):
 
 
 def collect_task(environment, task, data_root, demonstrations, seed, variation):
-    module_name, class_name = TASKS[task]
-    task_class = getattr(importlib.import_module(module_name), class_name)
+    spec = get_task_spec(task)
+    task_class = getattr(importlib.import_module(spec.module), spec.class_name)
     task_environment = environment.get_task(task_class)
     if variation < 0 or variation >= task_environment.variation_count():
         raise ValueError(

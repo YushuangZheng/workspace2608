@@ -411,7 +411,7 @@ IK_SAMPLING_MAX_CONFIGS = 5
 IK_SAMPLING_MAX_TIME_MS = 10
 IK_JOINT_LIMIT_ATOL = 1.0e-9
 GLOBAL_IK_CONTROLLER_PROFILE = "global_pseudo_trac_sampling_path_formal_v1"
-STAGE6_IK_CONTROLLER_PROFILE = "stage6_hybrid_cartesian_executor_v18"
+STAGE6_IK_CONTROLLER_PROFILE = "stage6_hybrid_cartesian_executor_v19"
 FROZEN_V4_CONTROLLER_PROFILE = "v4_frozen_legacy_replay"
 FROZEN_V4_IK_RESOLUTION_METHOD = "pseudo_inverse"
 FROZEN_V4_IK_MAX_ITERATIONS = 6
@@ -583,14 +583,17 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
         0.25,
         0.125,
     )
-    cartesian_continuation_max_segments: int = 8
+    cartesian_continuation_max_segments: int = 64
     # Bound the aggregate simulator work of one policy command.  The segment
     # limit bounds solver reconstruction count, but each segment can itself
     # consume ``max_steps`` raw physics updates; without this second budget a
     # slowly converging yet non-stalled target can monopolize one closed-loop
-    # observation for minutes.  Returning ``progressed`` lets the next policy
-    # cycle reobserve the world and continue the same absolute target.
-    cartesian_continuation_max_raw_physics_steps: int = 8
+    # observation for minutes.  Sixty-four raw updates still give a strict
+    # bound.  The segment count uses the same bound because every successfully
+    # executed segment consumes at least one raw update; a second, tighter
+    # eight-segment limit previously returned before the raw budget and let a
+    # moving trajectory cursor outrun the physical arm.
+    cartesian_continuation_max_raw_physics_steps: int = 64
     linear_path_steps: int = 50
     allow_collision_relaxed_linear_path: bool = True
     allow_collision_relaxed_nonlinear_path: bool = True
@@ -654,7 +657,7 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
 
     @property
     def protocol_id(self) -> str:
-        return "rlbench-stage6-hybrid-cartesian-continuation-v22"
+        return "rlbench-stage6-hybrid-cartesian-continuation-v23"
 
     def metadata(self) -> dict[str, Any]:
         value = super().metadata()

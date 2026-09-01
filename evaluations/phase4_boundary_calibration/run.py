@@ -819,7 +819,13 @@ def _joint_acceptance_rows(
     return result
 
 
-def run(config_path: Path, output: Path) -> None:
+def run(
+    config_path: Path,
+    output: Path,
+    *,
+    data_root: Path | None = None,
+    model_root: Path | None = None,
+) -> None:
     config = _read_config(config_path)
     if output.exists():
         raise FileExistsError(f"输出目录已存在：{output}")
@@ -834,7 +840,12 @@ def run(config_path: Path, output: Path) -> None:
     all_rows: list[dict[str, Any]] = []
     for task in config["tasks"]:
         print(f"[phase4-calibration] loading {task}", flush=True)
-        cases = _load_cases(task, maximum_demo + 1)
+        cases = _load_cases(
+            task,
+            maximum_demo + 1,
+            **({} if data_root is None else {"data_root": data_root}),
+            **({} if model_root is None else {"model_root": model_root}),
+        )
         runtime_config = _base_runtime_config(cases, config)
         for demonstration in config["demonstration_indices"]:
             print(
@@ -864,7 +875,12 @@ def run(config_path: Path, output: Path) -> None:
     acceptance_trace: list[dict[str, Any]] = []
     for task in config["tasks"]:
         print(f"[phase4-calibration] validating {task}", flush=True)
-        cases = _load_cases(task, maximum_demo + 1)
+        cases = _load_cases(
+            task,
+            maximum_demo + 1,
+            **({} if data_root is None else {"data_root": data_root}),
+            **({} if model_root is None else {"model_root": model_root}),
+        )
         final_runtime = BoundaryRuntimeConfig.from_mapping(runtime_configs[task])
         for demonstration in config["demonstration_indices"]:
             acceptance_trace.extend(
@@ -955,8 +971,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--data-root", type=Path, default=None)
+    parser.add_argument("--model-root", type=Path, default=None)
     arguments = parser.parse_args()
-    run(arguments.config, arguments.output)
+    run(
+        arguments.config,
+        arguments.output,
+        data_root=arguments.data_root,
+        model_root=arguments.model_root,
+    )
 
 
 if __name__ == "__main__":

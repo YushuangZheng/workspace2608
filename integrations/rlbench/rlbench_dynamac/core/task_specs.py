@@ -28,6 +28,7 @@ RLBENCH_REFERENCE_COMMIT = "a51b4e609dc5c3e1a8c06046bd87a9da24723da4"
 TASK_SCHEMA_SOURCE_STATUS = "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE"
 CANDIDATE_FRAME_POLICY = "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER"
 CANDIDATE_FRAME_POLICY_SOURCE_STATUS = "AUTHOR_EMAIL_EXPLICIT_20260814"
+TRAINING_MANIFEST_SCHEMA_STATIC_V1 = "dynamac-direct-static-training-v1"
 TASK_CONFIG_PATH = INTEGRATION_ROOT / "configs" / "tasks.json"
 
 SegmentationCoordination = Literal["single", "independent", "shared_union"]
@@ -116,6 +117,7 @@ class TaskPoseChunk:
     name: str
     role: str
     index: int
+    action_reference: bool = True
 
     @property
     def start(self) -> int:
@@ -131,6 +133,15 @@ class TaskPoseChunk:
 
 
 @dataclass(frozen=True)
+class TaskConfigurationChunk:
+    """One fixed-width internal entity state appended after all pose chunks."""
+
+    entity: str
+    name: str
+    size: int
+
+
+@dataclass(frozen=True)
 class TaskSpec:
     """Data-only specification for one paper-relevant RLBench task."""
 
@@ -142,6 +153,8 @@ class TaskSpec:
     paper_evaluation_group: str
     paper_scenarios: tuple[str, ...]
     pose_chunks: tuple[TaskPoseChunk, ...]
+    configuration_chunks: tuple[TaskConfigurationChunk, ...]
+    structural_bindings: dict[str, str]
     source_expression: str
     source_status: str = TASK_SCHEMA_SOURCE_STATUS
     candidate_frame_policy: str = CANDIDATE_FRAME_POLICY
@@ -155,8 +168,29 @@ class TaskSpec:
         return tuple(chunk.name for chunk in self.pose_chunks)
 
     @property
+    def action_frame_names(self) -> tuple[str, ...]:
+        return tuple(
+            chunk.name for chunk in self.pose_chunks if chunk.action_reference
+        )
+
+    @property
+    def scene_entity_names(self) -> tuple[str, ...]:
+        return tuple(
+            chunk.name for chunk in self.pose_chunks if not chunk.action_reference
+        )
+
+    @property
     def expected_low_dim_size(self) -> int:
-        return 7 * len(self.pose_chunks)
+        return 7 * len(self.pose_chunks) + sum(
+            chunk.size for chunk in self.configuration_chunks
+        )
+
+    @property
+    def configuration_schema(self) -> dict[str, dict[str, int]]:
+        schema: dict[str, dict[str, int]] = {}
+        for chunk in self.configuration_chunks:
+            schema.setdefault(chunk.entity, {})[chunk.name] = chunk.size
+        return schema
 
     @property
     def arm_count(self) -> int:
@@ -193,6 +227,46 @@ class TaskSpec:
             chunks = {name: xyzw_to_wxyz(pose) for name, pose in chunks.items()}
         return chunks
 
+    def extract_entity_configurations(
+        self,
+        task_low_dim_state: Any,
+    ) -> dict[str, dict[str, Array]]:
+        """Extract fixed-width non-pose fields without exposing them as frames."""
+
+        state = unwrap_task_low_dim_state(task_low_dim_state)
+        if state.size != self.expected_low_dim_size:
+            raise ValueError(
+                f"{self.task_name} task_low_dim_state has {state.size} values; "
+                f"expected {self.expected_low_dim_size} from {self.source_expression}"
+            )
+        cursor = 7 * len(self.pose_chunks)
+        result: dict[str, dict[str, Array]] = {}
+        for chunk in self.configuration_chunks:
+            result.setdefault(chunk.entity, {})[chunk.name] = state[
+                cursor : cursor + chunk.size
+            ].copy()
+            cursor += chunk.size
+        return result
+
+
+def task_spec_identity(spec: TaskSpec) -> dict[str, Any]:
+    """Bind a learned artifact to its generic fixed-width task interface."""
+
+    return {
+        "schema": "rlbench-task-spec-identity-v1",
+        "task_name": spec.task_name,
+        "module": spec.module,
+        "class_name": spec.class_name,
+        "source_expression": spec.source_expression,
+        "source_status": spec.source_status,
+        "frame_names": list(spec.frame_names),
+        "action_frame_names": list(spec.action_frame_names),
+        "scene_entity_names": list(spec.scene_entity_names),
+        "configuration_schema": spec.configuration_schema,
+        "structural_bindings": dict(spec.structural_bindings),
+        "expected_low_dim_size": spec.expected_low_dim_size,
+    }
+
 
 def _parse_task_spec(task_name: str, raw: Mapping[str, Any]) -> TaskSpec:
     required = {
@@ -223,11 +297,71 @@ def _parse_task_spec(task_name: str, raw: Mapping[str, Any]) -> TaskSpec:
             raise ValueError(f"{task_name}.pose_chunks[{index}] must be an object")
         name = item.get("name")
         role = item.get("role")
+        action_reference = item.get("action_reference", True)
         if not isinstance(name, str) or not name or not isinstance(role, str) or not role:
             raise ValueError(f"{task_name}.pose_chunks[{index}] needs name and role")
-        chunks.append(TaskPoseChunk(name=name, role=role, index=index))
+        if not isinstance(action_reference, bool):
+            raise ValueError(
+                f"{task_name}.pose_chunks[{index}].action_reference must be boolean"
+            )
+        chunks.append(
+            TaskPoseChunk(
+                name=name,
+                role=role,
+                index=index,
+                action_reference=action_reference,
+            )
+        )
     if len({chunk.name for chunk in chunks}) != len(chunks):
         raise ValueError(f"{task_name} has duplicate task-frame names")
+    raw_configurations = raw.get("configuration_chunks", [])
+    if not isinstance(raw_configurations, list):
+        raise ValueError(f"{task_name}.configuration_chunks must be a list")
+    configurations: list[TaskConfigurationChunk] = []
+    for index, item in enumerate(raw_configurations):
+        if not isinstance(item, Mapping):
+            raise ValueError(
+                f"{task_name}.configuration_chunks[{index}] must be an object"
+            )
+        entity = item.get("entity")
+        name = item.get("name")
+        size = item.get("size")
+        if (
+            not isinstance(entity, str)
+            or not entity
+            or entity not in {chunk.name for chunk in chunks}
+            or not isinstance(name, str)
+            or not name
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or size < 1
+        ):
+            raise ValueError(
+                f"{task_name}.configuration_chunks[{index}] is invalid"
+            )
+        configurations.append(
+            TaskConfigurationChunk(entity=entity, name=name, size=size)
+        )
+    configuration_keys = [
+        (chunk.entity, chunk.name) for chunk in configurations
+    ]
+    if len(configuration_keys) != len(set(configuration_keys)):
+        raise ValueError(f"{task_name} has duplicate entity-configuration fields")
+    raw_bindings = raw.get("structural_bindings", {})
+    if not isinstance(raw_bindings, Mapping):
+        raise ValueError(f"{task_name}.structural_bindings must be an object")
+    frame_names = {chunk.name for chunk in chunks}
+    structural_bindings: dict[str, str] = {}
+    for child, parent in raw_bindings.items():
+        if (
+            not isinstance(child, str)
+            or not isinstance(parent, str)
+            or child not in frame_names
+            or parent not in frame_names
+            or child == parent
+        ):
+            raise ValueError(f"{task_name}.structural_bindings contains an invalid edge")
+        structural_bindings[child] = parent
     raw_scenarios = raw["paper_scenarios"]
     if (
         not isinstance(raw_scenarios, list)
@@ -246,10 +380,12 @@ def _parse_task_spec(task_name: str, raw: Mapping[str, Any]) -> TaskSpec:
             f"{task_name}.segmentation_coordination must be one of "
             f"{sorted(allowed_coordination)}"
         )
-    if raw["candidate_frame_policy"] != CANDIDATE_FRAME_POLICY:
-        raise ValueError(f"{task_name} must retain every get_low_dim_state candidate frame")
-    if raw["candidate_frame_policy_source_status"] != CANDIDATE_FRAME_POLICY_SOURCE_STATUS:
-        raise ValueError(f"{task_name} candidate-frame provenance is not author-confirmed")
+    candidate_policy = raw["candidate_frame_policy"]
+    candidate_status = raw["candidate_frame_policy_source_status"]
+    if candidate_policy != CANDIDATE_FRAME_POLICY:
+        raise ValueError(f"{task_name} must retain every configured candidate frame")
+    if candidate_status != CANDIDATE_FRAME_POLICY_SOURCE_STATUS:
+        raise ValueError(f"{task_name} candidate-frame provenance is not confirmed")
     source_status = raw["segmentation_coordination_source_status"]
     if not isinstance(source_status, str) or not source_status:
         raise ValueError(f"{task_name}.segmentation_coordination_source_status is invalid")
@@ -265,12 +401,12 @@ def _parse_task_spec(task_name: str, raw: Mapping[str, Any]) -> TaskSpec:
         paper_evaluation_group=str(raw["paper_evaluation_group"]),
         paper_scenarios=tuple(raw_scenarios),
         pose_chunks=tuple(chunks),
+        configuration_chunks=tuple(configurations),
+        structural_bindings=structural_bindings,
         source_expression=str(raw["source_expression"]),
         source_status=str(raw["source_status"]),
-        candidate_frame_policy=str(raw["candidate_frame_policy"]),
-        candidate_frame_policy_source_status=str(
-            raw["candidate_frame_policy_source_status"]
-        ),
+        candidate_frame_policy=str(candidate_policy),
+        candidate_frame_policy_source_status=str(candidate_status),
         segmentation_coordination=coordination,
         segmentation_coordination_source_status=source_status,
         segmentation_debug_plots_required=debug_plots_required,
@@ -281,7 +417,7 @@ def load_task_specs(path: str | Path = TASK_CONFIG_PATH) -> dict[str, TaskSpec]:
     """Load and validate the frozen JSON task registry."""
 
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if payload.get("schema") != "rlbench-dynamac-task-specs-v2":
+    if payload.get("schema") != "rlbench-dynamac-task-specs-v3":
         raise ValueError("unsupported RLBench DynaMAC task-spec schema")
     source = payload.get("source", {})
     if source.get("commit") != RLBENCH_REFERENCE_COMMIT:
@@ -350,7 +486,9 @@ __all__ = [
     "SegmentationCoordination",
     "TASK_CONFIG_PATH",
     "TASK_SCHEMA_SOURCE_STATUS",
+    "TRAINING_MANIFEST_SCHEMA_STATIC_V1",
     "TASK_SPECS",
+    "TaskConfigurationChunk",
     "TaskPoseChunk",
     "TaskSpec",
     "core_pose_wxyz_to_rlbench_xyzw",
@@ -358,6 +496,7 @@ __all__ = [
     "load_task_specs",
     "rlbench_pose_xyzw_to_core_wxyz",
     "split_task_pose_chunks",
+    "task_spec_identity",
     "task_pose_chunks",
     "unwrap_task_low_dim_state",
     "wxyz_to_xyzw",

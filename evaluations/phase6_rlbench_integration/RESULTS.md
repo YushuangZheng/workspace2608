@@ -4,19 +4,13 @@
 
 当前集成身份为：
 
-- 执行器：stage6_hybrid_cartesian_executor_v18；
-- 执行协议：rlbench-stage6-hybrid-cartesian-continuation-v22；
+- 执行器：stage6_hybrid_cartesian_executor_v19；
+- 执行协议：rlbench-stage6-hybrid-cartesian-continuation-v23；
 - 封存评测集：rlbench_eval_v2；
 - 正式方法：DynaMAC V4、仅闭环进度、闭环进度＋动态角色、完整方法。
 
 旧执行器产生的组件 pilot、逐周期诊断、预正式门控和旧协议结果已经从当前项目交付中删除，不能与正式矩阵混合。修复过程保留在开发日志与 Git 历史，不属于可执行协议或当前实验结果。
 
-正式启动前保留的当前机制结论仅包括：
-
-- SweepDust 的 progress_dynamic_roles 与 full 在封存索引0至9均为10/10；
-- OpenMicrowave 原4条正式 LINK 入口结构化失败修复后为4/4成功，周期数161、161、196、161，且0 InvalidAction；
-- LiftTray 封存索引0至4的完整方法与共享执行器基线具有相同成功集合，未为两条共同物理抓取失败增加任务专属规则；
-- Handover 的接收臂抓取经冻结位姿继续执行验证为物理可行，最终采用统一的关系建立边界准备语义，而非任务专属提前闭爪：此前失败的封存索引19、75、90均成功，非Handover的StoreBottle索引0也成功；准备不提交任务状态，释放仍只在正式边界提交后执行；
-- 配置、动作事务和正式协议清理后的紧凑自动化回归通过。
+正式启动前只保留当前 v19/v23 身份的定向结论：纠正后 WipeDesk 在同一封存样本上成功抓取海绵并清除50/50灰尘，最大单目标原始物理步为41；配置、模型身份、动作事务和正式协议的紧凑自动化回归通过。
 
 这些内容只证明当前实现具备进入正式矩阵的条件，不是论文成功率结果。正常与故障统计必须由当前正式协议完整生成。

@@ -41,11 +41,14 @@
       "note": "All five live demonstrations contain the same two merged velocity/gripper boundary groups."
     },
     "wipe_desk": {
-      "candidate_merge_fraction": 0.05,
+      "velocity_threshold": 0.002,
+      "direction_reversal_based": true,
+      "direction_reversal_threshold_degrees": 120.0,
+      "candidate_merge_fraction": 0.04,
       "boundary_selection": "temporal_consensus_require_gripper",
-      "expected_boundary_count": 3,
-      "source_status": "LOCAL_LIVE_COHORT_SIGNAL_DIAGNOSTIC_20260815",
-      "note": "Three cohort-consistent groups retain approach/grasp, wiping, and release while treating variable internal wipe pauses as skill duration."
+      "expected_boundary_count": 8,
+      "source_status": "CONTINUOUS_CARTESIAN_PATH_FIVE_DEMO_GEOMETRIC_SIGNAL_AUDIT_20260901",
+      "note": "The upstream expert remains one continuous CartesianPath. The generic demonstrated-EE direction-reversal signal exposes its five physical fold points without reading task names or simulator waypoints; the velocity/gripper union retains grasp, path entry, and completion, and temporal consensus removes incidental planner slowdowns while retaining the gripper anchor."
     },
     "bimanual_put_bottle_in_fridge": {
       "gripper_min_end_distance": 0,
