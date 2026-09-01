@@ -1416,24 +1416,86 @@ class ClosedLoopTaskModelBuilder:
                     used_fold_events: dict[int, set[int]] = {
                         int(demonstration): set() for demonstration in members
                     }
+
+                    def aligned_link_close(
+                        event_members: Array,
+                        evidence_local_index: int,
+                    ) -> int | None:
+                        """Return the shared causal close for confirmed LINK evidence.
+
+                        The kinematic evidence remains mandatory.  This only
+                        prevents leave-one-demonstration-out folds from being
+                        treated as different physical events when their first
+                        informative carry motion occurs a few states apart but
+                        every demonstration has the same aligned close.
+                        """
+
+                        transitions = self._relation_event_gripper_transitions(
+                            joint_gripper,
+                            event_members,
+                            global_start + evidence_local_index,
+                            "link",
+                        )
+                        if transitions is None:
+                            return None
+                        positions = tuple(transitions.values())
+                        causal_global_index = max(positions)
+                        if (
+                            max(positions) - min(positions)
+                            > self.config.relation_event_alignment_tolerance
+                            or not global_start
+                            <= causal_global_index
+                            < global_stop
+                            or causal_global_index
+                            > global_start + evidence_local_index
+                        ):
+                            return None
+                        return causal_global_index - global_start
+
                     for transition, local_index in sorted(
                         joint_candidates,
                         key=lambda item: (item[1], item[0]),
                     ):
+                        joint_link_close = (
+                            aligned_link_close(members, local_index)
+                            if transition == "link"
+                            else None
+                        )
                         supported = []
                         matched_fold_events = []
                         for held_out in members:
                             demonstration = int(held_out)
-                            candidates = [
-                                (event_index, position)
-                                for event_index, (kind, position) in enumerate(
-                                    fold_events.get(demonstration, ())
+                            candidates = []
+                            training = members[members != held_out]
+                            for event_index, (kind, position) in enumerate(
+                                fold_events.get(demonstration, ())
+                            ):
+                                if (
+                                    kind != transition
+                                    or event_index
+                                    in used_fold_events[demonstration]
+                                ):
+                                    continue
+                                event_aligned = bool(
+                                    abs(position - local_index)
+                                    <= self.config.relation_event_alignment_tolerance
                                 )
-                                if kind == transition
-                                and event_index not in used_fold_events[demonstration]
-                                and abs(position - local_index)
-                                <= self.config.relation_event_alignment_tolerance
-                            ]
+                                if (
+                                    not event_aligned
+                                    and transition == "link"
+                                    and joint_link_close is not None
+                                ):
+                                    fold_link_close = aligned_link_close(
+                                        training,
+                                        position,
+                                    )
+                                    event_aligned = bool(
+                                        fold_link_close is not None
+                                        and abs(fold_link_close - joint_link_close)
+                                        <= self.config.relation_event_alignment_tolerance
+                                    )
+                                if event_aligned:
+                                    candidates.append((event_index, position))
                             if not candidates:
                                 continue
                             event_index, position = min(

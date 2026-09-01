@@ -863,6 +863,39 @@ def test_relation_events_use_joint_prior_lodo_and_all_demo_anchors() -> None:
     assert not opened_unlinks
 
 
+def test_link_lodo_aligns_delayed_kinematic_evidence_by_shared_close() -> None:
+    class DelayedFoldEvidenceBuilder(ClosedLoopTaskModelBuilder):
+        def _joint_relation_event_probability_sequence(
+            self,
+            policy,
+            aligned,
+            frame,
+            members,
+            final_skill,
+        ):
+            total = sum(
+                policy.skills[index].duration
+                for index in range(final_skill + 1)
+            )
+            probabilities = np.full(total, 0.1, dtype=np.float64)
+            link_evidence = 7 if len(members) == 5 else 11
+            probabilities[link_evidence:13] = 0.9
+            return probabilities
+
+    policy, demos = fitted_policy()
+    builder = DelayedFoldEvidenceBuilder()
+    model = builder.build(policy, demos, recoverable_frames={"object"})
+
+    anchor = next(
+        anchor
+        for event, anchor in model.link_anchors.items()
+        if event.frame_id == "object"
+    )
+    assert anchor.support_fraction == 1.0
+    assert anchor.event_id.transition == "link"
+    assert anchor.event_local_indices == (5, 5, 5, 5, 5)
+
+
 def test_scene_lodo_robot_baseline_does_not_use_relation_prior() -> None:
     policy, demos = fitted_policy()
     low_alpha = ClosedLoopTaskModelBuilder(

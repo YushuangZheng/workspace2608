@@ -202,22 +202,14 @@ def test_current_gripper_target_uses_current_state_at_the_same_pose_sample() -> 
     assert result.audit["action_timing"] == DYNAMAC_CURRENT_STATE_TIMING
 
 
-def test_wipe_desk_uses_standard_physical_task_frames() -> None:
+def test_wipe_desk_uses_the_upstream_sponge_task_frame() -> None:
     spec = get_task_spec("wipe_desk")
-    assert spec.frame_names == ("sponge", "dirt_boundary")
+    assert spec.frame_names == ("sponge",)
     assert spec.action_frame_names == spec.frame_names
     assert spec.scene_entity_names == ()
     assert spec.configuration_schema == {}
     assert spec.structural_bindings == {}
-    states = [
-        np.concatenate(
-            (
-                _xyzw_pose(float(index)),
-                _xyzw_pose(10.0),
-            )
-        )
-        for index in range(4)
-    ]
+    states = [_xyzw_pose(float(index)) for index in range(4)]
     episode = [
         SimpleNamespace(
             gripper_pose=_xyzw_pose(float(index)),
@@ -233,7 +225,7 @@ def test_wipe_desk_uses_standard_physical_task_frames() -> None:
     )
     demo = result.demonstrations[0]
     assert tuple(demo.frames) == spec.action_frame_names
-    assert tuple(demo.frames) == ("sponge", "dirt_boundary")
+    assert tuple(demo.frames) == ("sponge",)
     assert tuple(demo.scene_entity_poses) == ()
     assert demo.structural_bindings == {}
     assert demo.entity_configurations == {}

@@ -790,14 +790,9 @@ def test_rlbench_adapter_preserves_shared_snapshot_and_opposite_ee_frames() -> N
     assert wire[7] == wire[16] == 1.0
 
 
-def test_rlbench_adapter_exposes_wipe_physical_task_frames_uniformly() -> None:
+def test_rlbench_adapter_preserves_the_upstream_wipe_task_frame() -> None:
     spec = get_task_spec("wipe_desk")
-    task_state = np.concatenate(
-        (
-            _pose_xyzw(1.0),
-            _pose_xyzw(2.0),
-        )
-    )
+    task_state = _pose_xyzw(1.0)
     batch = ClosedLoopObservationAdapter(spec).build(
         {
             "gripper_pose": _pose_xyzw(0.0),
@@ -809,13 +804,9 @@ def test_rlbench_adapter_exposes_wipe_physical_task_frames_uniformly() -> None:
         previous_command_pose={"single": None},
     )
     assert tuple(batch.dynamac["single"].frames) == spec.action_frame_names
-    assert tuple(batch.dynamac["single"].frames) == (
-        "sponge",
-        "dirt_boundary",
-    )
+    assert tuple(batch.dynamac["single"].frames) == ("sponge",)
     assert set(batch.runtime["single"].frame_poses) == {
         "sponge",
-        "dirt_boundary",
         "single_ee",
     }
     assert batch.runtime["single"].entity_configurations == {}

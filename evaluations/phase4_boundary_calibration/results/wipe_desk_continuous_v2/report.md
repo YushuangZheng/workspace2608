@@ -10,14 +10,14 @@
 
 | 任务/机械臂 | 边界 | 正常末端下界 | 边界前上界 | theta_local | H | 秒 | 结果 |
 |---|---:|---:|---:|---:|---:|---:|---|
-| wipe_desk/single | `single:0->1` | 0.794684 | 8.09578e-14 | 0.397342 | 1 | 0.05 | `calibrated` |
-| wipe_desk/single | `single:1->2` | 0.38337 | 0.000107413 | 0.191739 | 1 | 0.05 | `calibrated` |
-| wipe_desk/single | `single:2->3` | 0.0107703 | 3.86571e-20 | 0.00538514 | 1 | 0.05 | `calibrated` |
-| wipe_desk/single | `single:3->4` | 0.204885 | 7.25728e-15 | 0.102442 | 1 | 0.05 | `calibrated` |
-| wipe_desk/single | `single:4->5` | 0.181172 | 2.28397e-29 | 0.0905862 | 1 | 0.05 | `calibrated` |
-| wipe_desk/single | `single:5->6` | 0.085002 | 3.53297e-42 | 0.042501 | 1 | 0.05 | `calibrated` |
-| wipe_desk/single | `single:6->7` | 0.290656 | 1.0194e-32 | 0.145328 | 1 | 0.05 | `calibrated` |
-| wipe_desk/single | `single:7->8` | 0.371489 | 3.65137e-52 | 0.185745 | 1 | 0.05 | `calibrated` |
+| wipe_desk/single | `single:0->1` | 0.760199 | 6.10815e-14 | 0.3801 | 1 | 0.05 | `calibrated` |
+| wipe_desk/single | `single:1->2` | 0.714496 | 5.74857e-12 | 0.357248 | 1 | 0.05 | `calibrated` |
+| wipe_desk/single | `single:2->3` | 0.0370405 | 1.70507e-22 | 0.0185203 | 1 | 0.05 | `calibrated` |
+| wipe_desk/single | `single:3->4` | 0.175559 | 2.31452e-16 | 0.0877793 | 1 | 0.05 | `calibrated` |
+| wipe_desk/single | `single:4->5` | 0.158095 | 2.90501e-49 | 0.0790476 | 1 | 0.05 | `calibrated` |
+| wipe_desk/single | `single:5->6` | 0.436074 | 4.00774e-113 | 0.218037 | 1 | 0.05 | `calibrated` |
+| wipe_desk/single | `single:6->7` | 0.230903 | 2.31068e-29 | 0.115451 | 1 | 0.05 | `calibrated` |
+| wipe_desk/single | `single:7->8` | 0.170894 | 1.05388e-41 | 0.085447 | 1 | 0.05 | `calibrated` |
 
 ## 联合事务元数据
 

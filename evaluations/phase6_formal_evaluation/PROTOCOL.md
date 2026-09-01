@@ -6,7 +6,7 @@
 
 正式启动前又确认了两个会影响比较口径的通用问题：WipeDesk 连续轨迹的真正几何反向点没有在五条示范中一致对齐，以及共享执行器把内部笛卡尔小步上限误当成原始策略目标完成上限。两项修复分别改变 WipeDesk 学习模型和全部方法共用的物理执行协议，因此旧正式结果不再复用；`retained_results.json` 当前必须为空，整个正常矩阵由本协议身份重新生成。
 
-四种方法统一读取 `integrations/rlbench/models/phase6_v1`。该目录保持冻结 DynaMAC V4 算法和其余七个任务模型不变，只将 WipeDesk 替换为由同样五条正常示范、同一通用训练链学习的纠正模型；三种闭环方法读取匹配的 `integrations/rlbench/models/closed_loop_phase6_v1` sidecar。模型根路径属于协议本身，单元运行器不接受命令行覆盖，避免冻结 V4、旧 WipeDesk 与新 sidecar 混用。WipeDesk 使用任务无关的 `dynamac-direct-static-training-v1` 清单：它与标准 V3 使用同一学习器和示范适配器，只是不声称携带与旧技能长度绑定的 V3 动态干预锚点；任意重训的静态任务都可使用该清单。
+四种方法统一读取 `integrations/rlbench/models/phase6_v1`。该目录保持冻结 DynaMAC V4 算法和其余七个任务模型不变，只将 WipeDesk 替换为由同样五条正常示范、同一通用训练链学习的纠正模型；三种闭环方法读取匹配的 `integrations/rlbench/models/closed_loop_phase6_v1` sidecar。模型根路径属于协议本身，单元运行器不接受命令行覆盖，避免冻结 V4、旧 WipeDesk 与新 sidecar 混用。WipeDesk 恢复公共 RLBench `get_low_dim_state=[sponge]` 接口，不含任务专属字段，并使用任务无关的 `dynamac-direct-static-training-v1` 清单：它与标准 V3 使用同一学习器和示范适配器，只是不声称携带与旧技能长度绑定的 V3 动态干预锚点；任意重训的静态任务都可使用该清单。
 
 ## 实验矩阵
 

@@ -1,0 +1,9 @@
+task,arm,boundary,transaction_group,normal_demonstrations,positive_support_separated,normal_terminal_score_floor,normal_preterminal_score_ceiling,local_score_threshold,maximum_preterminal_ready_run,confirmation_cycles,confirmation_seconds,minimum_terminal_hold_ready_run,status
+wipe_desk,single,single:0->1,,5,1,0.7601991284891413,6.108153902191449e-14,0.3800995642446012,0,1,0.05,41,calibrated
+wipe_desk,single,single:1->2,,5,1,0.7144957181187263,5.7485701162462276e-12,0.35724785906223744,0,1,0.05,41,calibrated
+wipe_desk,single,single:2->3,,5,1,0.03704052277241619,1.7050749226002432e-22,0.018520261386208096,0,1,0.05,41,calibrated
+wipe_desk,single,single:3->4,,5,1,0.1755585154833918,2.3145249169891154e-16,0.08777925774169601,0,1,0.05,41,calibrated
+wipe_desk,single,single:4->5,,5,1,0.1580951829050368,2.905014019092637e-49,0.0790475914525184,0,1,0.05,41,calibrated
+wipe_desk,single,single:5->6,,5,1,0.4360744917859625,4.0077374034250423e-113,0.21803724589298126,0,1,0.05,41,calibrated
+wipe_desk,single,single:6->7,,5,1,0.23090262792454702,2.310679269710398e-29,0.11545131396227351,0,1,0.05,41,calibrated
+wipe_desk,single,single:7->8,,5,1,0.17089394459522136,1.0538755857030557e-41,0.08544697229761068,0,1,0.05,41,calibrated
