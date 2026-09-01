@@ -58,6 +58,16 @@ def _model_tree_fingerprint(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    """Return whether *path* is contained by *root* on Python 3.8+."""
+
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def load_protocol(path: Path = PROTOCOL) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict) or value.get("schema") != (
@@ -114,7 +124,7 @@ def load_protocol(path: Path = PROTOCOL) -> dict[str, Any]:
         if not isinstance(model_root, str) or Path(model_root).is_absolute():
             raise ValueError(f"formal {field} must be a repository-relative path")
         resolved = (REPOSITORY_ROOT / model_root).resolve()
-        if not resolved.is_relative_to(REPOSITORY_ROOT) or not resolved.is_dir():
+        if not _is_within(resolved, REPOSITORY_ROOT) or not resolved.is_dir():
             raise ValueError(f"formal {field} does not identify a model directory")
         fingerprint_field = field.replace("_dir", "_fingerprint")
         expected_fingerprint = shared.get(fingerprint_field)
