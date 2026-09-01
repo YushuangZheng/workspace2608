@@ -479,6 +479,24 @@ def _is_v4_task_scoped(args):
     return _is_v4_lift(args) or _is_v4_store(args)
 
 
+def _task_model_content_identity(models_root, task_name):
+    """Fingerprint one task model independently of its containing directory."""
+
+    task_root = Path(models_root).resolve() / task_name
+    if not task_root.is_dir():
+        return None
+    files = sorted(path for path in task_root.rglob("*") if path.is_file())
+    if not files:
+        return None
+    return tuple(
+        (
+            path.relative_to(task_root).as_posix(),
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        for path in files
+    )
+
+
 def _validate_v4_store_protocol_args(args):
     """Fail before simulator launch on any StoreBottle V4 protocol drift."""
 
@@ -496,8 +514,19 @@ def _validate_v4_store_protocol_args(args):
         raise RuntimeError(
             "StoreBottle V4 has two entity triggers; --scenario-trigger-step is invalid"
         )
-    if Path(args.models_dir).resolve() != V4_MODELS_DIR.resolve():
-        raise RuntimeError("StoreBottle V4 formal evaluation requires models/v4")
+    candidate_identity = _task_model_content_identity(
+        args.models_dir,
+        STORE_BOTTLE_TASK_NAME,
+    )
+    frozen_identity = _task_model_content_identity(
+        V4_MODELS_DIR,
+        STORE_BOTTLE_TASK_NAME,
+    )
+    if candidate_identity is None or candidate_identity != frozen_identity:
+        raise RuntimeError(
+            "StoreBottle V4 formal evaluation requires model content identical "
+            "to the frozen models/v4 snapshot"
+        )
     return intervention, motion
 
 

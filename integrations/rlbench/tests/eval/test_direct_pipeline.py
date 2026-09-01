@@ -94,6 +94,21 @@ from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
 )
 
 
+def test_v4_store_model_identity_accepts_the_frozen_composite_copy() -> None:
+    task = "bimanual_put_bottle_in_fridge"
+    frozen = direct_evaluate._task_model_content_identity(
+        direct_evaluate.V4_MODELS_DIR,
+        task,
+    )
+    composite = direct_evaluate._task_model_content_identity(
+        direct_evaluate.INTEGRATION_ROOT / "models" / "phase6_v1",
+        task,
+    )
+
+    assert frozen is not None
+    assert composite == frozen
+
+
 class _InvalidActionForTest(Exception):
     pass
 
