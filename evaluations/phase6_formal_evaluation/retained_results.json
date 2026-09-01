@@ -1,5 +1,5 @@
 {
-  "protocol_sha256": "1715a3846d25f52e8266e24a872d3ac8ac9b552cb9805ee250aec9e6ec76ef0a",
+  "protocol_sha256": "b6e1f4f234d973ba499c9f9c411f6ea33fd048bd61970dcf6ea9292ee1300639",
   "reason": "The active executor revision changes the shared physical execution protocol for every method and task, so no result generated under an older protocol is retained.",
   "records": {},
   "schema": "essay2608.phase6_retained_results.v1"
