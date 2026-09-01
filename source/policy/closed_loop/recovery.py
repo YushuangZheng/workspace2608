@@ -19,6 +19,7 @@ from .frame_roles import RelationRecoveryIntent, RelationVerificationRequest
 from .link_anchors import EpisodeLinkAnchorRegistry
 from .mismatch import MismatchKind, MismatchUpdate
 from .reentry import ReentryConfig, ReentryDecision, ReentryEvaluation, ReentrySelector
+from .relation_events import RelationEventId
 from .relation_filter import RelationDecision, RelationEstimate
 from .relation_goals import RelationGoal, RelationGoalKind, RelationGoalPlanner
 from .relation_verification import (
@@ -256,6 +257,21 @@ class RecoveryTriggerTracker:
                         intents[(intent.arm_id, intent.frame_id)] = intent
 
         active_boundary_keys = set()
+        prepared_link_events: dict[tuple[str, str], RelationEventId] = {}
+        for prepared_request in transition_requests.values():
+            preparation = prepared_request.preparation
+            if preparation is None:
+                continue
+            for event_id in preparation.event_ids:
+                if event_id.transition not in {"link", "link_pending"}:
+                    continue
+                key = (event_id.arm_id, event_id.frame_id)
+                previous = prepared_link_events.get(key)
+                if previous is not None and previous != event_id:
+                    raise RuntimeError(
+                        "同一边界周期的 arm-frame 存在多个关系建立事件"
+                    )
+                prepared_link_events[key] = event_id
         for arm, request in transition_requests.items():
             if arm not in self.task_models:
                 raise KeyError(f"恢复触发器缺少机械臂模型 {arm}")
@@ -293,6 +309,7 @@ class RecoveryTriggerTracker:
                 expected = self._required_decision(condition.required_state)
                 if expected == estimate.decision_state:
                     continue
+                prepared_event = prepared_link_events.get((relation_arm, frame))
                 if (
                     condition_id.kind == ConditionKind.GUARD_RELATION
                     and relation_arm != arm
@@ -331,7 +348,7 @@ class RecoveryTriggerTracker:
                         )
                     )
                     registry = EpisodeLinkAnchorRegistry(self.task_models[relation_arm])
-                    if not any(
+                    if prepared_event is None and not any(
                         registry.has_pending_recovery_candidate(
                             frame,
                             relation_state,
@@ -350,6 +367,12 @@ class RecoveryTriggerTracker:
                         frame_id=frame,
                         expected_relation=expected,
                         actual_relation=estimate.decision_state,
+                        origin_event_id=(
+                            prepared_event
+                            if expected == RelationDecision.LINKED
+                            and estimate.decision_state == RelationDecision.EXTERNAL
+                            else None
+                        ),
                     )
                     intents[(relation_arm, frame)] = intent
                     reasons.append(f"{arm}:boundary_relation_mismatch")

@@ -75,7 +75,7 @@ class RelationVerificationConfig:
     minimum_tracking_reliability: float = 0.25
     minimum_approach_displacement: float = 1.0e-4
     task_history_length: int = 12
-    return_position_tolerance: float = 0.002
+    return_position_tolerance: float = 0.004
     maximum_return_cycles: int = 80
     action_position_variance: float = 1.0e-5
     action_rotation_variance: float = 1.0e-4

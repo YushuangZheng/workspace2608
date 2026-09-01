@@ -636,6 +636,7 @@ class ClosedLoopMultiStreamPolicy:
         arm: str,
         execution: ExecutionCycleResult | None,
         boundary: BoundaryCycleResult | None,
+        observation: RuntimeObservation | None = None,
     ) -> RelationVerificationRequest | None:
         requests: list[RelationVerificationRequest] = []
         if execution is not None:
@@ -647,11 +648,26 @@ class ClosedLoopMultiStreamPolicy:
             # route them by request.arm_id below.
             for transition in boundary.requests.values():
                 requests.extend(transition.verification_requests)
-        unique = {
-            request.pending_event_id.token: request
-            for request in requests
-            if request.arm_id == arm
-        }
+        preparations = {} if boundary is None else getattr(boundary, "preparations", {})
+        preparation = preparations.get(arm)
+        unique = {}
+        for request in requests:
+            if request.arm_id != arm:
+                continue
+            if preparation is not None and request.pending_event_id in preparation.event_ids:
+                # The request describes the consequence of the boundary edge
+                # close.  It cannot probe before that close has appeared in a
+                # real observation; otherwise VERIFY_LINK would freeze TASK
+                # while the gripper was still open.
+                if observation is None:
+                    continue
+                target = np.asarray(preparation.gripper_command, dtype=np.float64)
+                current = np.asarray(observation.gripper_state, dtype=np.float64)
+                if target.shape != current.shape:
+                    raise ValueError("关系验证准备动作与运行夹爪维度不一致")
+                if not np.array_equal(target > 0.5, current > 0.5):
+                    continue
+            unique[request.pending_event_id.token] = request
         return unique[min(unique)] if unique else None
 
     @staticmethod
@@ -948,6 +964,7 @@ class ClosedLoopMultiStreamPolicy:
                     arm,
                     executions.get(arm),
                     boundary,
+                    runtime[arm],
                 )
                 arm_trigger = self._arm_trigger(arm, trigger)
                 grasp_event = (

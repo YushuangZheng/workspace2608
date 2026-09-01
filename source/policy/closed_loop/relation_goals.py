@@ -108,8 +108,14 @@ class RelationGoalPlanner:
                         actual_relation=intent.actual_relation,
                         source_state=source_state,
                         mode=mode,
-                        link_anchor=self.anchor_registry.resolve_for_recovery(
-                            frame, source_state, mode
+                        link_anchor=(
+                            self.anchor_registry.resolve_for_recovery(
+                                frame, source_state, mode
+                            )
+                            if intent.origin_event_id is None
+                            else self.anchor_registry.resolve_event_for_recovery(
+                                intent.origin_event_id
+                            )
                         ),
                     )
                 )

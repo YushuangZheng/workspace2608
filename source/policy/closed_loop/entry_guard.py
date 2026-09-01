@@ -20,6 +20,7 @@ from .boundary_runtime import (
 )
 from .frame_roles import RelationVerificationRequest
 from .progress_filter import ProgressStatus
+from .relation_events import RelationEventId
 from .relation_filter import RelationDecision, RelationEstimate
 from .runtime_features import RuntimeFeatures
 from .scene_factors import FactorId
@@ -314,6 +315,7 @@ class EntryGuard:
         estimate: RelationEstimate | None,
         beliefs: Mapping[str, ClosedLoopBelief],
         mode_by_arm_skill: Mapping[str, Mapping[int, int]] | None,
+        pending_event_id: RelationEventId | None = None,
     ) -> RelationVerificationRequest | None:
         # LINK_PENDING marks a new grasp occurrence for which the pre-event
         # external decision may only be persistence.  With no post-grasp
@@ -334,11 +336,19 @@ class EntryGuard:
         mode_by_skill = (
             None if mode_by_arm_skill is None else mode_by_arm_skill.get(relation_arm)
         )
-        candidate = model.active_link_pending_candidate(
-            frame,
-            belief.progress.estimated_state,
-            mode_by_skill,
+        candidate = (
+            model.active_link_pending_candidate(
+                frame,
+                belief.progress.estimated_state,
+                mode_by_skill,
+            )
+            if pending_event_id is None
+            else model.link_pending_events.get(pending_event_id)
         )
+        if candidate is not None and (
+            candidate.arm_id != relation_arm or candidate.frame_id != frame
+        ):
+            raise ValueError("边界准备的 LINK_PENDING 事件与关系候选不一致")
         if candidate is not None:
             return RelationVerificationRequest(
                 arm_id=relation_arm,
@@ -668,6 +678,26 @@ class EntryGuard:
                 guard_results=guard_results,
             )
         )
+        if preparation is not None:
+            # The acquisition edge is physically attempted before target-state
+            # commit.  Surface its exact Pending occurrence to phase five even
+            # though the source StateId deliberately precedes candidate_state;
+            # the top-level policy waits until the close is observed before it
+            # may start VERIFY_LINK.
+            for event_id in preparation.event_ids:
+                if event_id.transition != "link_pending":
+                    continue
+                estimate = own_belief.relation_estimates.get(event_id.frame_id)
+                request = self._pending_request(
+                    relation_arm=self.arm_id,
+                    frame=event_id.frame_id,
+                    estimate=estimate,
+                    beliefs=beliefs,
+                    mode_by_arm_skill=mode_by_arm_skill,
+                    pending_event_id=event_id,
+                )
+                if request is not None:
+                    verification_requests[request.pending_event_id.token] = request
         return (
             TransitionRequest(
                 tick=tick,

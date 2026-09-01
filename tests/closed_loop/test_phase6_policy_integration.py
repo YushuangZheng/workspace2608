@@ -748,6 +748,45 @@ def test_directional_boundary_verification_request_routes_to_receiver_arm() -> N
     )
 
 
+def test_boundary_preparation_pending_request_waits_for_observed_close() -> None:
+    event_id = RelationEventId("right", "item0", 6, 0, 0, "link_pending")
+    request = RelationVerificationRequest(
+        arm_id="right",
+        frame_id="item0",
+        relation="linked",
+        pending_event_id=event_id,
+    )
+    preparation = TransitionPreparation(
+        boundary_id=BoundaryId("right", 5, 6),
+        event_ids=(event_id,),
+        gripper_command=np.asarray([-1.0]),
+    )
+    boundary = SimpleNamespace(
+        requests={
+            "right": SimpleNamespace(verification_requests=(request,)),
+        },
+        preparations={"right": preparation},
+    )
+    assert (
+        ClosedLoopMultiStreamPolicy._verification_request(
+            "right",
+            None,
+            boundary,
+            SimpleNamespace(gripper_state=np.asarray([1.0])),
+        )
+        is None
+    )
+    assert (
+        ClosedLoopMultiStreamPolicy._verification_request(
+            "right",
+            None,
+            boundary,
+            SimpleNamespace(gripper_state=np.asarray([-1.0])),
+        )
+        == request
+    )
+
+
 def test_rlbench_adapter_preserves_shared_snapshot_and_opposite_ee_frames() -> None:
     spec = get_task_spec("bimanual_handover_item")
     task_state = np.concatenate(

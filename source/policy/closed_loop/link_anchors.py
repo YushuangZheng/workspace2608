@@ -140,6 +140,38 @@ class EpisodeLinkAnchorRegistry:
         self._active_pending[candidate.frame_id] = anchor
         return anchor
 
+    def resolve_event_for_recovery(
+        self,
+        event_id: RelationEventId,
+    ) -> RuntimeLinkAnchor:
+        """Resolve the exact learned acquisition occurrence without confirming it.
+
+        Boundary transition preparation may physically attempt a target-entry
+        acquisition while the task cursor is intentionally still in the source
+        skill.  In that case state-order lookup cannot yet see the occurrence,
+        so the boundary carries its already learned event identity into recovery.
+        This does not activate a Pending origin or assert that LINK succeeded.
+        """
+
+        if event_id.arm_id != self.task_model.arm_id:
+            raise ValueError("LINK 恢复事件不属于当前机械臂")
+        if event_id.transition == "link":
+            try:
+                return RuntimeLinkAnchor.from_offline(
+                    self.task_model.link_anchors[event_id]
+                )
+            except KeyError as exc:
+                raise KeyError(f"不存在正式 LINK 事件 {event_id.token}") from exc
+        if event_id.transition == "link_pending":
+            try:
+                return RuntimeLinkAnchor.from_pending(
+                    self.task_model.link_pending_events[event_id],
+                    verified=False,
+                )
+            except KeyError as exc:
+                raise KeyError(f"不存在 LINK_PENDING 事件 {event_id.token}") from exc
+        raise ValueError("LINK 恢复事件必须为 link 或 link_pending")
+
     def _pending_recovery_candidate(
         self,
         frame_id: str,

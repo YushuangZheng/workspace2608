@@ -30,6 +30,7 @@ class RelationRecoveryIntent:
     frame_id: str
     expected_relation: RelationDecision
     actual_relation: RelationDecision
+    origin_event_id: RelationEventId | None = None
 
     def __post_init__(self) -> None:
         if not self.arm_id or not self.frame_id:
@@ -41,6 +42,14 @@ class RelationRecoveryIntent:
             raise ValueError("可靠关系恢复意图不能以 Unknown 为端点")
         if self.expected_relation == self.actual_relation:
             raise ValueError("关系恢复意图必须包含实际失配")
+        if self.origin_event_id is not None and (
+            self.expected_relation != RelationDecision.LINKED
+            or self.actual_relation != RelationDecision.EXTERNAL
+            or self.origin_event_id.arm_id != self.arm_id
+            or self.origin_event_id.frame_id != self.frame_id
+            or self.origin_event_id.transition not in {"link", "link_pending"}
+        ):
+            raise ValueError("关系恢复意图的事件来源与 LINK 失配不一致")
 
 
 @dataclass(frozen=True)

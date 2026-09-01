@@ -672,6 +672,35 @@ def test_pending_activation_is_episode_local_and_anchor_reinstantiates(
         registry.resolve("object", StateId(0, 0), 0)
 
 
+def test_boundary_preparation_routes_exact_pending_event_before_target_state(
+    phase5_case,
+) -> None:
+    model, _, pending = phase5_case
+    model.link_anchors.clear()
+    model.link_origins.clear()
+    registry = EpisodeLinkAnchorRegistry(model)
+    planner = RelationGoalPlanner(registry, UnlinkMetadataRepository(model))
+    source_state = model.skill_states[pending.candidate_state.skill_index - 1][-1]
+    goal = planner.plan(
+        (
+            RelationRecoveryIntent(
+                "single",
+                "object",
+                RelationDecision.LINKED,
+                RelationDecision.EXTERNAL,
+                origin_event_id=pending.event_id,
+            ),
+        ),
+        source_state=source_state,
+        mode=pending.event_id.mode,
+    )[0]
+    assert goal.source_state == source_state
+    assert goal.link_anchor is not None
+    assert goal.link_anchor.origin_event_id == pending.event_id
+    assert goal.link_anchor.source == "pending_recovery"
+    assert registry.active_pending == {}
+
+
 def test_pending_failed_link_uses_provisional_template_then_activates_on_success(
     phase5_case,
 ) -> None:
