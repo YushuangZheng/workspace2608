@@ -1,6 +1,6 @@
 {
-  "active_protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-  "reason": "Retain byte-identical completed normal and dynamic-no-fault cells after later general fixes whose execution paths were not exercised by those cells; rerun only affected or pending formal cells.",
+  "active_protocol_sha256": "72dfcd47e1b2d84905f1aeda6f6a70748dba7e8332f4b29a017f353eab77ae67",
+  "reason": "Retain byte-identical completed normal and dynamic-no-fault cells: their normal LINK occurrences acquired the relation, while the corrected finite confirmation expiry and attachment-suppression protocol affect only an unformed missed-interaction path; rerun all grasp-failure cells.",
   "records": {
     "dynamic/bimanual_handover_item/dynamac_v4": {
       "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
