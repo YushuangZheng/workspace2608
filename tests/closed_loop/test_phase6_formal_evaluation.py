@@ -255,6 +255,54 @@ def test_recovery_audit_combines_physical_truth_with_policy_modes(
     assert audit["post_reentry_completion"] is True
 
 
+def test_recovery_audit_does_not_credit_reentry_before_fault(
+    tmp_path: Path,
+) -> None:
+    diagnostics = tmp_path / "episode.jsonl"
+    diagnostics.write_text(
+        "\n".join(
+            json.dumps(record)
+            for record in (
+                {
+                    "tick": 4,
+                    "arms": {
+                        "single": {
+                            "mode_after": "task",
+                            "recovery": {"reentry": {"state_id": [0, 1]}},
+                        }
+                    },
+                },
+                {
+                    "tick": 8,
+                    "arms": {"single": {"mode_after": "task", "recovery": None}},
+                },
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    physical_fault = {
+        "spec": {"kind": "unexpected_drop"},
+        "events": [{"kind": "unexpected_drop", "policy_step": 8}],
+        "physical_audit": {
+            "effect_observed": True,
+            "fault_end_policy_step": 8,
+            "relation_restored": False,
+            "relation_restoration_policy_step": None,
+        },
+    }
+
+    audit = run_cell._episode_recovery_audit(
+        diagnostics,
+        physical_fault=physical_fault,
+        success=True,
+    )
+
+    assert audit["legal_reentry"] is False
+    assert audit["legal_reentry_policy_step"] is None
+    assert audit["post_reentry_completion"] is None
+
+
 def _synthetic_shard_payload(
     cell: launch.FormalCell,
     indices: tuple[int, ...],
@@ -459,14 +507,16 @@ def test_formal_cell_paths_are_separate_from_v4_release_results() -> None:
         assert cell.result.is_relative_to(launch.RESULTS_ROOT)
 
 
-def test_minimal_normal_rerun_retention_is_explicit_and_content_addressed() -> None:
+def test_retained_normal_and_dynamic_results_are_content_addressed() -> None:
     run_cell.load_protocol()
     records = launch._retained_records()
 
-    assert len(records) == 32
-    assert set(records) == {
-        cell.cell_id for cell in launch.build_cells(run_cell.load_protocol(), "normal")
-    }
+    expected_cells = (
+        *launch.build_cells(run_cell.load_protocol(), "normal"),
+        *launch.build_cells(run_cell.load_protocol(), "dynamic"),
+    )
+    assert len(records) == 64
+    assert set(records) == {cell.cell_id for cell in expected_cells}
     assert all(len(record["sha256"]) == 64 for record in records.values())
     assert all(len(record["protocol_sha256"]) == 64 for record in records.values())
 

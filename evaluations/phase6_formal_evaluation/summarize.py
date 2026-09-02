@@ -148,8 +148,18 @@ def _cell_rows(
                 if not restoration_audits
                 else relation_restored / len(restoration_audits)
             )
+            # Early versions of the reducer stored the first re-entry in the
+            # episode, including one that could precede the injected fault.
+            # Recovery attribution is causal only when re-entry is at or after
+            # the physical fault trigger.  Normalize retained rows here so the
+            # task outcomes remain immutable while derived recovery metrics are
+            # computed with the corrected time scope.
             legal_reentries = sum(
-                audit.get("legal_reentry") is True for audit in audits
+                isinstance(audit.get("fault_trigger_policy_step"), int)
+                and isinstance(audit.get("legal_reentry_policy_step"), int)
+                and audit["legal_reentry_policy_step"]
+                >= audit["fault_trigger_policy_step"]
+                for audit in audits
             )
             recovery_cycles = [
                 int(audit["post_fault_recovery_cycles"])
@@ -420,7 +430,7 @@ def _markdown(
     return "\n".join(lines) + "\n"
 
 
-def summarize(section: str, output: Path) -> dict[str, Any]:
+def summarize(section: str, output: Path, *, replace: bool = False) -> dict[str, Any]:
     protocol = load_protocol(PROTOCOL)
     cells = launch.build_cells(protocol, section)
     missing = [cell.cell_id for cell in cells if not cell.result.exists()]
@@ -452,7 +462,7 @@ def summarize(section: str, output: Path) -> dict[str, Any]:
             "bootstrap95_low": row["bootstrap95_low"],
             "passed": row["bootstrap95_low"] > -noninferiority_margin,
         }
-    output.mkdir(parents=True, exist_ok=False)
+    output.mkdir(parents=True, exist_ok=replace)
     _write_csv(output / "cell_summary.csv", cell_rows)
     _write_csv(output / "paired_comparisons.csv", comparisons)
     if condition_comparisons:
@@ -473,7 +483,11 @@ def summarize(section: str, output: Path) -> dict[str, Any]:
     }
     atomic_json(output / "summary.json", payload)
     (output / "RESULTS.md").write_text(_markdown(cell_rows, macro), encoding="utf-8")
-    artifacts = sorted(path for path in output.iterdir() if path.is_file())
+    artifacts = sorted(
+        path
+        for path in output.iterdir()
+        if path.is_file() and path.name != "SHA256SUMS"
+    )
     (output / "SHA256SUMS").write_text(
         "".join(f"{_sha256(path)}  {path.name}\n" for path in artifacts),
         encoding="utf-8",
@@ -489,12 +503,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="all",
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace generated files in an existing output directory",
+    )
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    payload = summarize(args.section, args.output)
+    payload = summarize(args.section, args.output, replace=args.replace)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 

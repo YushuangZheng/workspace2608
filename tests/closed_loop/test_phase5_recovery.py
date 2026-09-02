@@ -1464,8 +1464,9 @@ def test_reentry_alignment_routes_with_candidate_relation_without_mutating_beta(
     phase5_case,
 ) -> None:
     model, demonstrations, _ = phase5_case
-    candidate = StateId(1, 0)
-    frozen = StateId(1, 2)
+    anchor = next(iter(model.link_anchors.values()))
+    candidate = model.state(anchor.linked_entry_states[0]).topology.predecessors[0]
+    frozen = anchor.linked_entry_states[-1]
     assert model.state(candidate).demo_relation_priors["object"][0, 0] > 0.5
     assert model.state(frozen).demo_relation_priors["object"][0, 1] > 0.5
 
@@ -1480,7 +1481,7 @@ def test_reentry_alignment_routes_with_candidate_relation_without_mutating_beta(
         runtime_features=features_for(model, demonstrations, candidate),
     )
     controller = ClosedLoopExecutionController(model)
-    mode_by_skill = {1: 0}
+    mode_by_skill = {candidate.skill_index: 0, frozen.skill_index: 0}
 
     # Ordinary TASK routing intentionally keeps using the real frozen beta,
     # so its expected relation remains linked.  The learned direct-successor
@@ -1503,9 +1504,10 @@ def test_reentry_alignment_routes_with_candidate_relation_without_mutating_beta(
         return expected
 
     controller.weighted_poe = SimpleNamespace(query=query)
+    candidate_index = tuple(sorted(model.states)).index(candidate)
     observation = DynaMACObservation(
-        demonstrations[0].ee_pose[4],
-        {"object": demonstrations[0].frames["object"][4]},
+        demonstrations[0].ee_pose[candidate_index],
+        {"object": demonstrations[0].frames["object"][candidate_index]},
     )
     result = controller.query_reentry_alignment(
         candidate,

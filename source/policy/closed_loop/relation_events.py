@@ -68,6 +68,8 @@ class LinkRecoveryAnchor:
     local_means: Array
     local_covariances: Array
     gripper_commands: Array
+    # Finite causal close-to-kinematic-confirmation interval.  Persistent
+    # relation ownership is stored separately in ClosedLoopTaskModel.link_origins.
     linked_entry_states: tuple[StateId, ...]
     support_fraction: float = 1.0
     # LODO folds that reproduced the all-demo event; anchor fitting still uses

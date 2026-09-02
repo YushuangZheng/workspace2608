@@ -455,6 +455,23 @@ def test_relation_events_require_motion_and_follow_comotion_then_detachment() ->
     release_gripper = aligned[release.skill_index].gripper[members, release.local_index]
     assert np.all(release_gripper > 0.0)
 
+    ordered = tuple(sorted(model.states))
+    global_index = {state: index for index, state in enumerate(ordered)}
+    entry_indices = [global_index[state] for state in anchor.linked_entry_states]
+    assert entry_indices == list(range(entry_indices[0], entry_indices[-1] + 1))
+    origin_indices = sorted(
+        global_index[key.state_id]
+        for key, event_id in model.link_origins.items()
+        if event_id == anchor.event_id
+    )
+    assert set(entry_indices).issubset(origin_indices)
+    # Natural confirmation ends after the first stable kinematic evidence,
+    # while the relation origin correctly persists until the later UNLINK.
+    assert entry_indices[-1] < global_index[release]
+    assert any(
+        entry_indices[-1] < index < global_index[release] for index in origin_indices
+    )
+
 
 def test_confirmed_relation_events_override_flickering_state_evidence() -> None:
     class FlickeringPriorBuilder(ClosedLoopTaskModelBuilder):
@@ -874,8 +891,7 @@ def test_link_lodo_aligns_delayed_kinematic_evidence_by_shared_close() -> None:
             final_skill,
         ):
             total = sum(
-                policy.skills[index].duration
-                for index in range(final_skill + 1)
+                policy.skills[index].duration for index in range(final_skill + 1)
             )
             probabilities = np.full(total, 0.1, dtype=np.float64)
             link_evidence = 7 if len(members) == 5 else 11

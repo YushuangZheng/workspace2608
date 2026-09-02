@@ -372,21 +372,21 @@ class FrameRoleRouter:
         state_id: StateId,
         mode_by_skill: Mapping[int, int] | None,
     ) -> tuple[RelationEventId, ...]:
-        """Return unresolved formal LINKs inside their learned linked interval."""
+        """Return unresolved formal LINKs inside their causal confirmation interval."""
 
         events = []
-        for event_id in self._link_origins_for_state(
-            frame,
-            state_id,
-            mode_by_skill,
-        ):
+        for event_id, anchor in self.task_model.link_anchors.items():
+            if event_id.frame_id != frame or state_id not in anchor.linked_entry_states:
+                continue
+            if mode_by_skill is not None:
+                selected_mode = mode_by_skill.get(event_id.skill_index)
+                if selected_mode is not None and selected_mode != event_id.mode:
+                    continue
             if event_id in self._confirmed_link_events:
                 continue
             if event_id in self._rejected_link_events:
                 continue
-            anchor = self.task_model.link_anchors[event_id]
-            if state_id in anchor.linked_entry_states:
-                events.append(event_id)
+            events.append(event_id)
         return tuple(events)
 
     def _formal_link_confirmation_pending(
@@ -722,6 +722,8 @@ class FrameRoleRouter:
                 mode_by_skill,
             )
             pending_link_confirmation_events.update(confirmation_events)
+            if actual == RelationDecision.LINKED:
+                confirmed_link_events.update(confirmation_events)
             if (
                 not confirmation_events
                 and expected == RelationDecision.LINKED

@@ -429,8 +429,12 @@ class FaultInjectingTaskEnvironment:
                 }
             )
             return action
-        suppressed = action.copy()
-        suppressed[gripper_index] = 1.0
+        # Preserve the commanded gripper motion while suppressing only the
+        # attachment it is meant to establish.  Replacing the close command
+        # with an open command conflates a missed interaction with gripper
+        # actuator failure: the task executor then correctly waits for its
+        # unapplied discrete command and never reaches the relation evidence
+        # that this fault is intended to test.
         self._effect_observed = True
         self._effect_policy_step = (
             self._policy_step
@@ -439,13 +443,33 @@ class FaultInjectingTaskEnvironment:
         )
         self.events.append(
             {
-                "kind": "grasp_close_suppressed_cycle",
+                "kind": "grasp_attachment_suppressed_cycle",
                 "policy_step": self._policy_step,
                 "arm": selected[0],
                 "protocol_effective": True,
             }
         )
-        return suppressed
+        return action
+
+    def _set_grasp_attachment_enabled(self, enabled: bool) -> bool:
+        """Temporarily control the aligned RLBench attachment protocol.
+
+        The formal executor uses ``DiscreteGripperProtocol`` whose concrete
+        gripper action mode exposes the same ``_attach_grasped_objects`` flag
+        for single- and dual-arm control.  The fault wrapper changes only this
+        physical attachment operation; it does not alter policy state,
+        observations, gripper targets, or task progress.
+        """
+
+        action_mode = getattr(self._environment, "_action_mode", None)
+        gripper_mode = getattr(action_mode, "gripper_action_mode", None)
+        if gripper_mode is None or not hasattr(gripper_mode, "_attach_grasped_objects"):
+            raise RuntimeError(
+                "grasp failure requires the aligned gripper attachment protocol"
+            )
+        previous = bool(gripper_mode._attach_grasped_objects)
+        gripper_mode._attach_grasped_objects = bool(enabled)
+        return previous
 
     def _apply_relation_fault(self, *, bimanual: bool) -> bool:
         selected = self._selected_arms(bimanual=bimanual)
@@ -636,7 +660,17 @@ class FaultInjectingTaskEnvironment:
             applied = self._apply_grasp_failure(values, bimanual=bimanual)
         elif relation_fault_triggered:
             applied = self._force_release_action(values, bimanual=bimanual)
-        result = self._environment.step(applied)
+        restore_attachment: bool | None = None
+        if (
+            self.spec.kind == FaultInjectionKind.GRASP_FAILURE
+            and self._failed_close_active
+        ):
+            restore_attachment = self._set_grasp_attachment_enabled(False)
+        try:
+            result = self._environment.step(applied)
+        finally:
+            if restore_attachment is not None:
+                self._set_grasp_attachment_enabled(restore_attachment)
         self._audit_physical_effect(bimanual=bimanual)
         self._policy_step += 1
         return result

@@ -1443,11 +1443,8 @@ class ClosedLoopTaskModelBuilder:
                         if (
                             max(positions) - min(positions)
                             > self.config.relation_event_alignment_tolerance
-                            or not global_start
-                            <= causal_global_index
-                            < global_stop
-                            or causal_global_index
-                            > global_start + evidence_local_index
+                            or not global_start <= causal_global_index < global_stop
+                            or causal_global_index > global_start + evidence_local_index
                         ):
                             return None
                         return causal_global_index - global_start
@@ -1472,8 +1469,7 @@ class ClosedLoopTaskModelBuilder:
                             ):
                                 if (
                                     kind != transition
-                                    or event_index
-                                    in used_fold_events[demonstration]
+                                    or event_index in used_fold_events[demonstration]
                                 ):
                                     continue
                                 event_aligned = bool(
@@ -1720,6 +1716,18 @@ class ClosedLoopTaskModelBuilder:
                     ):
                         event_state = StateId(skill_index, local_index)
                         if transition == "link":
+                            gripper_transitions = (
+                                self._relation_event_gripper_transitions(
+                                    joint_gripper,
+                                    members,
+                                    global_start + evidence_local_index,
+                                    "link",
+                                )
+                            )
+                            if gripper_transitions is None:
+                                raise RuntimeError(
+                                    "正式 LINK 已通过模板检查但缺少因果闭爪位置"
+                                )
                             (
                                 context_state,
                                 local_means,
@@ -1731,18 +1739,28 @@ class ClosedLoopTaskModelBuilder:
                                 local_index,
                                 members,
                             )
-                            stop = next(
-                                (
-                                    index
-                                    for index in range(local_index + 1, skill.duration)
-                                    if relation_states[index] == "external"
-                                ),
-                                skill.duration,
+                            # ``linked_entry_states`` is the finite natural
+                            # confirmation interval, not the full duration of
+                            # the established relation.  It starts once every
+                            # aligned normal demonstration has issued the
+                            # causal close and ends after the first stable
+                            # kinematic LINK evidence.  Persistent ownership
+                            # through later skills is represented solely by
+                            # ``link_origins`` below and ends only at UNLINK.
+                            entry_start = max(gripper_transitions.values())
+                            evidence_global_index = global_start + evidence_local_index
+                            entry_stop = min(
+                                total_states,
+                                evidence_global_index
+                                + self.config.relation_minimum_dwell,
                             )
+                            if entry_start > evidence_global_index:
+                                raise RuntimeError(
+                                    "正式 LINK 的因果闭爪晚于运动学确认状态"
+                                )
                             linked_entry = tuple(
-                                StateId(skill_index, index)
-                                for index in range(local_index, stop)
-                                if relation_states[index] == "linked"
+                                state_from_global(index)
+                                for index in range(entry_start, entry_stop)
                             )
                             links[event_id] = LinkRecoveryAnchor(
                                 event_id=event_id,
@@ -1814,23 +1832,6 @@ class ClosedLoopTaskModelBuilder:
             pending_links,
             arm_id,
         )
-
-        # ``linked_entry_states`` is derived from the completed origin map so
-        # it covers legal linked states across later skill and mode boundaries,
-        # not only the remainder of the event's source skill.
-        linked_states_by_event: dict[RelationEventId, set[StateId]] = {
-            event_id: set() for event_id in links
-        }
-        for key, event_id in origins.items():
-            if event_id in linked_states_by_event:
-                linked_states_by_event[event_id].add(key.state_id)
-        links = {
-            event_id: replace(
-                anchor,
-                linked_entry_states=tuple(sorted(linked_states_by_event[event_id])),
-            )
-            for event_id, anchor in links.items()
-        }
         return links, unlinks, origins, pending_links
 
     def _reconcile_confirmed_relation_paths(

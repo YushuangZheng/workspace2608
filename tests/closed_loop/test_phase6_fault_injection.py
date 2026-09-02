@@ -61,13 +61,21 @@ class _TaskEnvironment:
             robot = SimpleNamespace(gripper=_Gripper(objects))
             self.observation = SimpleNamespace(gripper_pose=_pose(0.1))
         self._scene = SimpleNamespace(robot=robot)
+        self._gripper_action_mode = SimpleNamespace(_attach_grasped_objects=True)
+        self._action_mode = SimpleNamespace(
+            gripper_action_mode=self._gripper_action_mode
+        )
         self.actions = []
+        self.attachment_enabled = []
 
     def get_observation(self):
         return self.observation
 
     def step(self, action):
         self.actions.append(np.asarray(action, dtype=np.float64).copy())
+        self.attachment_enabled.append(
+            bool(self._gripper_action_mode._attach_grasped_objects)
+        )
         return self.observation, 0.0, False
 
 
@@ -189,7 +197,7 @@ def test_bimanual_time_stall_uses_right_first_wire_layout() -> None:
     assert environment.actions[0][16:].tolist() == [1.0, 0.0]
 
 
-def test_grasp_failure_suppresses_only_selected_close_occurrence() -> None:
+def test_grasp_failure_suppresses_attachment_not_gripper_close_occurrence() -> None:
     environment = _TaskEnvironment()
     wrapped = FaultInjectingTaskEnvironment(
         environment,
@@ -213,11 +221,13 @@ def test_grasp_failure_suppresses_only_selected_close_occurrence() -> None:
     assert [value[7] for value in environment.actions] == [
         0.0,
         1.0,
-        1.0,
-        1.0,
+        0.0,
+        0.0,
         1.0,
         0.0,
     ]
+    assert environment.attachment_enabled == [True, True, False, False, True, True]
+    assert environment._gripper_action_mode._attach_grasped_objects is True
     assert wrapped.events[0]["close_occurrence"] == 2
     assert wrapped.events[-1]["kind"] == "grasp_failure_occurrence_ended"
 

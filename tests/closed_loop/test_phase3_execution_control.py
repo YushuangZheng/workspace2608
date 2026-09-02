@@ -948,10 +948,12 @@ def test_formal_link_confirmation_interval_expires_after_terminal_entry_action(
     )
     decision = expired.decisions["object"]
     assert decision.formal_link_confirmation_pending is False
-    # This fixture's next state is its learned UNLINK, so the existing causal
-    # opening allowance remains nonblocking after confirmation grace expires.
-    assert decision.role == FrameRole.DEFER
-    assert expired.blocks_advance is False
+    # The finite close-to-evidence interval has now been consumed.  A still
+    # reliable external observation contradicts the persistent formal LINK
+    # origin and must immediately enter the ordinary recovery path rather than
+    # inheriting grace until the later UNLINK.
+    assert decision.role == FrameRole.RECOVER
+    assert expired.blocks_advance is True
     assert event_id in expired.rejected_link_events
 
 

@@ -361,6 +361,8 @@ def _episode_recovery_audit(
             if (
                 isinstance(recovery, Mapping)
                 and recovery.get("reentry") is not None
+                and trigger_step is not None
+                and tick >= trigger_step
                 and legal_reentry_tick is None
             ):
                 legal_reentry_tick = tick
