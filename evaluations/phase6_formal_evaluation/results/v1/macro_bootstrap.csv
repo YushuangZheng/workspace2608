@@ -1,0 +1,5 @@
+experiment,fault,proposed,reference,tasks,macro_rate_difference,bootstrap95_low,bootstrap95_high,bootstrap_draws
+normal,,progress_only,dynamac_v4,8,-0.053750000000000006,-0.14687499999999998,0.015000000000000001,10000
+normal,,progress_dynamic_roles,progress_only,8,-0.008125,-0.04,0.02375,10000
+normal,,full,progress_dynamic_roles,8,0.08875,0.01,0.18751562499999977,10000
+normal,,full,dynamac_v4,8,0.026874999999999996,0.00375,0.053750000000000006,10000

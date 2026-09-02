@@ -332,7 +332,12 @@ def _xvfb_command(
     )
 
 
-def _validate_result(cell: FormalCell, commit: Optional[str] = None) -> None:
+def _validate_result(
+    cell: FormalCell,
+    commit: Optional[str] = None,
+    *,
+    protocol_sha256: Optional[str] = None,
+) -> None:
     try:
         payload = json.loads(cell.result.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -348,7 +353,7 @@ def _validate_result(cell: FormalCell, commit: Optional[str] = None) -> None:
         "method": cell.method,
         "fault": cell.fault,
         "episodes_completed": cell.episodes,
-        "protocol_sha256": _sha256(PROTOCOL),
+        "protocol_sha256": protocol_sha256 or _sha256(PROTOCOL),
     }
     for name, value in expected.items():
         if metadata.get(name) != value:
@@ -395,26 +400,39 @@ def _validate_shard(shard: FormalShard, commit: Optional[str] = None) -> None:
 
 
 def _merge_ik_diagnostics(payloads: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    keys = set(payloads[0])
-    if any(set(payload) != keys for payload in payloads[1:]):
-        raise RuntimeError("formal shards expose different IK diagnostic fields")
+    # Runtime counters are emitted lazily: a shard that never exercises a
+    # diagnostic path can legitimately omit that counter.  Configuration and
+    # identity fields, in contrast, must be present and identical everywhere.
+    keys = set().union(*(set(payload) for payload in payloads))
     result: dict[str, Any] = {}
     for key in sorted(keys):
-        values = [payload[key] for payload in payloads]
+        values = [payload[key] for payload in payloads if key in payload]
+        missing = len(values) != len(payloads)
         first = values[0]
         if isinstance(first, bool) or isinstance(first, str) or first is None:
+            if missing:
+                raise RuntimeError(f"formal shard IK identity is missing at {key}")
             if any(value != first for value in values[1:]):
                 raise RuntimeError(f"formal shard IK identity differs at {key}")
             result[key] = first
         elif isinstance(first, dict):
+            if missing:
+                raise RuntimeError(f"formal shard IK config is missing at {key}")
             if any(value != first for value in values[1:]):
                 raise RuntimeError(f"formal shard IK config differs at {key}")
             result[key] = first
         elif isinstance(first, list):
+            if any(not isinstance(value, list) for value in values[1:]):
+                raise RuntimeError(f"formal shard IK type differs at {key}")
             result[key] = sorted(
                 {item for value in values for item in value}
             )
         elif isinstance(first, (int, float)):
+            if any(
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                for value in values[1:]
+            ):
+                raise RuntimeError(f"formal shard IK type differs at {key}")
             if key.endswith("_max") or key.endswith("_tier_max"):
                 result[key] = max(values)
             elif key.endswith("_min"):
@@ -656,14 +674,14 @@ def _retained_records() -> dict[str, dict[str, str]]:
         ) from error
     if not isinstance(payload, dict) or set(payload) != {
         "schema",
-        "protocol_sha256",
+        "active_protocol_sha256",
         "reason",
         "records",
     }:
         raise RuntimeError("retained formal-result manifest has invalid fields")
-    if payload.get("schema") != "essay2608.phase6_retained_results.v1":
+    if payload.get("schema") != "essay2608.phase6_retained_results.v2":
         raise RuntimeError("retained formal-result manifest has invalid schema")
-    if payload.get("protocol_sha256") != _sha256(PROTOCOL):
+    if payload.get("active_protocol_sha256") != _sha256(PROTOCOL):
         raise RuntimeError("retained formal results belong to a different protocol")
     if not isinstance(payload.get("reason"), str) or not payload["reason"].strip():
         raise RuntimeError("retained formal-result manifest must state its reason")
@@ -674,7 +692,8 @@ def _retained_records() -> dict[str, dict[str, str]]:
         if (
             not isinstance(cell_id, str)
             or not isinstance(record, dict)
-            or set(record) != {"path", "git_commit", "sha256"}
+            or set(record)
+            != {"path", "git_commit", "protocol_sha256", "sha256"}
             or any(not isinstance(record[name], str) for name in record)
         ):
             raise RuntimeError("retained formal-result record is invalid")
@@ -692,7 +711,30 @@ def _validate_retained_result(cell: FormalCell) -> None:
         raise RuntimeError(f"retained result path differs: {cell.result}")
     if record["sha256"] != _sha256(cell.result):
         raise RuntimeError(f"retained result content differs: {cell.result}")
-    _validate_result(cell, record["git_commit"])
+    _validate_result(
+        cell,
+        record["git_commit"],
+        protocol_sha256=record["protocol_sha256"],
+    )
+
+
+def _validate_available_result(
+    cell: FormalCell, commit: Optional[str] = None
+) -> str:
+    """Validate either the active result identity or an explicit retention.
+
+    A targeted rerun may leave unaffected cells byte-for-byte frozen while
+    replacing only the cells touched by a general mechanism correction.  The
+    retention manifest authenticates those exact files; it never rewrites
+    their embedded provenance or silently accepts an arbitrary old result.
+    """
+
+    try:
+        _validate_result(cell, commit)
+    except RuntimeError:
+        _validate_retained_result(cell)
+        return "COMPLETED_RETAINED"
+    return "COMPLETED_VALIDATED"
 
 
 def _states(cells: Sequence[FormalCell], commit: Optional[str]) -> dict[str, str]:
@@ -702,14 +744,7 @@ def _states(cells: Sequence[FormalCell], commit: Optional[str]) -> dict[str, str
         if lock.exists():
             raise RuntimeError(f"formal result has an active/stale lock: {lock}")
         if cell.result.exists():
-            _validate_result(cell)
-            payload = json.loads(cell.result.read_text(encoding="utf-8"))
-            result_commit = payload["stage6_formal_evaluation"]["git_commit"]
-            if commit is None or result_commit == commit:
-                result[cell.cell_id] = "COMPLETED_VALIDATED"
-            else:
-                _validate_retained_result(cell)
-                result[cell.cell_id] = "COMPLETED_RETAINED"
+            result[cell.cell_id] = _validate_available_result(cell, commit)
         else:
             result[cell.cell_id] = "PENDING"
     return result

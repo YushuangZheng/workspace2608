@@ -80,7 +80,7 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
 
 
 def _load_cell(cell: launch.FormalCell) -> tuple[dict[str, Any], dict[int, bool]]:
-    launch._validate_result(cell)
+    launch._validate_available_result(cell)
     payload = json.loads(cell.result.read_text(encoding="utf-8"))
     metadata = payload["stage6_formal_evaluation"]
     indices = metadata["episode_indices"]
@@ -106,7 +106,6 @@ def _cell_rows(
 ]:
     rows = []
     outcomes = {}
-    commits = set()
     for cell in cells:
         payload, values = _load_cell(cell)
         metadata = payload["stage6_formal_evaluation"]
@@ -125,7 +124,6 @@ def _cell_rows(
             conditional_recovery_rate = (
                 "" if not triggered_rows else triggered_successes / len(triggered_rows)
             )
-        commits.add(metadata["git_commit"])
         rows.append(
             {
                 "experiment": cell.experiment,
@@ -144,13 +142,12 @@ def _cell_rows(
                 "triggered_successes": triggered_successes,
                 "conditional_recovery_rate": conditional_recovery_rate,
                 "git_commit": metadata["git_commit"],
+                "result_protocol_sha256": metadata["protocol_sha256"],
                 "result_path": cell.result.as_posix(),
                 "result_sha256": _sha256(cell.result),
             }
         )
         outcomes[(cell.experiment, cell.fault, cell.task, cell.method)] = values
-    if len(commits) != 1:
-        raise RuntimeError("formal cells were produced by different Git commits")
     return rows, outcomes
 
 

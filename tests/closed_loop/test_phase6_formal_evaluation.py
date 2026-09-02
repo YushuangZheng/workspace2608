@@ -277,14 +277,22 @@ def test_shard_merge_is_resumable_and_rejects_incomplete_coverage(
     commit = "a" * 40
     for shard in shards:
         shard.result.parent.mkdir(parents=True, exist_ok=True)
+        payload = _synthetic_shard_payload(
+            cell,
+            shard.episode_indices,
+            commit=commit,
+        )
+        if shard is shards[0]:
+            payload["ik_execution_diagnostics"].update(
+                {
+                    "optional_counter": 3,
+                    "optional_residual_max": 2.5,
+                    "optional_fraction_min": 0.2,
+                    "optional_sources": ["synthetic"],
+                }
+            )
         shard.result.write_text(
-            json.dumps(
-                _synthetic_shard_payload(
-                    cell,
-                    shard.episode_indices,
-                    commit=commit,
-                )
-            ),
+            json.dumps(payload),
             encoding="utf-8",
         )
 
@@ -298,6 +306,10 @@ def test_shard_merge_is_resumable_and_rejects_incomplete_coverage(
     assert merged["success_rate"] == 0.5
     assert merged["ik_execution_diagnostics"]["attempts"] == 4
     assert merged["ik_execution_diagnostics"]["residual_max"] == 3.0
+    assert merged["ik_execution_diagnostics"]["optional_counter"] == 3
+    assert merged["ik_execution_diagnostics"]["optional_residual_max"] == 2.5
+    assert merged["ik_execution_diagnostics"]["optional_fraction_min"] == 0.2
+    assert merged["ik_execution_diagnostics"]["optional_sources"] == ["synthetic"]
     assert merged["stage6_formal_evaluation"]["shard_merge"][
         "exact_nonoverlapping_coverage"
     ] is True
@@ -359,9 +371,16 @@ def test_formal_cell_paths_are_separate_from_v4_release_results() -> None:
         assert cell.result.is_relative_to(launch.RESULTS_ROOT)
 
 
-def test_active_executor_revision_retains_no_older_formal_results() -> None:
+def test_minimal_normal_rerun_retention_is_explicit_and_content_addressed() -> None:
     run_cell.load_protocol()
-    assert launch._retained_records() == {}
+    records = launch._retained_records()
+
+    assert len(records) == 32
+    assert set(records) == {
+        cell.cell_id for cell in launch.build_cells(run_cell.load_protocol(), "normal")
+    }
+    assert all(len(record["sha256"]) == 64 for record in records.values())
+    assert all(len(record["protocol_sha256"]) == 64 for record in records.values())
 
 
 def test_formal_statistics_helpers_match_known_binomial_cases() -> None:
