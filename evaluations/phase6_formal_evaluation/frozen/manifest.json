@@ -14,7 +14,7 @@
     "result_schema.json": "b9f773a16d3a482fd2703148f01773317c0e4920e3cbfd470f32fcab2ab341b8"
   },
   "formal_protocol": "evaluations/phase6_formal_evaluation/protocol.json",
-  "formal_protocol_sha256": "321525ba2da6b0dd677748ba3b728fbf0a18c1463f36676f7af6572bd43c54b0",
+  "formal_protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
   "methods": [
     "dynamac_v4",
     "progress_only",
