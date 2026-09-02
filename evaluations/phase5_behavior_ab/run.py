@@ -64,7 +64,7 @@ def _read_config(path: Path) -> dict[str, Any]:
         "tasks",
         "demonstration_indices",
         "verification_outcomes",
-        "reference_reentry_robot_compatibility",
+        "reference_reentry_robot_peak_normalized_compatibility",
         "maximum_simulation_cycles",
         "stuck_recovery_waypoint_cycles",
         "stuck_recovery_attempts",
@@ -77,7 +77,9 @@ def _read_config(path: Path) -> dict[str, Any]:
         raise ValueError("阶段五行为 A/B 任务和示范索引不能为空")
     if set(value["verification_outcomes"]) != {"linked", "external"}:
         raise ValueError("主动验证必须同时评测 linked 和 external 物理结果")
-    reference_threshold = float(value["reference_reentry_robot_compatibility"])
+    reference_threshold = float(
+        value["reference_reentry_robot_peak_normalized_compatibility"]
+    )
     if not 0.0 <= reference_threshold <= 1.0:
         raise ValueError("重入机器人兼容度参考阈值必须位于 [0,1]")
     for name in (
@@ -715,9 +717,11 @@ def _reentry_trials(
                     ),
                     "proposed_wins": int(proposed_error < baseline_error),
                     "atomic_commit_correct": int(commit_correct),
-                    "truth_robot_compatibility": evaluation.scores[
-                        truth
-                    ].robot_compatibility,
+                    "truth_robot_peak_normalized_compatibility": (
+                        evaluation.scores[
+                            truth
+                        ].robot_peak_normalized_compatibility
+                    ),
                     "truth_scene_compatibility": evaluation.scores[
                         truth
                     ].state_compatibility,
@@ -870,8 +874,8 @@ def run(config_path: Path, output: Path) -> None:
     recovery_config = ClosedLoopRecoveryConfig.from_json(RECOVERY_CONFIG_PATH)
     reference_reentry_config = replace(
         recovery_config.reentry,
-        minimum_robot_compatibility=float(
-            config["reference_reentry_robot_compatibility"]
+        minimum_robot_peak_normalized_compatibility=float(
+            config["reference_reentry_robot_peak_normalized_compatibility"]
         ),
     )
     maximum_demo = max(int(value) for value in config["demonstration_indices"])
@@ -978,15 +982,20 @@ def run(config_path: Path, output: Path) -> None:
         reentry_rows,
         guard_rows,
     )
-    reference_threshold = float(config["reference_reentry_robot_compatibility"])
-    calibrated_threshold = recovery_config.reentry.minimum_robot_compatibility
+    reference_threshold = float(
+        config["reference_reentry_robot_peak_normalized_compatibility"]
+    )
+    calibrated_threshold = (
+        recovery_config.reentry.minimum_robot_peak_normalized_compatibility
+    )
     calibration_rows = [
         {
             "normal_trials": len(reentry_rows),
             "reference_threshold": reference_threshold,
             "calibrated_threshold": calibrated_threshold,
-            "minimum_truth_robot_compatibility": min(
-                float(row["truth_robot_compatibility"]) for row in reentry_rows
+            "minimum_truth_robot_peak_normalized_compatibility": min(
+                float(row["truth_robot_peak_normalized_compatibility"])
+                for row in reentry_rows
             ),
             "reference_selected": sum(
                 int(row["reference_selected"]) for row in reentry_rows
@@ -1102,7 +1111,7 @@ def run(config_path: Path, output: Path) -> None:
             f"- 机器人兼容度阈值由 {calibration['reference_threshold']:.6f} "
             f"标定为 {calibration['calibrated_threshold']:.6f}；"
             f"240条正常试验中的最低正确状态兼容度为 "
-            f"{calibration['minimum_truth_robot_compatibility']:.8f}。"
+            f"{calibration['minimum_truth_robot_peak_normalized_compatibility']:.8f}。"
         ),
         (
             f"- 状态选择 {calibration['reference_selected']}→"

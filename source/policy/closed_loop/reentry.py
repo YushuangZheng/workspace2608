@@ -19,7 +19,7 @@ from .task_model import ClosedLoopTaskModel
 @dataclass(frozen=True)
 class ReentryConfig:
     minimum_explanation_score: float = 0.001
-    minimum_robot_compatibility: float = 0.001
+    minimum_robot_peak_normalized_compatibility: float = 0.001
     minimum_scene_compatibility: float = 0.01
     minimum_relation_compatibility: float = 0.60
     require_relation_evidence_when_available: bool = True
@@ -27,7 +27,7 @@ class ReentryConfig:
     def __post_init__(self) -> None:
         for value in (
             self.minimum_explanation_score,
-            self.minimum_robot_compatibility,
+            self.minimum_robot_peak_normalized_compatibility,
             self.minimum_scene_compatibility,
             self.minimum_relation_compatibility,
         ):
@@ -133,7 +133,10 @@ class ReentrySelector:
                 reasons.append("cross_skill_guard_not_permitted")
             if not score.robot_evidence_available:
                 reasons.append("robot_evidence_unavailable")
-            elif score.robot_compatibility < self.config.minimum_robot_compatibility:
+            elif (
+                score.robot_peak_normalized_compatibility
+                < self.config.minimum_robot_peak_normalized_compatibility
+            ):
                 reasons.append("robot_incompatible")
             if score.scene_evidence_expected:
                 if not score.scene_evidence_available:
@@ -190,7 +193,7 @@ class ReentrySelector:
                 else max(
                     alignment_candidates,
                     key=lambda item: (
-                        item[1].robot_compatibility,
+                        item[1].robot_peak_normalized_compatibility,
                         -self._global_index[item[0]],
                     ),
                 )[0]

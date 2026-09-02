@@ -38,8 +38,10 @@ from integrations.rlbench.rlbench_dynamac.protocols.store_bottle_semantics impor
 
 
 DEFAULT_DATA_ROOT = REPOSITORY_ROOT / "integrations/rlbench/data/training/main"
-DEFAULT_BASE_MODELS = REPOSITORY_ROOT / "integrations/rlbench/models/v4"
-DEFAULT_OUTPUT = REPOSITORY_ROOT / "integrations/rlbench/models/closed_loop_v1"
+DEFAULT_BASE_MODELS = REPOSITORY_ROOT / "integrations/rlbench/models/phase6_v1"
+DEFAULT_OUTPUT = (
+    REPOSITORY_ROOT / "integrations/rlbench/models/closed_loop_phase6_v1"
+)
 DEFAULT_TASK_CONFIG = REPOSITORY_ROOT / "configs/closed_loop_task_model.json"
 DEFAULT_BELIEF_CONFIG = REPOSITORY_ROOT / "configs/closed_loop_belief.json"
 DEFAULT_EXECUTION_CONFIG = REPOSITORY_ROOT / "configs/closed_loop_execution.json"

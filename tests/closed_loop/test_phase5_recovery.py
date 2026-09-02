@@ -17,6 +17,7 @@ from essay2608.policy import (
 from essay2608.policy.closed_loop import (
     BeliefUpdater,
     BoundaryId,
+    CandidateScore,
     ClosedLoopBelief,
     ClosedLoopExecutionController,
     ClosedLoopRecoveryConfig,
@@ -1300,6 +1301,59 @@ def test_reentry_uses_full_state_and_requires_cross_skill_guard(phase5_case) -> 
     assert frozen.progress.posterior == {candidate: 1.0}
 
 
+def test_reentry_threshold_uses_jointly_attainable_robot_peak(
+    phase5_case, monkeypatch
+) -> None:
+    model, demonstrations, _ = phase5_case
+    state = StateId(0, 1)
+    belief = belief_for(
+        model,
+        demonstrations,
+        state,
+        relation(RelationDecision.EXTERNAL),
+    )
+    score = CandidateScore(
+        state_id=state,
+        robot_log_likelihood=-30.0,
+        state_log_likelihood=0.0,
+        robot_log_support=-0.1,
+        robot_unadjusted_log_support=-30.0,
+        state_log_support=0.0,
+        relation_log_compatibility=0.0,
+        explanation_log_score=-0.1,
+        normalized_explanation_score=0.8,
+        robot_compatibility=1.0e-8,
+        robot_peak_normalized_compatibility=0.9,
+        state_compatibility=1.0,
+        relation_compatibility=1.0,
+        relation_state_compatibility=1.0,
+        robot_frame_weights={"object": 1.0},
+        relation_frame_weights={"object": 1.0},
+        robot_evidence_available=True,
+    )
+    selector = ReentrySelector(
+        model,
+        ReentryConfig(
+            minimum_explanation_score=0.1,
+            minimum_robot_peak_normalized_compatibility=0.5,
+        ),
+    )
+    monkeypatch.setattr(
+        selector.evaluator,
+        "evaluate_many",
+        lambda *args, **kwargs: {state: score},
+    )
+    evaluation = selector.select(
+        (state,),
+        belief,
+        current_reference=state,
+        mode_by_skill={0: 0},
+    )
+    assert score.robot_compatibility < 0.5
+    assert evaluation.decision is not None
+    assert "robot_incompatible" not in evaluation.rejection_reasons.get(state, ())
+
+
 def test_reentry_reuses_recovery_covariance_without_changing_normal_scores(
     phase5_case,
 ) -> None:
@@ -1327,7 +1381,7 @@ def test_reentry_reuses_recovery_covariance_without_changing_normal_scores(
     )
     config = ReentryConfig(
         minimum_explanation_score=0.0,
-        minimum_robot_compatibility=0.001,
+        minimum_robot_peak_normalized_compatibility=0.001,
     )
     strict = ReentrySelector(model, config).select(
         (state,),

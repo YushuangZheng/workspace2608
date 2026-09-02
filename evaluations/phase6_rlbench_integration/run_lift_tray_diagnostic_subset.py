@@ -86,7 +86,7 @@ def main() -> int:
             "--policy-type",
             "closed_loop_multistream",
             "--closed-loop-models-dir",
-            "integrations/rlbench/models/closed_loop_v1",
+            "integrations/rlbench/models/closed_loop_phase6_v1",
             "--policy-diagnostics-dir",
             str(args.diagnostics_dir),
             "--controller-profile",

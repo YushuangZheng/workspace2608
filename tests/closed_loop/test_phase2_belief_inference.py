@@ -1284,6 +1284,46 @@ def test_reliable_early_release_can_expand_to_matching_future_segment(
     assert belief.progress.status == ProgressStatus.FORWARD_REALIGNMENT
 
 
+def test_candidate_expansion_uses_jointly_attainable_robot_peak(
+    phase2_model, monkeypatch
+) -> None:
+    model, demonstrations = phase2_model
+    state = StateId(0, 1)
+    score = candidate(state, log_score=-0.1, compatibility=0.8)
+    score = replace(
+        score,
+        robot_compatibility=1.0e-8,
+        robot_peak_normalized_compatibility=0.9,
+        relation_state_compatibility=1.0,
+        robot_evidence_available=True,
+    )
+    updater = BeliefUpdater(model)
+    monkeypatch.setattr(
+        updater.state_evaluator,
+        "evaluate_many",
+        lambda *args, **kwargs: {state: score},
+    )
+    eligible = updater._eligible_expanded_scores(
+        (state,),
+        RuntimeFeatureBuilder().build(
+            RuntimeObservation(
+                tick=1,
+                ee_pose=demonstrations[0].ee_pose[1],
+                frame_poses={"object": demonstrations[0].frames["object"][1]},
+                gripper_state=np.asarray([1.0]),
+                previous_command_pose=demonstrations[0].action_pose[0],
+                previous_ee_pose=demonstrations[0].ee_pose[0],
+                tracking_reliability={"object": 1.0},
+                frame_visibility={"object": True},
+            )
+        ),
+        {},
+        {0: 0},
+    )
+    assert score.robot_compatibility < 0.01
+    assert eligible == {state: score}
+
+
 def test_drop_during_carry_does_not_jump_to_release_on_relation_alone(
     phase2_model,
 ) -> None:

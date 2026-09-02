@@ -147,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--closed-loop-models-dir",
         type=Path,
-        default=Path("integrations/rlbench/models/closed_loop_v1"),
+        default=Path("integrations/rlbench/models/closed_loop_phase6_v1"),
     )
     parser.add_argument("--horizon", type=int, default=1000)
     return parser

@@ -51,8 +51,8 @@ from integrations.rlbench.rlbench_dynamac.data.direct_policy import demonstratio
 
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE_ROOT = ROOT / "integrations/rlbench/models/v4"
-BUNDLE_ROOT = ROOT / "integrations/rlbench/models/closed_loop_v1"
+BASE_ROOT = ROOT / "integrations/rlbench/models/phase6_v1"
+BUNDLE_ROOT = ROOT / "integrations/rlbench/models/closed_loop_phase6_v1"
 DATA_ROOT = ROOT / "integrations/rlbench/data/training/main"
 
 

@@ -39,14 +39,14 @@ from .task_model import ClosedLoopTaskModel
 class CandidateExpansionConfig:
     extension_prior_mass: float = 0.08
     minimum_relation_compatibility: float = 0.60
-    minimum_robot_compatibility: float = 0.01
+    minimum_robot_peak_normalized_compatibility: float = 0.01
     minimum_scene_compatibility: float = 0.01
 
     def __post_init__(self) -> None:
         for value in (
             self.extension_prior_mass,
             self.minimum_relation_compatibility,
-            self.minimum_robot_compatibility,
+            self.minimum_robot_peak_normalized_compatibility,
             self.minimum_scene_compatibility,
         ):
             if not 0.0 <= value <= 1.0:
@@ -443,8 +443,8 @@ class BeliefUpdater:
             state: score
             for state, score in scores.items()
             if score.robot_evidence_available
-            and score.robot_compatibility
-            >= self.expansion_config.minimum_robot_compatibility
+            and score.robot_peak_normalized_compatibility
+            >= self.expansion_config.minimum_robot_peak_normalized_compatibility
             and score.relation_state_compatibility
             >= self.expansion_config.minimum_relation_compatibility
             and (

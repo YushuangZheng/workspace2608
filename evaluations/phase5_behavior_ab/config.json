@@ -12,7 +12,7 @@
   ],
   "demonstration_indices": [0, 1, 2, 3, 4],
   "verification_outcomes": ["linked", "external"],
-  "reference_reentry_robot_compatibility": 0.01,
+  "reference_reentry_robot_peak_normalized_compatibility": 0.01,
   "maximum_simulation_cycles": 120,
   "stuck_recovery_waypoint_cycles": 1,
   "stuck_recovery_attempts": 1

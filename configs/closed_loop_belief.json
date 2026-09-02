@@ -37,7 +37,7 @@
   "candidate_expansion": {
     "extension_prior_mass": 0.08,
     "minimum_relation_compatibility": 0.6,
-    "minimum_robot_compatibility": 0.01,
+    "minimum_robot_peak_normalized_compatibility": 0.01,
     "minimum_scene_compatibility": 0.01
   }
 }

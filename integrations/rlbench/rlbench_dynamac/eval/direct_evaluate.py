@@ -123,7 +123,7 @@ DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
 DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v3"
 V4_MODELS_DIR = INTEGRATION_ROOT / "models" / "v4"
 V4_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v4"
-CLOSED_LOOP_MODELS_DIR = INTEGRATION_ROOT / "models" / "closed_loop_v1"
+CLOSED_LOOP_MODELS_DIR = INTEGRATION_ROOT / "models" / "closed_loop_phase6_v1"
 DEFAULT_POLICY_PYTHON = Path(
     os.environ.get(
         "DYNAMAC_POLICY_PYTHON",

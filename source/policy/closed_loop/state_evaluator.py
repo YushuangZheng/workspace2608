@@ -210,10 +210,10 @@ class CandidateScore:
     # test is not stricter than the action distribution that produced it.
     robot_covariance_inflation: float = 0.0
     # ``robot_compatibility`` is the geometric mean of the individually
-    # peak-normalized stream supports and remains the quantity used by the
-    # existing posterior/expansion audits.  The absolute plausibility gate
-    # additionally removes the lower, jointly attainable peak of a multi-flow
-    # PoE whose transformed expert means do not coincide exactly.
+    # peak-normalized stream supports and is retained for component audit.
+    # Absolute decisions use the jointly attainable peak-normalized value
+    # below, because one world EE pose generally cannot sit at every
+    # transformed expert mean at once.
     robot_peak_normalized_compatibility: float = 1.0
     relation_peak_normalized_compatibility: float = 1.0
     # Thresholded state-transition/reentry checks need both a unit-peak scale

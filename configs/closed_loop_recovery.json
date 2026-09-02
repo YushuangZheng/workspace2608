@@ -38,7 +38,7 @@
   },
   "reentry": {
     "minimum_explanation_score": 0.001,
-    "minimum_robot_compatibility": 0.001,
+    "minimum_robot_peak_normalized_compatibility": 0.001,
     "minimum_scene_compatibility": 0.01,
     "minimum_relation_compatibility": 0.6,
     "require_relation_evidence_when_available": true
