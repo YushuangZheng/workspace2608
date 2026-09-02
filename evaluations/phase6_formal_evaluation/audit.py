@@ -63,11 +63,11 @@ def _latest_completed_fault_launch(protocol_sha256: str) -> tuple[Path, dict[str
             payload.get("schema") == "essay2608.phase6_formal_launch.v1"
             and payload.get("status") == "completed"
             and payload.get("protocol_sha256") == protocol_sha256
-            and scheduler.get("new_shards_completed") == 6400
+            and scheduler.get("new_shards_completed", 0) > 0
         ):
             candidates.append((path, payload))
     if not candidates:
-        raise RuntimeError("no completed 6400-shard fault launcher record exists")
+        raise RuntimeError("no completed active-protocol fault launcher record exists")
     return max(candidates, key=lambda value: value[0].parent.name)
 
 
@@ -345,11 +345,24 @@ def audit() -> dict[str, Any]:
 
     launch_path, launch_payload = _latest_completed_fault_launch(protocol_sha256)
     launcher_cells = launch_payload.get("cells", {})
+    launcher_states = (
+        Counter(launcher_cells.values())
+        if isinstance(launcher_cells, dict)
+        else Counter()
+    )
+    active_fault_cells = launcher_states["COMPLETED_VALIDATED"]
+    retained_fault_cells = launcher_states["COMPLETED_RETAINED"]
+    expected_new_shards = active_fault_cells * 50
     launcher_valid = (
         isinstance(launcher_cells, dict)
         and len(launcher_cells) == 128
-        and set(launcher_cells.values()) == {"COMPLETED_VALIDATED"}
+        and set(launcher_cells.values()).issubset(
+            {"COMPLETED_VALIDATED", "COMPLETED_RETAINED"}
+        )
+        and active_fault_cells + retained_fault_cells == 128
         and launch_payload.get("parallel_workers") == 48
+        and launch_payload.get("scheduler", {}).get("new_shards_completed")
+        == expected_new_shards
         and launch_payload.get("scheduler", {}).get("shard_size") == 1
         and launch_payload.get("scheduler", {}).get("work_conserving_global_queue")
         is True

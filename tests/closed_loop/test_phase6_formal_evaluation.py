@@ -507,15 +507,20 @@ def test_formal_cell_paths_are_separate_from_v4_release_results() -> None:
         assert cell.result.is_relative_to(launch.RESULTS_ROOT)
 
 
-def test_retained_normal_and_dynamic_results_are_content_addressed() -> None:
+def test_unaffected_formal_results_are_content_addressed() -> None:
     run_cell.load_protocol()
     records = launch._retained_records()
 
     expected_cells = (
         *launch.build_cells(run_cell.load_protocol(), "normal"),
         *launch.build_cells(run_cell.load_protocol(), "dynamic"),
+        *(
+            cell
+            for cell in launch.build_cells(run_cell.load_protocol(), "fault")
+            if cell.fault != "grasp_failure"
+        ),
     )
-    assert len(records) == 64
+    assert len(records) == 160
     assert set(records) == {cell.cell_id for cell in expected_cells}
     assert all(len(record["sha256"]) == 64 for record in records.values())
     assert all(len(record["protocol_sha256"]) == 64 for record in records.values())
