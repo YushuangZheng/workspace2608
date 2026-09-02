@@ -147,5 +147,62 @@ class RelationGoalPlanner:
             )
         )
 
+    def plan_available(
+        self,
+        intents: Sequence[RelationRecoveryIntent],
+        *,
+        source_state: StateId,
+        mode: int,
+    ) -> tuple[tuple[RelationGoal, ...], tuple[RelationRecoveryIntent, ...]]:
+        """Plan only recovery goals grounded by learned event metadata.
+
+        A reliable online mismatch does not imply that successful
+        demonstrations contain the inverse relation-changing event.  In
+        particular, an unexpectedly early ``linked`` decision can occur for a
+        relation that is normally linked once and never released.  Such an
+        observation must keep normal advancement blocked, but it cannot be
+        converted into an invented UNLINK trajectory.
+
+        The strict :meth:`plan` API remains unchanged for callers that require
+        every intent to be resolvable.  Runtime orchestration uses this method
+        to keep unsupported intents diagnostic-only while continuing to plan
+        every learned recovery primitive that is available.
+        """
+
+        by_frame: dict[str, RelationRecoveryIntent] = {}
+        for intent in intents:
+            if intent.arm_id != self.task_model.arm_id:
+                raise ValueError("恢复意图不属于当前机械臂")
+            previous = by_frame.get(intent.frame_id)
+            if previous is not None and previous != intent:
+                raise ValueError("同一参考系收到相互冲突的关系恢复意图")
+            by_frame[intent.frame_id] = intent
+
+        goals: list[RelationGoal] = []
+        unavailable: list[RelationRecoveryIntent] = []
+        for intent in (by_frame[frame] for frame in sorted(by_frame)):
+            try:
+                goals.extend(
+                    self.plan(
+                        (intent,),
+                        source_state=source_state,
+                        mode=mode,
+                    )
+                )
+            except KeyError:
+                unavailable.append(intent)
+        return (
+            tuple(
+                sorted(
+                    goals,
+                    key=lambda goal: (
+                        0 if goal.kind == RelationGoalKind.UNLINK else 1,
+                        goal.frame_id,
+                    ),
+                )
+            ),
+            tuple(unavailable),
+        )
+
 
 __all__ = ["RelationGoal", "RelationGoalKind", "RelationGoalPlanner"]

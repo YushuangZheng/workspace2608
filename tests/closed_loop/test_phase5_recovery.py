@@ -855,6 +855,43 @@ def test_relation_goal_planner_uses_event_context_and_unlink_before_link(
     assert goals[0].unlink_metadata is not None
 
 
+def test_runtime_does_not_invent_unlink_without_learned_release_metadata(
+    phase5_case,
+) -> None:
+    model, _, _ = phase5_case
+    model.unlink_events.clear()
+    intent = RelationRecoveryIntent(
+        model.arm_id,
+        "object",
+        RelationDecision.EXTERNAL,
+        RelationDecision.LINKED,
+    )
+    source = model.skill_states[1][0]
+    planner = RelationGoalPlanner(
+        EpisodeLinkAnchorRegistry(model), UnlinkMetadataRepository(model)
+    )
+
+    with pytest.raises(KeyError):
+        planner.plan((intent,), source_state=source, mode=0)
+    goals, unavailable = planner.plan_available((intent,), source_state=source, mode=0)
+    assert goals == ()
+    assert unavailable == (intent,)
+
+    manager = ClosedLoopRecoveryManager(model)
+    began = manager.begin_recovery(
+        RecoveryTriggerDecision(
+            triggered=True,
+            reasons=(f"{model.arm_id}:relation_mismatch",),
+            intents=(intent,),
+        ),
+        source_state=source,
+        mode=0,
+    )
+    assert not began
+    assert manager.mode == ExecutionMode.TASK
+    assert manager.unavailable_recovery_intents == (intent,)
+
+
 def test_link_and_unlink_recovery_are_bounded_and_supply_reentry_states(
     phase5_case,
 ) -> None:
@@ -1456,10 +1493,7 @@ def test_reentry_alignment_routes_with_candidate_relation_without_mutating_beta(
         mode_by_skill=mode_by_skill,
         commit=False,
     )
-    assert (
-        ordinary.decisions["object"].expected_relation
-        == RelationDecision.LINKED
-    )
+    assert ordinary.decisions["object"].expected_relation == RelationDecision.LINKED
 
     calls = []
     expected = SimpleNamespace(action=object())
@@ -1485,8 +1519,7 @@ def test_reentry_alignment_routes_with_candidate_relation_without_mutating_beta(
     assert calls[0][1] == candidate
     assert calls[0][2].blocks_advance is False
     assert (
-        calls[0][2].decisions["object"].expected_relation
-        == RelationDecision.EXTERNAL
+        calls[0][2].decisions["object"].expected_relation == RelationDecision.EXTERNAL
     )
     assert belief.progress.posterior == {frozen: 1.0}
     assert belief.progress.estimated_state == frozen

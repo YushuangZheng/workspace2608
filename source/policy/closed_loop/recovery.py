@@ -268,9 +268,7 @@ class RecoveryTriggerTracker:
                 key = (event_id.arm_id, event_id.frame_id)
                 previous = prepared_link_events.get(key)
                 if previous is not None and previous != event_id:
-                    raise RuntimeError(
-                        "同一边界周期的 arm-frame 存在多个关系建立事件"
-                    )
+                    raise RuntimeError("同一边界周期的 arm-frame 存在多个关系建立事件")
                 prepared_link_events[key] = event_id
         for arm, request in transition_requests.items():
             if arm not in self.task_models:
@@ -1024,6 +1022,7 @@ class ClosedLoopRecoveryManager:
         self.goal_planner = RelationGoalPlanner(
             self.anchor_registry, self.unlink_repository
         )
+        self._unavailable_recovery_intents: tuple[RelationRecoveryIntent, ...] = ()
         self.verification = RelationVerificationController(config.verification)
         self.recovery = RelationRecoveryController(
             self.anchor_registry,
@@ -1039,6 +1038,7 @@ class ClosedLoopRecoveryManager:
 
     def reset(self) -> None:
         self.mode = ExecutionMode.TASK
+        self._unavailable_recovery_intents = ()
         self.anchor_registry.reset()
         self.verification.reset_runtime()
         self.verification.attempts.reset()
@@ -1090,9 +1090,7 @@ class ClosedLoopRecoveryManager:
             >= self.verification.config.minimum_tracking_reliability
             and estimate.information_weight
             < self.verification.config.minimum_information_weight
-            and self.verification.approach_direction_available(
-                self._task_pose_history
-            )
+            and self.verification.approach_direction_available(self._task_pose_history)
             and self.verification.can_attempt(
                 candidate,
                 task_state=task_state,
@@ -1179,16 +1177,28 @@ class ClosedLoopRecoveryManager:
         *,
         source_state: StateId,
         mode: int,
-    ) -> None:
+    ) -> bool:
         if self.mode != ExecutionMode.TASK:
             raise RuntimeError("只有 TASK 模式可以进入 RECOVERY")
         if not trigger.triggered:
             raise ValueError("没有恢复触发证据")
-        goals = self.goal_planner.plan(
-            trigger.intents,
-            source_state=source_state,
-            mode=mode,
-        )
+        if trigger.intents:
+            goals, unavailable = self.goal_planner.plan_available(
+                trigger.intents,
+                source_state=source_state,
+                mode=mode,
+            )
+        else:
+            goals, unavailable = (), ()
+        self._unavailable_recovery_intents = unavailable
+        if trigger.intents and not goals:
+            # The dynamic-role layer still blocks normal advancement while the
+            # reliable relation mismatch is present.  Remaining in TASK keeps
+            # beta/q updates alive so a progress-relation disagreement can
+            # realign on the next observation.  Entering RECOVERY here would
+            # either invent a relation-changing primitive absent from the
+            # successful demonstrations or misroute to unconstrained reentry.
+            return False
         self.recovery.start(
             goals,
             fallback_reentry_states=(
@@ -1197,6 +1207,13 @@ class ClosedLoopRecoveryManager:
         )
         self._frozen_reference = source_state
         self.mode = ExecutionMode.RECOVERY
+        return True
+
+    @property
+    def unavailable_recovery_intents(self) -> tuple[RelationRecoveryIntent, ...]:
+        """Latest reliable intents lacking a learned recovery primitive."""
+
+        return self._unavailable_recovery_intents
 
     def update_recovery(
         self,

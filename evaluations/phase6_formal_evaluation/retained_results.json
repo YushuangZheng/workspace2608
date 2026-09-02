@@ -1,7 +1,199 @@
 {
   "active_protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-  "reason": "The completed 32-cell normal matrix is frozen by exact result content hash after the user-approved minimal rerun: WipeDesk all four methods and PlaceCups progress_only/progress_dynamic_roles were regenerated; the other 26 unaffected cells were retained.",
+  "reason": "Retain byte-identical completed normal and dynamic-no-fault cells after later general fixes whose execution paths were not exercised by those cells; rerun only affected or pending formal cells.",
   "records": {
+    "dynamic/bimanual_handover_item/dynamac_v4": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_handover_item/dynamac_v4_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "4e9d8b83aa7419bde81051f65d34ad9452da6877cea41ae5c7059c315b7e47f7"
+    },
+    "dynamic/bimanual_handover_item/full": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_handover_item/full_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "ac8feebedb2236e54d90427154b5e0e4030461d57ab548b91fab258abd616c89"
+    },
+    "dynamic/bimanual_handover_item/progress_dynamic_roles": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_handover_item/progress_dynamic_roles_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "3167b1762a5b633dbe27982489c7e66aa5241b593f0022c524cea3dec970d336"
+    },
+    "dynamic/bimanual_handover_item/progress_only": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_handover_item/progress_only_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "2c6af58e11941fbe481f461b46f711d7c4078e78041b14b2decc6cce1dc4d9be"
+    },
+    "dynamic/bimanual_lift_tray/dynamac_v4": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_lift_tray/dynamac_v4_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "3d0d1af9387f899d4aeed7f0442363d1e9812cf40577d644cf7bba00e1d76ed1"
+    },
+    "dynamic/bimanual_lift_tray/full": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_lift_tray/full_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "c64af2144251e9957f3ce9c71c31ccf9d4fa0e0fab27af981772d125412498ba"
+    },
+    "dynamic/bimanual_lift_tray/progress_dynamic_roles": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_lift_tray/progress_dynamic_roles_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "556a7f561b96ddd4eb84224099f1ed154bb6ef56eed0e6c521dc68a38d484ccd"
+    },
+    "dynamic/bimanual_lift_tray/progress_only": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_lift_tray/progress_only_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "6f3af6737bba1c3bafa4a970a3cd3e3b931bb0cd8390c2a6ac3ecf0730cf964e"
+    },
+    "dynamic/bimanual_put_bottle_in_fridge/dynamac_v4": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_put_bottle_in_fridge/dynamac_v4_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "ca17b6de1c9b9e5002aa0eb66dc0f87e27775edf545aa475c12f5814497f6d29"
+    },
+    "dynamic/bimanual_put_bottle_in_fridge/full": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_put_bottle_in_fridge/full_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "e56e2e11d3a35340a4be34691b9ca3fb8b864d3104ec9c248ec91c7cbe3e1d89"
+    },
+    "dynamic/bimanual_put_bottle_in_fridge/progress_dynamic_roles": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_put_bottle_in_fridge/progress_dynamic_roles_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "43d5fc129b7c372abae8226173e3b028eba7917c50a942b5a4d2e02e4945db0c"
+    },
+    "dynamic/bimanual_put_bottle_in_fridge/progress_only": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_put_bottle_in_fridge/progress_only_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "5600dea2d0708b83317d83e9918a94f27337aabf7d213be3ee1787859287b083"
+    },
+    "dynamic/bimanual_sweep_to_dustpan/dynamac_v4": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_sweep_to_dustpan/dynamac_v4_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "7bebf0667d3b388de8190ab12d8443442eb7af9dfb14d848ca19ec2061b8c479"
+    },
+    "dynamic/bimanual_sweep_to_dustpan/full": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_sweep_to_dustpan/full_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "304a7721f18f421291a48f83305a48c6c9b00764f66b61cfb63772828ea1ab23"
+    },
+    "dynamic/bimanual_sweep_to_dustpan/progress_dynamic_roles": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_sweep_to_dustpan/progress_dynamic_roles_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "7004b2ed373cef33a7996b4291df79e6d9ddff5002e78aa450c549db47990df4"
+    },
+    "dynamic/bimanual_sweep_to_dustpan/progress_only": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/bimanual_sweep_to_dustpan/progress_only_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "f275319d8a8818c5eedc2cc1203593056d1aafd6200c73db31f99c2852b39548"
+    },
+    "dynamic/open_microwave/dynamac_v4": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/open_microwave/dynamac_v4_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "8dcc7bdea415a849a31925edc4bb7c7c6fe1318b5faafff631e2c69ee583290e"
+    },
+    "dynamic/open_microwave/full": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/open_microwave/full_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "87792d48d4217100925c6ceba83573a4083d7717feab1527b1718897a00a7483"
+    },
+    "dynamic/open_microwave/progress_dynamic_roles": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/open_microwave/progress_dynamic_roles_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "35348491a9ec89170984f2d883fa469b345a5e90e8b03270197c27c4a899863a"
+    },
+    "dynamic/open_microwave/progress_only": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/open_microwave/progress_only_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "f25005e0cee1ad9792adf00d6642c0c870aeba8951575170b94de10c960acd79"
+    },
+    "dynamic/place_cups/dynamac_v4": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/place_cups/dynamac_v4_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "75579cf4a0f9e7e99e4b9fb01f8ac2e65569ba6c96f2d0a2a1f3a51ad808bcdb"
+    },
+    "dynamic/place_cups/full": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/place_cups/full_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "3eb19c7b707b4e7871a8aad2cd9121377ab4aa2f5d7d90db91e878326165aeb0"
+    },
+    "dynamic/place_cups/progress_dynamic_roles": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/place_cups/progress_dynamic_roles_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "146a40b53a1b658696e2ee97301f554ee7ce0a8ff5418274c193d6f6f8717813"
+    },
+    "dynamic/place_cups/progress_only": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/place_cups/progress_only_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "638c40467968f89db19e7536d6cd71932fb07c33f9bfe88b7508f0b1d7075e60"
+    },
+    "dynamic/stack_wine/dynamac_v4": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/stack_wine/dynamac_v4_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "4c70cab042b8dbf3e635ab56cc5f87d47ff9042aab199f8752c8fe58959658f6"
+    },
+    "dynamic/stack_wine/full": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/stack_wine/full_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "19b736bdeaecd56ec3fa0b656d52e82e952f47fd9e85b11382ac3dbf98b2d235"
+    },
+    "dynamic/stack_wine/progress_dynamic_roles": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/stack_wine/progress_dynamic_roles_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "844fa94f0843ebbd2466a293c7122a787e74a84f9de09d3f14a414017f0d5959"
+    },
+    "dynamic/stack_wine/progress_only": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/stack_wine/progress_only_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "d81d6782313501a7e6b7038b165ee904b0c026e1356c2eebe347a0240e1a0047"
+    },
+    "dynamic/wipe_desk/dynamac_v4": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/wipe_desk/dynamac_v4_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "7f5f9e349e983839363230860a981e29f2a6e3f8fb88f615323cfb9a3e4196aa"
+    },
+    "dynamic/wipe_desk/full": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/wipe_desk/full_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "8578ce865b87010161a9b69f4c63d9f3f38bcb3fbad20d0d2da30eeea959a6a2"
+    },
+    "dynamic/wipe_desk/progress_dynamic_roles": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/wipe_desk/progress_dynamic_roles_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "92908d258b7b1b0174c6e68ba249943c00e1c5c09545509b9efeb62fa37c7945"
+    },
+    "dynamic/wipe_desk/progress_only": {
+      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
+      "path": "dynamic/wipe_desk/progress_only_n50.json",
+      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+      "sha256": "f49c9ca4c4c71193390c38cb06d433685bf1978f378b1ce941ed36054df84178"
+    },
     "normal/bimanual_handover_item/dynamac_v4": {
       "git_commit": "0401a1066f32b2d7f2842956f84c91082500b268",
       "path": "normal/bimanual_handover_item/dynamac_v4_n200.json",
