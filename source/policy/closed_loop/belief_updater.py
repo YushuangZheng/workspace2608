@@ -561,12 +561,15 @@ class BeliefUpdater:
         observation: RuntimeObservation,
         *,
         mode_by_skill: Mapping[int, int] | None = None,
+        demonstration_state_by_frame: Mapping[str, StateId] | None = None,
     ) -> ClosedLoopBelief:
         """Update relation evidence while freezing the normal progress posterior.
 
         ``VERIFY_LINK`` and ``RECOVERY`` actions are not normal task actions, so
         their observations must not advance or realign the task clock.  The
         same feature builder and relation filter still consume the real motion.
+        An exact Pending candidate may supply the learned relation context for
+        its own frame while beta remains frozen at the source boundary.
         Candidate scores are diagnostic only; they do not alter beta until an
         explicit reentry decision resets it.
         """
@@ -582,6 +585,7 @@ class BeliefUpdater:
             previous_decisions=self._stable_decisions,
             previous_evidence_decisions=self._informative_evidence_decisions,
             mode_by_skill=mode_by_skill,
+            demonstration_state_by_frame=demonstration_state_by_frame,
         )
         self._commit_informative_evidence(features, relation_estimates)
         changes = self._relation_changes(features, relation_estimates)

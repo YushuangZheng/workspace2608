@@ -305,6 +305,44 @@ def test_non_task_belief_update_freezes_progress_and_updates_relation(
     assert "object" in result.relation_estimates
 
 
+def test_pending_verification_uses_candidate_relation_context_without_moving_beta(
+    phase5_case,
+) -> None:
+    model, demonstrations, pending = phase5_case
+    source = pending.context_state
+    target = pending.candidate_state
+    source_prior = model.state(source).demo_relation_priors["object"][0]
+    target_prior = model.state(target).demo_relation_priors["object"][0]
+    assert source_prior[0] > source_prior[1]
+    assert target_prior[1] > target_prior[0]
+
+    previous = observation_for(model, demonstrations, source, 5)
+    updater = BeliefUpdater(model)
+    updater.reset(
+        initial_progress={source: 1.0},
+        initial_relations={"object": np.asarray([0.5, 0.5])},
+        previous_observation=previous,
+    )
+    current = replace(
+        previous,
+        tick=6,
+        previous_ee_pose=previous.ee_pose,
+        previous_command_pose=previous.ee_pose,
+    )
+    result = updater.update_frozen(
+        current,
+        mode_by_skill={source.skill_index: 0, target.skill_index: 0},
+        demonstration_state_by_frame={"object": target},
+    )
+
+    assert result.progress.posterior == {source: 1.0}
+    assert result.progress.estimated_state == source
+    np.testing.assert_allclose(
+        result.relation_estimates["object"].demonstration_prior,
+        target_prior,
+    )
+
+
 @pytest.mark.parametrize(
     "initial_relation",
     (RelationDecision.UNKNOWN, RelationDecision.EXTERNAL),

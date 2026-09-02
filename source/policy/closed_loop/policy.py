@@ -880,9 +880,22 @@ class ClosedLoopMultiStreamPolicy:
                     else self._task_command(action)
                 )
             else:
+                demonstration_state_by_frame = None
+                if modes_before[arm] == ExecutionMode.VERIFY_LINK:
+                    manager = self.recovery_managers[arm]
+                    request = manager.verification.request
+                    if request is None:
+                        raise RuntimeError("VERIFY_LINK 缺少当前 Pending 请求")
+                    candidate = self.task_models[arm].link_pending_events[
+                        request.pending_event_id
+                    ]
+                    demonstration_state_by_frame = {
+                        request.frame_id: candidate.candidate_state
+                    }
                 beliefs[arm] = updater.update_frozen(
                     runtime[arm],
                     mode_by_skill=self._mode_by_arm_skill[arm],
+                    demonstration_state_by_frame=demonstration_state_by_frame,
                 )
                 if modes_before[arm] == ExecutionMode.TASK:
                     commands[arm] = self._frozen_task_command(

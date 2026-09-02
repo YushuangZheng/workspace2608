@@ -237,13 +237,42 @@ class RelationFilter:
         previous_decisions: Mapping[str, RelationDecision] | None = None,
         previous_evidence_decisions: Mapping[str, RelationDecision] | None = None,
         mode_by_skill: Mapping[int, int] | None = None,
+        demonstration_state_by_frame: Mapping[str, StateId] | None = None,
     ) -> dict[str, RelationEstimate]:
         previous_posteriors = previous_posteriors or {}
         previous_decisions = previous_decisions or {}
         previous_evidence_decisions = previous_evidence_decisions or {}
+        # Normal TASK updates mix the learned relation prior through beta.
+        # VERIFY_LINK deliberately freezes beta at the source boundary, but
+        # tests one exact Pending occurrence whose learned physical context is
+        # the target-entry state.  A per-frame StateId selects that already
+        # learned context without inventing a new prior or relation state.
+        demonstration_state_by_frame = demonstration_state_by_frame or {}
+        unknown_frames = set(demonstration_state_by_frame).difference(
+            self.task_model.relation_frames
+        )
+        if unknown_frames:
+            raise KeyError(
+                f"关系先验上下文引用未知参考系：{sorted(unknown_frames)}"
+            )
         estimates: dict[str, RelationEstimate] = {}
         for frame in self.task_model.relation_frames:
-            demo_prior = self.demonstration_prior(progress_prior, frame, mode_by_skill)
+            demonstration_state = demonstration_state_by_frame.get(frame)
+            if demonstration_state is None:
+                demo_prior = self.demonstration_prior(
+                    progress_prior, frame, mode_by_skill
+                )
+            else:
+                node = self.task_model.state(demonstration_state)
+                mode = (
+                    None
+                    if mode_by_skill is None
+                    else mode_by_skill.get(demonstration_state.skill_index)
+                )
+                demo_prior = _normalize(
+                    self._node_prior(node, frame, mode),
+                    self.config.probability_floor,
+                )
             previous = previous_posteriors.get(frame, demo_prior)
             previous = _normalize(previous, self.config.probability_floor)
             predicted = _normalize(
