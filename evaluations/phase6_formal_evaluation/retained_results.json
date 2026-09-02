@@ -1,6 +1,6 @@
 {
-  "active_protocol_sha256": "72dfcd47e1b2d84905f1aeda6f6a70748dba7e8332f4b29a017f353eab77ae67",
-  "reason": "Retain byte-identical completed normal, dynamic-no-fault, and non-grasp fault cells: their acquired-relation paths are unchanged by the corrected finite confirmation expiry; the attachment-suppression protocol affects only grasp_failure, whose 32 cells are rerun.",
+  "active_protocol_sha256": "441a40d072b6454dd1a7ad02270f6f9dfe306ad4018845d4632320ab7caaa58a",
+  "reason": "Retain byte-identical completed normal, dynamic-no-fault, and non-grasp fault cells: removing a Pending candidate superseded by a formal LINK changes only the previously invalid missed-attachment path; the corrected attachment-suppression grasp_failure cells are rerun.",
   "records": {
     "dynamic/bimanual_handover_item/dynamac_v4": {
       "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
