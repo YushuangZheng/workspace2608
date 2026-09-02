@@ -1,0 +1,38 @@
+{
+  "background_scenarios": {
+    "dynamic": "smooth",
+    "fault": "smooth",
+    "normal": "static"
+  },
+  "dynamic_no_fault_episode_count_per_task": 50,
+  "episode_records": 400,
+  "evaluation_set_id": "rlbench_eval_v2",
+  "fault_episode_count_per_task": 50,
+  "files": {
+    "episodes.jsonl": "265a7207ba7926e4af2cdc7612d305c969d3561093ec1543590a38ac51245957",
+    "faults.json": "f3022443643fc3953d24a60bba13b3991cfaaae05ecae1069161d70afc5a64c4",
+    "result_schema.json": "b9f773a16d3a482fd2703148f01773317c0e4920e3cbfd470f32fcab2ab341b8"
+  },
+  "formal_protocol": "evaluations/phase6_formal_evaluation/protocol.json",
+  "formal_protocol_sha256": "321525ba2da6b0dd677748ba3b728fbf0a18c1463f36676f7af6572bd43c54b0",
+  "methods": [
+    "dynamac_v4",
+    "progress_only",
+    "progress_dynamic_roles",
+    "full"
+  ],
+  "result_based_selection": false,
+  "schema": "essay2608.iclr2027_core8_frozen_contract.v1",
+  "source_evaluation_manifest": "integrations/rlbench/data/evaluation/manifest.json",
+  "source_evaluation_manifest_sha256": "dcccb0557291f35a76e2a340bf31244cf4c748ee34351d749eec9198780bd876",
+  "tasks": [
+    "bimanual_handover_item",
+    "bimanual_lift_tray",
+    "bimanual_sweep_to_dustpan",
+    "bimanual_put_bottle_in_fridge",
+    "place_cups",
+    "open_microwave",
+    "wipe_desk",
+    "stack_wine"
+  ]
+}

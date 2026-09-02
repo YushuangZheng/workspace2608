@@ -27,6 +27,7 @@ from integrations.rlbench.rlbench_dynamac.protocols.store_bottle_semantics impor
 
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
 from integrations.rlbench.rlbench_dynamac.core.paths import REPOSITORY_ROOT
+
 V4_STORE_INTERVENTION_CONFIG = (
     INTEGRATION_ROOT / "configs" / "v4" / "store_bottle_intervention.json"
 )
@@ -46,9 +47,7 @@ _V4_STORE_CURRENT_COLLECTION_MANIFEST_PATH = (
     "bimanual_put_bottle_in_fridge/collection_manifest.json"
 )
 V4_STORE_PLAN_SCHEMA = "dynamac-store-bottle-multi-entity-motion-plan-v4"
-V4_STORE_PLAN_VALIDATION_SCHEMA = (
-    "dynamac-store-bottle-multi-entity-plan-validation-v4"
-)
+V4_STORE_PLAN_VALIDATION_SCHEMA = "dynamac-store-bottle-multi-entity-plan-validation-v4"
 V4_STORE_BATCH_SCHEMA = "dynamac-store-bottle-multi-entity-plan-batch-v4"
 V4_STORE_RUNTIME_LOADER_ID = "store-bottle-multi-entity-motion-plan-batch-v4"
 V4_STORE_MOTION_PROTOCOL_ID = (
@@ -192,9 +191,9 @@ def load_v4_store_intervention_protocol(
             ("collection_manifest_path", "collection_manifest_sha256"),
         ):
             evidence_path = _repository_path(evidence.get(path_key, ""))
-            if not evidence_path.is_file() or _file_sha256(evidence_path) != evidence.get(
-                sha_key
-            ):
+            if not evidence_path.is_file() or _file_sha256(
+                evidence_path
+            ) != evidence.get(sha_key):
                 raise ValueError(f"StoreBottle V4 trigger evidence changed: {path_key}")
         training = json.loads(
             _repository_path(evidence["training_manifest_path"]).read_text(
@@ -253,9 +252,7 @@ def load_v4_store_motion_source_protocol(
         or generation.get("policy_result_fields_read") is not False
         or generation.get("result_based_candidate_selection_forbidden") is not True
         or generation.get("minimum_paired_arm_waypoint_distance_m") != 0.18
-        or generation.get(
-            "minimum_bottle_to_fridge_door_sweep_proxy_clearance_m"
-        )
+        or generation.get("minimum_bottle_to_fridge_door_sweep_proxy_clearance_m")
         != 0.2
     ):
         raise ValueError("StoreBottle V4 motion-source protocol is invalid")
@@ -295,8 +292,7 @@ def load_v4_store_motion_source_protocol(
         )
         if (
             not raw_hash_matches
-            and semantic_spec.fingerprint
-            != _V4_STORE_SEMANTIC_IDENTITY_FINGERPRINT
+            and semantic_spec.fingerprint != _V4_STORE_SEMANTIC_IDENTITY_FINGERPRINT
         ):
             raise ValueError("StoreBottle V4 semantic config changed")
     return payload
@@ -394,8 +390,10 @@ def sample_v4_store_entity_goal_pose(
 def store_entity_geometry(source_pose: Any, goal_pose: Any) -> dict[str, float]:
     source = np.asarray(source_pose, dtype=np.float64)
     goal = np.asarray(goal_pose, dtype=np.float64)
-    if source.shape != (7,) or goal.shape != (7,) or not (
-        np.all(np.isfinite(source)) and np.all(np.isfinite(goal))
+    if (
+        source.shape != (7,)
+        or goal.shape != (7,)
+        or not (np.all(np.isfinite(source)) and np.all(np.isfinite(goal)))
     ):
         raise ValueError("StoreBottle plan poses must be finite 7D")
     delta = goal[:3] - source[:3]
@@ -434,8 +432,10 @@ class StoreBottleEntityMotion:
             raise ValueError("StoreBottle entity root/frame identity is invalid")
         source = np.asarray(self.source_pose, dtype=np.float64)
         goal = np.asarray(self.goal_pose, dtype=np.float64)
-        if source.shape != (7,) or goal.shape != (7,) or not (
-            np.all(np.isfinite(source)) and np.all(np.isfinite(goal))
+        if (
+            source.shape != (7,)
+            or goal.shape != (7,)
+            or not (np.all(np.isfinite(source)) and np.all(np.isfinite(goal)))
         ):
             raise ValueError("StoreBottle entity poses must be finite 7D")
         if not isinstance(self.moved, bool):
@@ -453,9 +453,9 @@ class StoreBottleEntityMotion:
                 entity=self.name,
             )
             geometry = store_entity_geometry(source, goal)
-            limits = load_v4_store_motion_source_protocol(
-                verify_semantics_file=False
-            )["entities"][self.name]
+            limits = load_v4_store_motion_source_protocol(verify_semantics_file=False)[
+                "entities"
+            ][self.name]
             if (
                 np.linalg.norm(expected[:3] - goal[:3]) > V4_STORE_POSE_ATOL
                 or _quaternion_angle_xyzw(expected[3:], goal[3:])
@@ -468,8 +468,7 @@ class StoreBottleEntityMotion:
                 or abs(geometry["yaw_delta_rad"])
                 > limits["rotation"]["yaw_delta_abs_max_rad"]
                 + V4_STORE_ROTATION_ATOL_RAD
-                or geometry["relative_rotation_xy_norm"]
-                > V4_STORE_ROTATION_ATOL_RAD
+                or geometry["relative_rotation_xy_norm"] > V4_STORE_ROTATION_ATOL_RAD
             ):
                 raise ValueError("StoreBottle entity A-to-B geometry is invalid")
         elif self.candidate_seed is not None or not np.allclose(
@@ -508,7 +507,10 @@ class StoreBottleEntityMotion:
             "candidate_seed",
             "trigger_step",
         }
-        if set(payload) not in {frozenset(base_fields), frozenset(base_fields | {"geometry"})}:
+        if set(payload) not in {
+            frozenset(base_fields),
+            frozenset(base_fields | {"geometry"}),
+        }:
             raise ValueError("StoreBottle entity plan fields are invalid")
         entity = cls(
             name=payload.get("name", ""),
@@ -586,9 +588,7 @@ class StoreBottleMultiEntityPlan:
             raise ValueError("StoreBottle source low-dimensional state must be 14D")
         validation = self.validation
         motion = load_v4_store_motion_source_protocol(verify_semantics_file=False)
-        intervention = load_v4_store_intervention_protocol(
-            verify_evidence_files=False
-        )
+        intervention = load_v4_store_intervention_protocol(verify_evidence_files=False)
         if (
             not isinstance(validation, dict)
             or validation.get("schema") != V4_STORE_PLAN_VALIDATION_SCHEMA
@@ -601,8 +601,7 @@ class StoreBottleMultiEntityPlan:
             <= validation.get("sampling_attempts", 0)
             <= motion["goal_sampling_max_attempts"]
             or validation.get("motion_source_fingerprint") != motion["fingerprint"]
-            or validation.get("intervention_fingerprint")
-            != intervention["fingerprint"]
+            or validation.get("intervention_fingerprint") != intervention["fingerprint"]
             or validation.get("policy_result_fields_read") is not False
         ):
             raise ValueError("StoreBottle plan validation evidence is invalid")
@@ -755,8 +754,7 @@ def load_v4_store_motion_plan_batch(payload: dict[str, Any]) -> list[Any]:
     }
     if (
         set(payload) != expected_fields
-        or
-        payload.get("schema") != V4_STORE_BATCH_SCHEMA
+        or payload.get("schema") != V4_STORE_BATCH_SCHEMA
         or payload.get("protocol_id") != V4_STORE_MOTION_PROTOCOL_ID
         or payload.get("task_name") != STORE_BOTTLE_TASK_NAME
         or payload.get("scenario_independent") is not True
@@ -809,7 +807,10 @@ def build_v4_store_task_scoped_plan_batch(
     variations: list[int],
     plans: list[StoreBottleMultiEntityPlan],
 ) -> dict[str, Any]:
-    from integrations.rlbench.rlbench_dynamac.eval.eval_set import build_task_scoped_identity, build_task_scoped_plan_batch
+    from integrations.rlbench.rlbench_dynamac.eval.eval_set import (
+        build_task_scoped_identity,
+        build_task_scoped_plan_batch,
+    )
 
     runtime_batch = store_bottle_motion_plan_batch(
         base_seed=base_seed,
@@ -910,7 +911,9 @@ def _semantic_tree_state(task: Any, roots: Mapping[str, Any]) -> list[dict[str, 
         if key in seen:
             raise RuntimeError("StoreBottle task tree has duplicate stable identities")
         seen.add(key)
-        parent = value.get_parent() if callable(getattr(value, "get_parent", None)) else None
+        parent = (
+            value.get_parent() if callable(getattr(value, "get_parent", None)) else None
+        )
         parent_name = (
             str(parent.get_name())
             if parent is not None and callable(getattr(parent, "get_name", None))
@@ -934,9 +937,7 @@ def _semantic_tree_state(task: Any, roots: Mapping[str, Any]) -> list[dict[str, 
             row["joint_position"] = float(joint())
         rows.append(row)
     rows.sort(key=lambda row: (row["name"], row["type"], row["parent"] or ""))
-    expected_members = {
-        name for group in spec.entity_groups for name in group.members
-    }
+    expected_members = {name for group in spec.entity_groups for name in group.members}
     actual_members = {row["name"] for row in rows if row["entity"] is not None}
     if expected_members != actual_members:
         missing = sorted(expected_members - actual_members)
@@ -1025,7 +1026,9 @@ def _waypoint_positions(task: Any) -> dict[str, np.ndarray]:
     return positions
 
 
-def _point_segment_distance(point: np.ndarray, start: np.ndarray, end: np.ndarray) -> float:
+def _point_segment_distance(
+    point: np.ndarray, start: np.ndarray, end: np.ndarray
+) -> float:
     delta = end - start
     denominator = float(np.dot(delta, delta))
     if denominator <= 1.0e-16:
@@ -1037,9 +1040,13 @@ def _point_segment_distance(point: np.ndarray, start: np.ndarray, end: np.ndarra
 def _scene_safety_audit(task: Any) -> dict[str, Any]:
     motion = load_v4_store_motion_source_protocol(verify_semantics_file=False)
     positions = _waypoint_positions(task)
-    pairs = (("waypoint0", "waypoint4"), ("waypoint1", "waypoint5"),
-             ("waypoint2", "waypoint6"), ("waypoint3", "waypoint7"),
-             ("waypoint3", "waypoint8"))
+    pairs = (
+        ("waypoint0", "waypoint4"),
+        ("waypoint1", "waypoint5"),
+        ("waypoint2", "waypoint6"),
+        ("waypoint3", "waypoint7"),
+        ("waypoint3", "waypoint8"),
+    )
     paired = {
         f"{right}:{left}": float(np.linalg.norm(positions[right] - positions[left]))
         for right, left in pairs
@@ -1278,7 +1285,9 @@ def stage_v4_store_motion_plan(
             candidate_tree = _semantic_tree_state(task, roots)
             tree_audit = _compare_semantic_tree(current_tree, candidate_tree)
             if not tree_audit["matched"]:
-                raise RuntimeError("entity-root motion did not preserve semantic subtrees")
+                raise RuntimeError(
+                    "entity-root motion did not preserve semantic subtrees"
+                )
             low_dim_goal = _low_dim_frame_audit(task)
             if not low_dim_goal["matched"]:
                 raise RuntimeError("goal low-dimensional frames are inconsistent")
@@ -1293,7 +1302,9 @@ def stage_v4_store_motion_plan(
             if frozenset(goal_collisions) - frozenset(source_collisions):
                 raise RuntimeError("validated goal leaves new robot collision pairs")
         except Exception as error:
-            if not (_is_expected_placement_error(error) or isinstance(error, RuntimeError)):
+            if not (
+                _is_expected_placement_error(error) or isinstance(error, RuntimeError)
+            ):
                 raise
             goal_attempt_rows.append(
                 {
@@ -1344,7 +1355,9 @@ def stage_v4_store_motion_plan(
             source_pose=tuple(selected_root_poses[name]),
             goal_pose=tuple(accepted["goals"][name]),
             moved=name in moved_entities,
-            candidate_seed=(accepted["candidate_seed"] if name in moved_entities else None),
+            candidate_seed=(
+                accepted["candidate_seed"] if name in moved_entities else None
+            ),
         )
         for name in V4_STORE_ENTITY_ORDER
     )
@@ -1479,19 +1492,39 @@ def bind_v4_store_source_plan(
 
 
 class StoreBottleMultiEntityController:
-    """Apply each moved StoreBottle root once at its own frozen trigger."""
+    """Apply each moved StoreBottle root at its own frozen trigger.
 
-    def __init__(self, *, plan: StoreBottleMultiEntityPlan, scenario: str):
-        if scenario not in {"static", "teleport"}:
-            raise ValueError("StoreBottle V4 supports only static/teleport")
+    The authenticated A/B plan is scenario independent.  ``teleport`` applies
+    B once, while the Stage-six ``smooth`` background follows the same A/B
+    geometry over a fixed number of committed policy ticks.  This is an
+    evaluation adapter only; it does not alter task or policy state.
+    """
+
+    def __init__(
+        self,
+        *,
+        plan: StoreBottleMultiEntityPlan,
+        scenario: str,
+        total_steps: int = 10,
+    ):
+        if scenario not in {"static", "teleport", "smooth"}:
+            raise ValueError("StoreBottle controller scenario is unsupported")
+        if (
+            isinstance(total_steps, bool)
+            or not isinstance(total_steps, int)
+            or total_steps < 1
+        ):
+            raise ValueError("StoreBottle smooth-step budget must be positive")
         self.plan = plan
         self.scenario = scenario
+        self.total_steps = total_steps
         self._applied: set[str] = set()
+        self._smooth_calls = {name: 0 for name in V4_STORE_ENTITY_ORDER}
         self._source_binding: dict[str, Any] | None = None
 
     @property
     def required_entities(self) -> tuple[str, ...]:
-        return self.plan.moved_entities if self.scenario == "teleport" else ()
+        return self.plan.moved_entities if self.scenario != "static" else ()
 
     def bind_source(
         self,
@@ -1519,23 +1552,28 @@ class StoreBottleMultiEntityController:
             raise RuntimeError("StoreBottle controller source was not bound")
         if self.scenario == "static":
             return observation, []
+        expected_step = {
+            entity: V4_STORE_TRIGGER_STEPS[entity]
+            + (self._smooth_calls[entity] if self.scenario == "smooth" else 0)
+            for entity in self.required_entities
+        }
         due = [
             entity
             for entity in self.required_entities
-            if entity not in self._applied
-            and V4_STORE_TRIGGER_STEPS[entity] == policy_step
+            if entity not in self._applied and expected_step[entity] == policy_step
         ]
         missed = [
             entity
             for entity in self.required_entities
-            if entity not in self._applied
-            and V4_STORE_TRIGGER_STEPS[entity] < policy_step
+            if entity not in self._applied and expected_step[entity] < policy_step
         ]
         if missed:
             raise RuntimeError(f"StoreBottle entity trigger was skipped: {missed}")
         if not due:
             return observation, []
-        from integrations.rlbench.rlbench_dynamac.core.runtime import _robot_external_collision_pairs
+        from integrations.rlbench.rlbench_dynamac.core.runtime import (
+            _robot_external_collision_pairs,
+        )
 
         scene = task_environment._scene
         task = scene.task
@@ -1547,11 +1585,23 @@ class StoreBottleMultiEntityController:
             for name in V4_STORE_ENTITY_ORDER
         }
         events = []
+        from integrations.rlbench.rlbench_dynamac.core.runtime import (
+            _interpolate_rlbench_pose,
+        )
+
+        commanded_poses = {}
+        smooth_call_by_entity = {}
         for entity in due:
+            entity_plan = self.plan.entity(entity)
+            previous_calls = self._smooth_calls[entity]
             expected_before = (
-                self.plan.entity(entity).source_pose
-                if entity not in self._applied
-                else self.plan.entity(entity).goal_pose
+                entity_plan.source_pose
+                if previous_calls == 0 or self.scenario == "teleport"
+                else _interpolate_rlbench_pose(
+                    entity_plan.source_pose,
+                    entity_plan.goal_pose,
+                    previous_calls / float(self.total_steps),
+                )
             )
             if not np.allclose(
                 before_root_poses[entity],
@@ -1560,8 +1610,28 @@ class StoreBottleMultiEntityController:
                 rtol=0.0,
             ):
                 raise RuntimeError(f"StoreBottle {entity} drifted before intervention")
-            roots[entity].set_pose(self.plan.entity(entity).goal_pose)
-            self._applied.add(entity)
+            if self.scenario == "teleport":
+                commanded = np.asarray(entity_plan.goal_pose, dtype=np.float64)
+                complete = True
+                smooth_call = None
+            else:
+                smooth_call = previous_calls + 1
+                complete = smooth_call >= self.total_steps
+                commanded = (
+                    np.asarray(entity_plan.goal_pose, dtype=np.float64)
+                    if complete
+                    else _interpolate_rlbench_pose(
+                        entity_plan.source_pose,
+                        entity_plan.goal_pose,
+                        smooth_call / float(self.total_steps),
+                    )
+                )
+                self._smooth_calls[entity] = smooth_call
+            roots[entity].set_pose(commanded)
+            commanded_poses[entity] = commanded
+            smooth_call_by_entity[entity] = smooth_call
+            if complete:
+                self._applied.add(entity)
         after_tree = _semantic_tree_state(task, roots)
         tree_audit = _compare_semantic_tree(before_tree, after_tree)
         after_collisions = _robot_external_collision_pairs(scene, scene.robot)
@@ -1579,28 +1649,40 @@ class StoreBottleMultiEntityController:
             entity_plan = self.plan.entity(entity)
             actual = np.asarray(roots[entity].get_pose(), dtype=np.float64)
             position_error = float(
-                np.linalg.norm(actual[:3] - np.asarray(entity_plan.goal_pose)[:3])
+                np.linalg.norm(actual[:3] - commanded_poses[entity][:3])
             )
             rotation_error = _quaternion_angle_xyzw(
-                actual[3:], np.asarray(entity_plan.goal_pose)[3:]
+                actual[3:], commanded_poses[entity][3:]
             )
             effective = bool(
                 position_error <= V4_STORE_POSE_ATOL
                 and rotation_error <= V4_STORE_ROTATION_ATOL_RAD
             )
             if not effective:
-                raise RuntimeError("StoreBottle entity did not reach registered B")
+                raise RuntimeError(
+                    "StoreBottle entity did not reach its motion command"
+                )
+            complete = entity in self._applied
             events.append(
                 {
-                    "kind": "teleport_store_entity",
+                    "kind": (
+                        "teleport_store_entity"
+                        if self.scenario == "teleport"
+                        else "smooth_store_entity"
+                    ),
                     "applied": True,
-                    "complete": True,
+                    "complete": complete,
                     "protocol_effective": True,
                     "entity": entity,
                     "step": policy_step,
                     "trigger_step": V4_STORE_TRIGGER_STEPS[entity],
+                    "smooth_call": smooth_call_by_entity[entity],
+                    "smooth_total_steps": (
+                        self.total_steps if self.scenario == "smooth" else None
+                    ),
                     "source_pose": list(entity_plan.source_pose),
                     "goal_pose": list(entity_plan.goal_pose),
+                    "commanded_pose": commanded_poses[entity].tolist(),
                     "actual_pose": actual.tolist(),
                     "geometry": store_entity_geometry(
                         entity_plan.source_pose,
@@ -1626,5 +1708,8 @@ class StoreBottleMultiEntityController:
                 name: V4_STORE_TRIGGER_STEPS[name] for name in V4_STORE_ENTITY_ORDER
             },
             "independent_roots": dict(V4_STORE_ENTITY_ROOTS),
-            "applications_per_moved_entity": 1,
+            "applications_per_moved_entity": (
+                self.total_steps if self.scenario == "smooth" else 1
+            ),
+            "stage6_smooth_background_extension": self.scenario == "smooth",
         }

@@ -1111,7 +1111,9 @@ def test_policy_ping_binds_results_to_the_loaded_checkpoint(tmp_path) -> None:
         "training_adapter_protocol",
         "checkpoint_trigger_audit_fingerprint",
         "v3_trigger_anchor_evidence",
+        "phase6_dynamic_trigger_evidence",
     }
+    assert identity["phase6_dynamic_trigger_evidence"] is None
     assert identity["model_schema_version"] == expected_summary["model_schema_version"]
     assert (
         identity["selection_semantics_id"] == expected_summary["selection_semantics_id"]

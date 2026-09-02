@@ -147,9 +147,7 @@ class FormalShard:
         diagnostics_index = values.index("--diagnostics-dir") + 1
         values[output_index] = str(self.result)
         values[diagnostics_index] = str(self.diagnostics)
-        values.extend(
-            ("--episode-indices", ",".join(map(str, self.episode_indices)))
-        )
+        values.extend(("--episode-indices", ",".join(map(str, self.episode_indices))))
         return tuple(values)
 
 
@@ -189,13 +187,21 @@ def build_shards(
 
 def build_cells(protocol: Mapping[str, Any], section: str) -> tuple[FormalCell, ...]:
     normal_bounds = protocol["evaluation_set"]["normal_episode_index_range"]
+    dynamic_bounds = protocol["evaluation_set"]["dynamic_episode_index_range"]
     fault_bounds = protocol["evaluation_set"]["fault_episode_index_range"]
     normal_n = int(normal_bounds[1]) - int(normal_bounds[0]) + 1
+    dynamic_n = int(dynamic_bounds[1]) - int(dynamic_bounds[0]) + 1
     fault_n = int(fault_bounds[1]) - int(fault_bounds[0]) + 1
     cells = []
     if section in {"normal", "all"}:
         cells.extend(
             FormalCell("normal", task, method, None, normal_n)
+            for task in protocol["tasks"]
+            for method in protocol["methods"]
+        )
+    if section in {"dynamic", "all"}:
+        cells.extend(
+            FormalCell("dynamic", task, method, None, dynamic_n)
             for task in protocol["tasks"]
             for method in protocol["methods"]
         )
@@ -371,7 +377,9 @@ def _validate_shard(shard: FormalShard, commit: Optional[str] = None) -> None:
     try:
         payload = json.loads(shard.result.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise RuntimeError(f"cannot read formal shard result: {shard.result}") from error
+        raise RuntimeError(
+            f"cannot read formal shard result: {shard.result}"
+        ) from error
     metadata = payload.get("stage6_formal_evaluation")
     if not isinstance(metadata, dict) or metadata.get("schema") != (
         "essay2608.phase6_formal_result.v1"
@@ -424,9 +432,7 @@ def _merge_ik_diagnostics(payloads: Sequence[Mapping[str, Any]]) -> dict[str, An
         elif isinstance(first, list):
             if any(not isinstance(value, list) for value in values[1:]):
                 raise RuntimeError(f"formal shard IK type differs at {key}")
-            result[key] = sorted(
-                {item for value in values for item in value}
-            )
+            result[key] = sorted({item for value in values for item in value})
         elif isinstance(first, (int, float)):
             if any(
                 isinstance(value, bool) or not isinstance(value, (int, float))
@@ -460,13 +466,15 @@ def _merge_episode_accounting(
         raise RuntimeError("formal shard episode-accounting fields differ")
     for key in sorted(keys.difference({"schema", *rate_keys})):
         values = [payload[key] for payload in payloads]
-        if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) for value in values
+        ):
             raise RuntimeError(f"episode-accounting field {key} is not a count")
         result[key] = sum(values)
     denominator = result["planned_episode_denominator"]
-    result["success_rate_all_planned_episodes"] = (
-        result["successes_in_planned_denominator"] / float(denominator)
-    )
+    result["success_rate_all_planned_episodes"] = result[
+        "successes_in_planned_denominator"
+    ] / float(denominator)
     complete = result["complete_intervention_subset_count"]
     result["success_rate_in_complete_intervention_subset"] = (
         result["successes_in_complete_intervention_subset"] / float(complete)
@@ -516,16 +524,16 @@ def _merge_protocol_summary(
         if field not in result:
             continue
         values = [payload[field] for payload in payloads]
-        result[field] = None if all(value is None for value in values) else all(
-            value is not False for value in values
+        result[field] = (
+            None
+            if all(value is None for value in values)
+            else all(value is not False for value in values)
         )
     cache = result.get("staged_motion_plan_cache")
     if isinstance(cache, dict):
         caches = [payload["staged_motion_plan_cache"] for payload in payloads]
         cache["plan_fingerprints"] = [
-            item
-            for value in caches
-            for item in value.get("plan_fingerprints", [])
+            item for value in caches for item in value.get("plan_fingerprints", [])
         ]
         key = cache.get("cache_key")
         if isinstance(key, dict):
@@ -535,9 +543,7 @@ def _merge_protocol_summary(
                 key["variation_schedule"] = [
                     item
                     for value in caches
-                    for item in value.get("cache_key", {}).get(
-                        "variation_schedule", []
-                    )
+                    for item in value.get("cache_key", {}).get("variation_schedule", [])
                 ]
     return result
 
@@ -581,7 +587,9 @@ def merge_formal_cell(
     indices = tuple(index for shard in ordered for index in shard.episode_indices)
     if indices != tuple(range(cell.episodes)):
         raise RuntimeError(f"formal shard coverage is incomplete for {cell.cell_id}")
-    payloads = [json.loads(shard.result.read_text(encoding="utf-8")) for shard in ordered]
+    payloads = [
+        json.loads(shard.result.read_text(encoding="utf-8")) for shard in ordered
+    ]
     _validate_merge_identity(payloads)
     rows = [row for payload in payloads for row in payload["results"]]
     observed = [row.get("formal_episode_index") for row in rows]
@@ -692,8 +700,7 @@ def _retained_records() -> dict[str, dict[str, str]]:
         if (
             not isinstance(cell_id, str)
             or not isinstance(record, dict)
-            or set(record)
-            != {"path", "git_commit", "protocol_sha256", "sha256"}
+            or set(record) != {"path", "git_commit", "protocol_sha256", "sha256"}
             or any(not isinstance(record[name], str) for name in record)
         ):
             raise RuntimeError("retained formal-result record is invalid")
@@ -718,9 +725,7 @@ def _validate_retained_result(cell: FormalCell) -> None:
     )
 
 
-def _validate_available_result(
-    cell: FormalCell, commit: Optional[str] = None
-) -> str:
+def _validate_available_result(cell: FormalCell, commit: Optional[str] = None) -> str:
     """Validate either the active result identity or an explicit retention.
 
     A targeted rerun may leave unaffected cells byte-for-byte frozen while
@@ -1067,7 +1072,9 @@ def build_parser() -> argparse.ArgumentParser:
         "command", nargs="?", choices=("plan", "preflight", "execute"), default="plan"
     )
     parser.add_argument(
-        "--section", choices=("normal", "fault", "all"), default="normal"
+        "--section",
+        choices=("normal", "dynamic", "fault", "all"),
+        default="normal",
     )
     parser.add_argument("--sim-python", type=Path, default=DEFAULT_SIM_PYTHON)
     parser.add_argument("--policy-python", type=Path, default=DEFAULT_POLICY_PYTHON)

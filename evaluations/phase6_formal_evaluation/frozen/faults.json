@@ -1,0 +1,81 @@
+{
+  "background": {
+    "fault_eligibility": "after_completed_scheduled_background_segments",
+    "fault_label": false,
+    "policy_state_available_to_scheduler": false,
+    "scenario": "smooth",
+    "smooth_steps": 10
+  },
+  "faults": {
+    "grasp_failure": {
+      "arm_by_task": {
+        "bimanual_handover_item": "right",
+        "bimanual_lift_tray": "left",
+        "bimanual_put_bottle_in_fridge": "left",
+        "bimanual_sweep_to_dustpan": "left",
+        "open_microwave": "single",
+        "place_cups": "single",
+        "stack_wine": "single",
+        "wipe_desk": "single"
+      },
+      "close_occurrence": 1,
+      "earliest_step": 0,
+      "paper_name": "initial_grasp_failure"
+    },
+    "relation_mismatch": {
+      "arm_by_task": {
+        "bimanual_handover_item": "right",
+        "bimanual_lift_tray": "left",
+        "bimanual_put_bottle_in_fridge": "left",
+        "bimanual_sweep_to_dustpan": "left",
+        "open_microwave": "single",
+        "place_cups": "single",
+        "stack_wine": "single",
+        "wipe_desk": "single"
+      },
+      "earliest_step": 0,
+      "minimum_grasped_cycles": 5,
+      "mismatch_translation": [
+        0.04,
+        0.0,
+        0.0
+      ],
+      "paper_name": "post_link_displacement"
+    },
+    "time_stall": {
+      "arm_by_task": {
+        "bimanual_handover_item": "all",
+        "bimanual_lift_tray": "all",
+        "bimanual_put_bottle_in_fridge": "all",
+        "bimanual_sweep_to_dustpan": "all",
+        "open_microwave": "all",
+        "place_cups": "all",
+        "stack_wine": "all",
+        "wipe_desk": "all"
+      },
+      "duration_cycles": 12,
+      "earliest_step": 40,
+      "motion_trigger_distance": 0.01,
+      "paper_name": "motion_stall"
+    },
+    "unexpected_drop": {
+      "arm_by_task": {
+        "bimanual_handover_item": "right",
+        "bimanual_lift_tray": "left",
+        "bimanual_put_bottle_in_fridge": "left",
+        "bimanual_sweep_to_dustpan": "left",
+        "open_microwave": "single",
+        "place_cups": "single",
+        "stack_wine": "single",
+        "wipe_desk": "single"
+      },
+      "earliest_step": 0,
+      "minimum_grasped_cycles": 8,
+      "paper_name": "unexpected_drop"
+    }
+  },
+  "intention_to_treat": true,
+  "policy_internal_state_available_to_injector": false,
+  "schema": "essay2608.iclr2027_core8_faults.v1",
+  "trigger_basis": "external_physical_or_action_predicates"
+}

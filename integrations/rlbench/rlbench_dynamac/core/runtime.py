@@ -7479,10 +7479,8 @@ class ScenarioController:
                 )
 
                 validate_v4_lift_motion_plan(self.motion_plan)
-                if self.kind == "smooth_task_motion":
-                    raise ValueError("V4 LiftTray supports only static and teleport")
                 if self.kind != "static" and self.trigger_step != V4_LIFT_TRIGGER_STEP:
-                    raise ValueError("V4 LiftTray teleport trigger must be tick 35")
+                    raise ValueError("V4 LiftTray dynamic trigger must be tick 35")
             self._motion_source_pose = np.asarray(
                 self.motion_plan.source_pose,
                 dtype=np.float64,
@@ -7528,13 +7526,16 @@ class ScenarioController:
                     "z_delta_m": 0.0,
                     "yaw_delta_abs_max_rad": 0.10,
                     "roll_pitch": "unchanged_from_source_A",
-                    "formal_scenarios": ["static", "teleport"],
+                    "formal_scenarios": ["static", "teleport", "smooth"],
                     "trigger_clock": "committed_policy_ticks",
                     "trigger_step": 35,
                     "formal_intervention_sampling": False,
                     "formal_intervention_task_get_state": False,
                     "formal_intervention_task_restore_state": False,
                     "result_based_candidate_selection": False,
+                    "stage6_smooth_background_extension": (
+                        self.kind == "smooth_task_motion"
+                    ),
                     "task_scoped_plan_evidence": dict(v4_lift),
                 }
             return {

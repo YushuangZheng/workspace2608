@@ -88,7 +88,9 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
 from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
     load_v3_intervention_protocol,
     load_v3_motion_source_protocol,
-    resolve_authenticated_v3_trigger,
+)
+from integrations.rlbench.rlbench_dynamac.protocols.phase6_dynamic_protocol import (
+    resolve_phase6_dynamic_trigger,
 )
 
 from integrations.rlbench.rlbench_dynamac.core.paths import REPOSITORY_ROOT
@@ -237,23 +239,24 @@ def _validate_v3_protocol_budgets(args):
     return protocol
 
 
-def _authenticated_v3_dynamic_trigger(args, worker):
-    """Resolve the frozen per-task trigger from checkpoint-backed evidence."""
+def _authenticated_phase6_dynamic_trigger(args, worker):
+    """Resolve the smooth trigger against the checkpoint actually loaded."""
 
     protocol = _validate_v3_protocol_budgets(args)
-    authentication = resolve_authenticated_v3_trigger(
+    authentication = resolve_phase6_dynamic_trigger(
         worker.model_identity,
-        task=args.task,
+        args.task,
+        args.smooth_steps,
     )
     authenticated_step = authentication["trigger_step"]
     requested_step = getattr(args, "trigger_step", None)
     if requested_step is not None and requested_step != authenticated_step:
         raise RuntimeError(
-            "command-line trigger step differs from authenticated V3 preregistration"
+            "command-line trigger step differs from authenticated Stage-six trigger"
         )
     if authenticated_step >= worker.policy_steps:
         raise RuntimeError(
-            "authenticated V3 trigger lies outside the loaded policy clock"
+            "authenticated Stage-six trigger lies outside the loaded policy clock"
         )
     return protocol, authentication
 
@@ -262,16 +265,17 @@ def _authenticated_intervention_protocol(args, worker):
     """Authenticate dynamic triggers only when the scenario can apply one."""
 
     if args.scenario != "static":
-        return _authenticated_v3_dynamic_trigger(args, worker)
+        return _authenticated_phase6_dynamic_trigger(args, worker)
     protocol = _validate_v3_protocol_budgets(args)
     identity = worker.model_identity
     accepted_schemas = {
         "dynamac-direct-training-v3",
         TRAINING_MANIFEST_SCHEMA_STATIC_V1,
     }
-    if identity.get("manifest_authenticated") is not True or identity.get(
-        "training_manifest_schema"
-    ) not in accepted_schemas:
+    if (
+        identity.get("manifest_authenticated") is not True
+        or identity.get("training_manifest_schema") not in accepted_schemas
+    ):
         raise RuntimeError("static evaluation requires an authenticated model")
     authentication = {
         "schema": "v3-static-no-dynamic-trigger-v1",
@@ -1004,6 +1008,9 @@ def _run_episode(
         verify_instance=True,
         motion_plan=motion_plan,
     )
+    background_configurer = getattr(task_environment, "configure_background", None)
+    if callable(background_configurer) and args.scenario == "smooth":
+        background_configurer(scenario=args.scenario, expected_segments=1)
     invalid_actions = 0
     joint_hold_commits = 0
     events = []
@@ -1144,6 +1151,9 @@ def _run_episode(
             if event.get("applied"):
                 if trigger_step is None or committed_policy_steps < trigger_step:
                     raise RuntimeError("scenario controller applied before the trigger")
+                recorder = getattr(task_environment, "record_background_event", None)
+                if callable(recorder):
+                    recorder(event)
                 observation = task_environment.get_observation()
                 event["policy_observation_refreshed"] = True
                 events.append(event)
@@ -1395,9 +1405,7 @@ def _load_fixed_motion_plans(args):
             "payload": {
                 "evaluation_set_id": "local_fixed_qualification",
                 "spec": {"sha256": fingerprint},
-                "environment_plan_batches": {
-                    args.task: {"sha256": fingerprint}
-                },
+                "environment_plan_batches": {args.task: {"sha256": fingerprint}},
             },
             "manifest_sha256": fingerprint,
         }

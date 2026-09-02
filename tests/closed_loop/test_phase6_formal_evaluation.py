@@ -92,16 +92,32 @@ def test_formal_protocol_rejects_old_or_mixed_runtime_identities(
 def test_formal_matrix_has_exact_preregistered_cell_and_episode_counts() -> None:
     protocol = run_cell.load_protocol()
     normal = launch.build_cells(protocol, "normal")
+    dynamic = launch.build_cells(protocol, "dynamic")
     fault = launch.build_cells(protocol, "fault")
     all_cells = launch.build_cells(protocol, "all")
 
     assert len(normal) == 32
+    assert len(dynamic) == 32
     assert len(fault) == 128
-    assert len(all_cells) == 160
+    assert len(all_cells) == 192
     assert sum(cell.episodes for cell in normal) == 6400
+    assert sum(cell.episodes for cell in dynamic) == 1600
     assert sum(cell.episodes for cell in fault) == 6400
+    assert sum(cell.episodes for cell in all_cells) == 14400
     assert len({cell.cell_id for cell in all_cells}) == len(all_cells)
     assert len({cell.result for cell in all_cells}) == len(all_cells)
+
+
+def test_formal_background_separates_dynamic_context_from_fault_labels() -> None:
+    protocol = run_cell.load_protocol()
+
+    assert protocol["shared_execution"]["scenario_by_experiment"] == {
+        "normal": "static",
+        "dynamic": "smooth",
+        "fault": "smooth",
+    }
+    assert protocol["claims"]["dynamic_is_fault_label"] is False
+    assert protocol["claims"]["fault_requires_completed_dynamic_background"] is True
 
 
 def test_global_shard_queue_round_robins_cells_and_preserves_exact_indices() -> None:
@@ -168,6 +184,75 @@ def test_run_cell_accepts_only_contiguous_sealed_episode_shards() -> None:
         run_cell._parse_episode_indices("1,3", allowed=allowed)
     with pytest.raises(ValueError, match="outside"):
         run_cell._parse_episode_indices("9,10", allowed=allowed)
+
+
+def test_recovery_audit_combines_physical_truth_with_policy_modes(
+    tmp_path: Path,
+) -> None:
+    diagnostics = tmp_path / "episode.jsonl"
+    diagnostics.write_text(
+        "\n".join(
+            json.dumps(record)
+            for record in (
+                {
+                    "tick": 4,
+                    "arms": {
+                        "single": {
+                            "mode_before": "task",
+                            "mode_after": "task",
+                            "recovery": None,
+                        }
+                    },
+                },
+                {
+                    "tick": 5,
+                    "arms": {
+                        "single": {
+                            "mode_before": "task",
+                            "mode_after": "recovery",
+                            "recovery": {"reentry": None},
+                        }
+                    },
+                },
+                {
+                    "tick": 6,
+                    "arms": {
+                        "single": {
+                            "mode_before": "recovery",
+                            "mode_after": "task",
+                            "recovery": {"reentry": {"state_id": [1, 0]}},
+                        }
+                    },
+                },
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    physical_fault = {
+        "spec": {"kind": "unexpected_drop"},
+        "events": [{"kind": "unexpected_drop", "policy_step": 5}],
+        "physical_audit": {
+            "effect_observed": True,
+            "fault_end_policy_step": 5,
+            "relation_restored": True,
+            "relation_restoration_policy_step": 6,
+        },
+    }
+
+    audit = run_cell._episode_recovery_audit(
+        diagnostics,
+        physical_fault=physical_fault,
+        success=True,
+    )
+
+    assert audit["fault_trigger_policy_step"] == 5
+    assert audit["first_post_fault_alarm_policy_step"] == 5
+    assert audit["alarm_delay_cycles"] == 0
+    assert audit["post_fault_recovery_cycles"] == 1
+    assert audit["relation_restored"] is True
+    assert audit["legal_reentry"] is True
+    assert audit["post_reentry_completion"] is True
 
 
 def _synthetic_shard_payload(
@@ -310,9 +395,12 @@ def test_shard_merge_is_resumable_and_rejects_incomplete_coverage(
     assert merged["ik_execution_diagnostics"]["optional_residual_max"] == 2.5
     assert merged["ik_execution_diagnostics"]["optional_fraction_min"] == 0.2
     assert merged["ik_execution_diagnostics"]["optional_sources"] == ["synthetic"]
-    assert merged["stage6_formal_evaluation"]["shard_merge"][
-        "exact_nonoverlapping_coverage"
-    ] is True
+    assert (
+        merged["stage6_formal_evaluation"]["shard_merge"][
+            "exact_nonoverlapping_coverage"
+        ]
+        is True
+    )
 
 
 @pytest.mark.parametrize(

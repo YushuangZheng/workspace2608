@@ -12,6 +12,7 @@
     "seed_start": 2608000000,
     "available_episodes_per_task": 200,
     "normal_episode_index_range": [0, 199],
+    "dynamic_episode_index_range": [0, 49],
     "fault_episode_index_range": [0, 49]
   },
   "tasks": [
@@ -49,10 +50,15 @@
     "base_models_fingerprint": "1fc31fe8a4c416000a3ee2e68caef7429a9dc3bde51faf5375df2c1a6064ddf9",
     "closed_loop_models_dir": "integrations/rlbench/models/closed_loop_phase6_v1",
     "closed_loop_models_fingerprint": "b8cca02bded32f7e8fae68652d30096dc04a7d44472c3fabe0b8070b1cd204a6",
-    "scenario": "static",
+    "scenario_by_experiment": {
+      "normal": "static",
+      "dynamic": "smooth",
+      "fault": "smooth"
+    },
+    "smooth_steps": 10,
     "horizon": 1000,
     "policy_timeout_seconds": 120.0,
-    "reason": "All methods use the same executor so the comparison isolates closed-loop mechanisms rather than IK quality."
+    "reason": "All methods use the same executor. Static nominal execution is retained; dynamic no-fault and fault cells share the same smooth A-to-B background so dynamic adaptation is separated from the four physical fault labels."
   },
   "faults": {
     "time_stall": {
@@ -176,9 +182,13 @@
   "claims": {
     "normal_cells": 32,
     "normal_episodes": 6400,
+    "dynamic_cells": 32,
+    "dynamic_episodes": 1600,
     "fault_cells": 128,
     "fault_episodes": 6400,
-    "total_episodes": 12800,
+    "total_episodes": 14400,
+    "dynamic_is_fault_label": false,
+    "fault_requires_completed_dynamic_background": true,
     "seed_or_episode_selection_based_on_results": false,
     "policy_internal_state_mutated_by_fault_injector": false
   }

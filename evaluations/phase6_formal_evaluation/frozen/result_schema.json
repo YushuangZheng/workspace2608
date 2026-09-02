@@ -1,0 +1,52 @@
+{
+  "fault_episode_required_fields": [
+    "physical_fault"
+  ],
+  "missing_value_rule": "null means not applicable or not physically observed; false means evaluated and not achieved",
+  "physical_audit_fields": [
+    "effect_observed",
+    "effect_policy_step",
+    "fault_end_policy_step",
+    "target_arm",
+    "target_objects",
+    "relation_restored",
+    "relation_restoration_policy_step",
+    "cycles_to_relation_restoration"
+  ],
+  "physical_background_fields": [
+    "required",
+    "configured",
+    "scenario",
+    "expected_segments",
+    "completed_segments",
+    "ready",
+    "ready_policy_step",
+    "ready_before_fault",
+    "pre_background_policy_steps",
+    "events"
+  ],
+  "physical_fault_schema": "essay2608.rlbench.physical_fault.v2",
+  "recovery_audit_fields": [
+    "fault_trigger_policy_step",
+    "fault_effect_observed",
+    "first_post_fault_alarm_policy_step",
+    "alarm_delay_cycles",
+    "intervention_entries",
+    "intervention_cycles",
+    "post_fault_recovery_cycles",
+    "relation_restored",
+    "legal_reentry",
+    "legal_reentry_policy_step",
+    "post_reentry_completion"
+  ],
+  "recovery_audit_schema": "essay2608.phase6_recovery_outcome.v1",
+  "required_episode_fields": [
+    "formal_episode_index",
+    "formal_episode_seed",
+    "success",
+    "reason",
+    "scenario_events",
+    "recovery_audit"
+  ],
+  "schema": "essay2608.iclr2027_core8_result_contract.v1"
+}

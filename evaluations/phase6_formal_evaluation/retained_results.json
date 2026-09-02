@@ -1,5 +1,5 @@
 {
-  "active_protocol_sha256": "1a6417738ce4e7ded1b1faa8ada24ca805687552d9aecf342a895183aaacacfb",
+  "active_protocol_sha256": "321525ba2da6b0dd677748ba3b728fbf0a18c1463f36676f7af6572bd43c54b0",
   "reason": "The completed 32-cell normal matrix is frozen by exact result content hash after the user-approved minimal rerun: WipeDesk all four methods and PlaceCups progress_only/progress_dynamic_roles were regenerated; the other 26 unaffected cells were retained.",
   "records": {
     "normal/bimanual_handover_item/dynamac_v4": {

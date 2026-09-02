@@ -96,7 +96,76 @@ def test_time_stall_replaces_only_pose_and_records_every_suppressed_cycle() -> N
         "time_stall",
         "time_stall_cycle",
         "time_stall_cycle",
+        "time_stall_ended",
     ]
+    assert wrapped.protocol_metadata()["physical_audit"] == {
+        "effect_observed": True,
+        "effect_policy_step": 0,
+        "fault_end_policy_step": 1,
+        "target_arm": None,
+        "target_objects": [],
+        "relation_restored": None,
+        "relation_restoration_policy_step": None,
+        "cycles_to_relation_restoration": None,
+    }
+
+
+def test_fault_waits_for_completed_dynamic_background_without_changing_actions() -> (
+    None
+):
+    environment = _TaskEnvironment()
+    wrapped = FaultInjectingTaskEnvironment(
+        environment,
+        FaultInjectionSpec(
+            FaultInjectionKind.TIME_STALL,
+            duration_cycles=1,
+            motion_trigger_distance=0.005,
+        ),
+        background_required=True,
+    )
+    wrapped.configure_background(scenario="smooth", expected_segments=1)
+    action = np.concatenate((_pose(0.2), [0.0, 1.0]))
+
+    wrapped.step(action)
+    wrapped.record_background_event(
+        {
+            "kind": "smooth_task_motion",
+            "applied": True,
+            "complete": False,
+            "protocol_effective": True,
+        }
+    )
+    wrapped.step(action)
+    wrapped.record_background_event(
+        {
+            "kind": "smooth_task_motion",
+            "applied": True,
+            "complete": True,
+            "protocol_effective": True,
+        }
+    )
+    wrapped.step(action)
+
+    assert np.allclose(environment.actions[0], action)
+    assert np.allclose(environment.actions[1], action)
+    assert np.allclose(environment.actions[2][:7], _pose(0.1))
+    metadata = wrapped.protocol_metadata()
+    assert metadata["triggered"] is True
+    assert metadata["background"]["ready"] is True
+    assert metadata["background"]["ready_policy_step"] == 2
+    assert metadata["background"]["ready_before_fault"] is True
+    assert metadata["background"]["completed_segments"] == ["task_root"]
+    assert metadata["background"]["pre_background_policy_steps"] == 2
+
+
+def test_required_dynamic_background_must_be_configured_before_step() -> None:
+    wrapped = FaultInjectingTaskEnvironment(
+        _TaskEnvironment(),
+        FaultInjectionSpec(FaultInjectionKind.TIME_STALL),
+        background_required=True,
+    )
+    with pytest.raises(RuntimeError, match="did not configure"):
+        wrapped.step(np.concatenate((_pose(0.2), [0.0, 1.0])))
 
 
 def test_bimanual_time_stall_uses_right_first_wire_layout() -> None:
@@ -176,10 +245,40 @@ def test_relation_fault_releases_after_stable_carriage(
     wrapped.step(action)
 
     assert environment._scene.robot.gripper.release_calls == 1
+    assert environment.actions[1][7] == 1.0
     assert np.allclose(item.position, expected_position)
     trigger = next(event for event in wrapped.events if event["kind"] == kind.value)
     assert trigger["released_objects"] == ["item"]
     assert trigger["displaced"] is displaced
+    audit = wrapped.protocol_metadata()["physical_audit"]
+    assert audit["effect_observed"] is True
+    assert audit["fault_end_policy_step"] == 1
+    assert audit["target_objects"] == ["item"]
+    assert audit["relation_restored"] is False
+
+
+def test_relation_fault_audit_observes_later_target_reattachment() -> None:
+    item = _Object("item")
+    environment = _TaskEnvironment(objects=[item])
+    wrapped = FaultInjectingTaskEnvironment(
+        environment,
+        FaultInjectionSpec(
+            FaultInjectionKind.UNEXPECTED_DROP,
+            minimum_grasped_cycles=1,
+        ),
+    )
+    action = np.concatenate((_pose(0.1), [0.0, 0.0]))
+
+    wrapped.step(action)
+    environment._scene.robot.gripper.objects = [item]
+    wrapped.step(action)
+
+    audit = wrapped.protocol_metadata()["physical_audit"]
+    assert audit["effect_observed"] is True
+    assert audit["relation_restored"] is True
+    assert audit["relation_restoration_policy_step"] == 1
+    assert audit["cycles_to_relation_restoration"] == 1
+    assert wrapped.events[-1]["kind"] == "relation_restored"
 
 
 def test_fault_spec_rejects_unknown_configuration_instead_of_ignoring_it() -> None:

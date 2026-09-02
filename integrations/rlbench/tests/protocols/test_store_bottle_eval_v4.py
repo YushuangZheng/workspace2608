@@ -47,9 +47,7 @@ def _plan(
                 candidate_seed=candidate_seed if name in moved else None,
             )
         )
-    motion = protocol.load_v4_store_motion_source_protocol(
-        verify_semantics_file=False
-    )
+    motion = protocol.load_v4_store_motion_source_protocol(verify_semantics_file=False)
     intervention = protocol.load_v4_store_intervention_protocol(
         verify_evidence_files=False
     )
@@ -130,12 +128,8 @@ def test_store_mode_schedule_has_preregistered_n200_counts():
 def test_entity_candidates_are_source_relative_and_within_limits(
     entity, minimum, maximum, maximum_yaw
 ):
-    first = protocol.sample_v4_store_entity_goal_pose(
-        SOURCE_POSE, 99, entity=entity
-    )
-    second = protocol.sample_v4_store_entity_goal_pose(
-        SOURCE_POSE, 99, entity=entity
-    )
+    first = protocol.sample_v4_store_entity_goal_pose(SOURCE_POSE, 99, entity=entity)
+    second = protocol.sample_v4_store_entity_goal_pose(SOURCE_POSE, 99, entity=entity)
     geometry = protocol.store_entity_geometry(SOURCE_POSE, first)
     assert np.array_equal(first, second)
     assert minimum <= geometry["xy_radius_m"] <= maximum
@@ -164,8 +158,7 @@ def test_store_batch_and_task_scoped_loader_roundtrip():
         "both": 0,
     }
     assert protocol.v4_store_runtime_loaders() == {
-        protocol.V4_STORE_RUNTIME_LOADER_ID:
-        protocol.load_v4_store_motion_plan_batch
+        protocol.V4_STORE_RUNTIME_LOADER_ID: protocol.load_v4_store_motion_plan_batch
     }
     mutated = dict(inner)
     mutated["mode_counts"] = dict(inner["mode_counts"], both=3)
@@ -181,17 +174,13 @@ def test_loader_tolerates_only_cross_python_roundoff_in_legacy_derived_geometry(
     )
     legacy = copy.deepcopy(inner)
     entity = legacy["plans"][0]["entities"]["bottle"]
-    derived = protocol.store_entity_geometry(
-        entity["source_pose"], entity["goal_pose"]
-    )
+    derived = protocol.store_entity_geometry(entity["source_pose"], entity["goal_pose"])
     entity["geometry"] = {
         key: value + (5.0e-12 if key == "xy_radius_m" else 0.0)
         for key, value in derived.items()
     }
     plan_body = {
-        key: value
-        for key, value in legacy["plans"][0].items()
-        if key != "fingerprint"
+        key: value for key, value in legacy["plans"][0].items() if key != "fingerprint"
     }
     legacy["plans"][0]["fingerprint"] = protocol.canonical_fingerprint(plan_body)
     batch_body = {
@@ -204,9 +193,7 @@ def test_loader_tolerates_only_cross_python_roundoff_in_legacy_derived_geometry(
     drifted_entity = drifted["plans"][0]["entities"]["bottle"]
     drifted_entity["geometry"]["xy_radius_m"] += 1.0e-6
     plan_body = {
-        key: value
-        for key, value in drifted["plans"][0].items()
-        if key != "fingerprint"
+        key: value for key, value in drifted["plans"][0].items() if key != "fingerprint"
     }
     drifted["plans"][0]["fingerprint"] = protocol.canonical_fingerprint(plan_body)
     batch_body = {
@@ -247,16 +234,16 @@ def test_controller_applies_fridge_then_bottle_as_independent_events(monkeypatch
         "bind_v4_store_source_plan",
         lambda *args, **kwargs: {"formal_source_bound": True},
     )
-    monkeypatch.setattr(
-        protocol, "_semantic_roots", lambda task: environment.roots
-    )
+    monkeypatch.setattr(protocol, "_semantic_roots", lambda task: environment.roots)
     monkeypatch.setattr(protocol, "_semantic_tree_state", lambda task, roots: [])
     monkeypatch.setattr(
         protocol,
         "_compare_semantic_tree",
         lambda before, after: {"matched": True},
     )
-    monkeypatch.setattr(protocol, "_low_dim_frame_audit", lambda task: {"matched": True})
+    monkeypatch.setattr(
+        protocol, "_low_dim_frame_audit", lambda task: {"matched": True}
+    )
     monkeypatch.setattr(runtime, "_robot_external_collision_pairs", lambda *args: ())
     controller = protocol.StoreBottleMultiEntityController(
         plan=plan,
@@ -268,26 +255,62 @@ def test_controller_applies_fridge_then_bottle_as_independent_events(monkeypatch
         fresh_task_generation={"fixture": True},
     )
     observation = {"observation": 0}
-    observation, early = controller.apply(
-        environment, observation, policy_step=44
-    )
+    observation, early = controller.apply(environment, observation, policy_step=44)
     assert early == []
-    observation, fridge = controller.apply(
-        environment, observation, policy_step=45
-    )
+    observation, fridge = controller.apply(environment, observation, policy_step=45)
     assert [event["entity"] for event in fridge] == ["fridge"]
     assert np.allclose(
         environment.roots["bottle"].get_pose(), plan.entity("bottle").source_pose
     )
-    observation, middle = controller.apply(
-        environment, observation, policy_step=59
-    )
+    observation, middle = controller.apply(environment, observation, policy_step=59)
     assert middle == []
-    observation, bottle = controller.apply(
-        environment, observation, policy_step=60
-    )
+    observation, bottle = controller.apply(environment, observation, policy_step=60)
     assert [event["entity"] for event in bottle] == ["bottle"]
     assert environment.observation_count == 2
+
+
+def test_controller_smoothly_reuses_same_authenticated_entity_plan(monkeypatch):
+    plan = _plan(0, base_seed=70, diagnostic_mode="bottle_only")
+    environment = _TaskEnvironment()
+    monkeypatch.setattr(
+        protocol,
+        "bind_v4_store_source_plan",
+        lambda *args, **kwargs: {"formal_source_bound": True},
+    )
+    monkeypatch.setattr(protocol, "_semantic_roots", lambda task: environment.roots)
+    monkeypatch.setattr(protocol, "_semantic_tree_state", lambda task, roots: [])
+    monkeypatch.setattr(
+        protocol,
+        "_compare_semantic_tree",
+        lambda before, after: {"matched": True},
+    )
+    monkeypatch.setattr(
+        protocol, "_low_dim_frame_audit", lambda task: {"matched": True}
+    )
+    monkeypatch.setattr(runtime, "_robot_external_collision_pairs", lambda *args: ())
+    controller = protocol.StoreBottleMultiEntityController(
+        plan=plan,
+        scenario="smooth",
+        total_steps=2,
+    )
+    controller.bind_source(
+        environment,
+        descriptions=["fixture"],
+        fresh_task_generation={"fixture": True},
+    )
+
+    observation = {"observation": 0}
+    observation, first = controller.apply(environment, observation, policy_step=60)
+    observation, second = controller.apply(environment, observation, policy_step=61)
+
+    assert first[0]["kind"] == "smooth_store_entity"
+    assert first[0]["smooth_call"] == 1
+    assert first[0]["complete"] is False
+    assert second[0]["smooth_call"] == 2
+    assert second[0]["complete"] is True
+    assert np.allclose(
+        environment.roots["bottle"].get_pose(), plan.entity("bottle").goal_pose
+    )
 
 
 def test_direct_evaluator_store_dispatch_is_v4_only():

@@ -19,7 +19,7 @@ from integrations.rlbench.rlbench_dynamac.core.records import atomic_json
 from . import launch
 from .run_cell import PROTOCOL, load_protocol
 
-DEFAULT_OUTPUT = Path(__file__).with_name("results") / "v1"
+DEFAULT_OUTPUT = Path(__file__).with_name("results") / "v2"
 CONTRASTS = (
     ("progress_only", "dynamac_v4"),
     ("progress_dynamic_roles", "progress_only"),
@@ -114,6 +114,11 @@ def _cell_rows(
         triggered = metadata["episodes_fault_triggered"]
         triggered_successes: Any = ""
         conditional_recovery_rate: Any = ""
+        fault_effective: Any = ""
+        relation_restored: Any = ""
+        relation_restoration_rate: Any = ""
+        legal_reentries: Any = ""
+        mean_post_fault_recovery_cycles: Any = ""
         if cell.fault is not None:
             triggered_rows = [
                 row
@@ -124,9 +129,42 @@ def _cell_rows(
             conditional_recovery_rate = (
                 "" if not triggered_rows else triggered_successes / len(triggered_rows)
             )
+            audits = [
+                row.get("recovery_audit", {})
+                for row in triggered_rows
+                if isinstance(row.get("recovery_audit"), dict)
+            ]
+            fault_effective = sum(
+                audit.get("fault_effect_observed") is True for audit in audits
+            )
+            restoration_audits = [
+                audit for audit in audits if audit.get("relation_restored") is not None
+            ]
+            relation_restored = sum(
+                audit.get("relation_restored") is True for audit in restoration_audits
+            )
+            relation_restoration_rate = (
+                ""
+                if not restoration_audits
+                else relation_restored / len(restoration_audits)
+            )
+            legal_reentries = sum(
+                audit.get("legal_reentry") is True for audit in audits
+            )
+            recovery_cycles = [
+                int(audit["post_fault_recovery_cycles"])
+                for audit in audits
+                if isinstance(audit.get("post_fault_recovery_cycles"), int)
+            ]
+            mean_post_fault_recovery_cycles = (
+                ""
+                if not recovery_cycles
+                else sum(recovery_cycles) / len(recovery_cycles)
+            )
         rows.append(
             {
                 "experiment": cell.experiment,
+                "background": metadata.get("background", payload.get("scenario")),
                 "fault": cell.fault or "",
                 "task": cell.task,
                 "method": cell.method,
@@ -141,6 +179,11 @@ def _cell_rows(
                 ),
                 "triggered_successes": triggered_successes,
                 "conditional_recovery_rate": conditional_recovery_rate,
+                "fault_effective": fault_effective,
+                "relation_restored": relation_restored,
+                "relation_restoration_rate": relation_restoration_rate,
+                "legal_reentries": legal_reentries,
+                "mean_post_fault_recovery_cycles": mean_post_fault_recovery_cycles,
                 "git_commit": metadata["git_commit"],
                 "result_protocol_sha256": metadata["protocol_sha256"],
                 "result_path": cell.result.as_posix(),
@@ -190,6 +233,78 @@ def _comparisons(
                     "mcnemar_exact_p": p_value,
                 }
             )
+    adjusted = _holm([row["mcnemar_exact_p"] for row in rows])
+    for row, value in zip(rows, adjusted):
+        row["holm_adjusted_p"] = value
+    return rows
+
+
+def _condition_comparisons(
+    outcomes: Mapping[tuple[str, Optional[str], str, str], Mapping[int, bool]],
+) -> list[dict[str, Any]]:
+    """Compare clean dynamic execution and faults on identical episodes."""
+
+    tasks = sorted({key[2] for key in outcomes})
+    methods = sorted({key[3] for key in outcomes})
+    faults = sorted({key[1] for key in outcomes if key[0] == "fault"})
+    rows = []
+    contrasts = [("dynamic", None, "normal", None)] + [
+        ("fault", fault, "dynamic", None) for fault in faults
+    ]
+    for (
+        proposed_experiment,
+        proposed_fault,
+        reference_experiment,
+        reference_fault,
+    ) in contrasts:
+        for task in tasks:
+            for method in methods:
+                proposed = outcomes[(proposed_experiment, proposed_fault, task, method)]
+                reference = outcomes[
+                    (reference_experiment, reference_fault, task, method)
+                ]
+                indices = sorted(set(proposed).intersection(reference))
+                if not indices:
+                    raise RuntimeError(
+                        "formal condition comparison has no paired episodes"
+                    )
+                proposed_only = sum(
+                    proposed[index] and not reference[index] for index in indices
+                )
+                reference_only = sum(
+                    reference[index] and not proposed[index] for index in indices
+                )
+                discordant = proposed_only + reference_only
+                p_value = (
+                    1.0
+                    if discordant == 0
+                    else float(
+                        binomtest(
+                            proposed_only,
+                            discordant,
+                            p=0.5,
+                            alternative="two-sided",
+                        ).pvalue
+                    )
+                )
+                rows.append(
+                    {
+                        "proposed_experiment": proposed_experiment,
+                        "proposed_fault": proposed_fault or "",
+                        "reference_experiment": reference_experiment,
+                        "reference_fault": reference_fault or "",
+                        "task": task,
+                        "method": method,
+                        "paired_episodes": len(indices),
+                        "proposed_rate": sum(proposed[index] for index in indices)
+                        / len(indices),
+                        "reference_rate": sum(reference[index] for index in indices)
+                        / len(indices),
+                        "proposed_only_success": proposed_only,
+                        "reference_only_success": reference_only,
+                        "mcnemar_exact_p": p_value,
+                    }
+                )
     adjusted = _holm([row["mcnemar_exact_p"] for row in rows])
     for row, value in zip(rows, adjusted):
         row["holm_adjusted_p"] = value
@@ -258,17 +373,29 @@ def _markdown(
         "",
         "## 单元结果",
         "",
-        "| 实验 | 故障 | 任务 | 方法 | 成功 | 成功率 | 95% CI | 触发 |",
-        "|---|---|---|---|---:|---:|---:|---:|",
+        "| 实验 | 背景 | 故障 | 任务 | 方法 | 成功 | 成功率 | 95% CI | 触发 | 物理有效 | 关系恢复 | 合法重入 |",
+        "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in cell_rows:
         triggered = row["fault_triggered"]
         rendered = dict(row)
         rendered["fault"] = rendered["fault"] or "-"
         rendered["triggered"] = "-" if triggered == "" else triggered
+        rendered["fault_effective"] = (
+            "-" if rendered["fault_effective"] == "" else rendered["fault_effective"]
+        )
+        rendered["relation_restored"] = (
+            "-"
+            if rendered["relation_restoration_rate"] == ""
+            else rendered["relation_restored"]
+        )
+        rendered["legal_reentries"] = (
+            "-" if triggered == "" else rendered["legal_reentries"]
+        )
         lines.append(
-            "| {experiment} | {fault} | {task} | {method} | {successes}/{episodes} "
-            "| {success_rate:.3f} | [{wilson95_low:.3f}, {wilson95_high:.3f}] | {triggered} |".format(
+            "| {experiment} | {background} | {fault} | {task} | {method} | {successes}/{episodes} "
+            "| {success_rate:.3f} | [{wilson95_low:.3f}, {wilson95_high:.3f}] "
+            "| {triggered} | {fault_effective} | {relation_restored} | {legal_reentries} |".format(
                 **rendered
             )
         )
@@ -303,6 +430,7 @@ def summarize(section: str, output: Path) -> dict[str, Any]:
         )
     cell_rows, outcomes = _cell_rows(cells)
     comparisons = _comparisons(outcomes)
+    condition_comparisons = _condition_comparisons(outcomes) if section == "all" else []
     macro = _macro_bootstrap(outcomes)
     noninferiority_margin = float(
         protocol["statistics"]["normal_noninferiority_margin"]
@@ -327,6 +455,8 @@ def summarize(section: str, output: Path) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=False)
     _write_csv(output / "cell_summary.csv", cell_rows)
     _write_csv(output / "paired_comparisons.csv", comparisons)
+    if condition_comparisons:
+        _write_csv(output / "condition_comparisons.csv", condition_comparisons)
     _write_csv(output / "macro_bootstrap.csv", macro)
     payload = {
         "schema": "essay2608.phase6_formal_summary.v1",
@@ -337,6 +467,7 @@ def summarize(section: str, output: Path) -> dict[str, Any]:
         "episode_count": sum(cell.episodes for cell in cells),
         "cell_results": cell_rows,
         "paired_comparisons": comparisons,
+        "condition_comparisons": condition_comparisons,
         "macro_bootstrap": macro,
         "normal_noninferiority": noninferiority,
     }
@@ -352,7 +483,11 @@ def summarize(section: str, output: Path) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--section", choices=("normal", "fault", "all"), default="all")
+    parser.add_argument(
+        "--section",
+        choices=("normal", "dynamic", "fault", "all"),
+        default="all",
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     return parser
 

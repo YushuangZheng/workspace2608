@@ -102,9 +102,23 @@ class FaultInjectionSpec:
 
 
 class FaultInjectingTaskEnvironment:
-    """Transparent one-shot fault wrapper around an RLBench task environment."""
+    """Transparent one-shot fault wrapper around an RLBench task environment.
 
-    def __init__(self, task_environment: Any, spec: FaultInjectionSpec) -> None:
+    Formal dynamic-background evaluation can require the external scene-motion
+    controller to finish before the physical fault becomes eligible.  The
+    evaluator reports those background events through ``configure_background``
+    and ``record_background_event``.  This handshake is deliberately outside
+    the policy: it never reads or mutates StateId, progress, relation beliefs,
+    or execution modes.
+    """
+
+    def __init__(
+        self,
+        task_environment: Any,
+        spec: FaultInjectionSpec,
+        *,
+        background_required: bool = False,
+    ) -> None:
         self._environment = task_environment
         self.spec = spec
         self.events: list[dict[str, Any]] = []
@@ -115,6 +129,24 @@ class FaultInjectingTaskEnvironment:
         self._previous_close_request = False
         self._failed_close_active = False
         self._grasped_cycles = 0
+        self._fault_arm: str | None = None
+        self._released_objects: dict[str, Any] = {}
+        self._released_object_positions: dict[str, np.ndarray] = {}
+        self._effect_observed: bool | None = None
+        self._effect_policy_step: int | None = None
+        self._fault_end_policy_step: int | None = None
+        self._relation_restored: bool | None = None
+        self._relation_restoration_policy_step: int | None = None
+        self._background_required = bool(background_required)
+        self._background_configured = False
+        self._background_scenario: str | None = None
+        self._background_expected_segments = 0
+        self._background_completed_segments: set[str] = set()
+        self._background_events: list[dict[str, Any]] = []
+        self._background_ready = not self._background_required
+        self._background_ready_policy_step: int | None = None
+        self._fault_background_ready_at_trigger: bool | None = None
+        self._pre_background_policy_steps = 0
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._environment, name)
@@ -123,15 +155,108 @@ class FaultInjectingTaskEnvironment:
     def triggered(self) -> bool:
         return self._triggered
 
+    def configure_background(self, *, scenario: str, expected_segments: int) -> None:
+        """Declare the policy-independent dynamic background contract.
+
+        A segment is one independently scheduled scene-root motion.  Ordinary
+        tasks have one segment; task-scoped multi-entity plans may have more.
+        Configuration must happen before the first action is executed.
+        """
+
+        if self._policy_step != 0 or self._background_configured:
+            raise RuntimeError(
+                "fault background must be configured exactly once before stepping"
+            )
+        if scenario != "smooth":
+            raise ValueError("formal fault background must use the smooth scenario")
+        if (
+            isinstance(expected_segments, bool)
+            or not isinstance(expected_segments, int)
+            or expected_segments < 1
+        ):
+            raise ValueError("dynamic fault background needs at least one segment")
+        self._background_configured = True
+        self._background_scenario = scenario
+        self._background_expected_segments = expected_segments
+        self._background_ready = False
+
+    def record_background_event(self, event: Mapping[str, Any]) -> None:
+        """Record one externally applied scene-motion tick.
+
+        Only an effective, completed segment opens fault eligibility.  Partial
+        interpolation ticks remain auditable but cannot release a fault.
+        """
+
+        if not self._background_required:
+            return
+        if not self._background_configured:
+            raise RuntimeError("dynamic background event arrived before configuration")
+        if not isinstance(event, Mapping) or event.get("applied") is not True:
+            raise ValueError("background notification must describe an applied event")
+        record = dict(event)
+        self._background_events.append(record)
+        if (
+            event.get("complete") is not True
+            or event.get("protocol_effective") is False
+        ):
+            return
+        segment = str(event.get("entity", "task_root"))
+        self._background_completed_segments.add(segment)
+        if (
+            len(self._background_completed_segments)
+            >= self._background_expected_segments
+        ):
+            self._background_ready = True
+            if self._background_ready_policy_step is None:
+                self._background_ready_policy_step = self._policy_step
+
     def protocol_metadata(self) -> dict[str, Any]:
+        relation_fault = self.spec.kind in {
+            FaultInjectionKind.GRASP_FAILURE,
+            FaultInjectionKind.RELATION_MISMATCH,
+            FaultInjectionKind.UNEXPECTED_DROP,
+        }
         return {
-            "schema": "essay2608.rlbench.physical_fault.v1",
+            "schema": "essay2608.rlbench.physical_fault.v2",
             "spec": self.spec.to_dict(),
             "triggered": self._triggered,
             "events": list(self.events),
             "policy_steps_observed": self._policy_step,
             "policy_state_mutated": False,
             "observation_hidden": False,
+            "background": {
+                "required": self._background_required,
+                "configured": self._background_configured,
+                "scenario": self._background_scenario,
+                "expected_segments": self._background_expected_segments,
+                "completed_segments": sorted(self._background_completed_segments),
+                "ready": self._background_ready,
+                "ready_policy_step": self._background_ready_policy_step,
+                "ready_before_fault": self._fault_background_ready_at_trigger,
+                "pre_background_policy_steps": self._pre_background_policy_steps,
+                "events": list(self._background_events),
+            },
+            "physical_audit": {
+                "effect_observed": self._effect_observed,
+                "effect_policy_step": self._effect_policy_step,
+                "fault_end_policy_step": self._fault_end_policy_step,
+                "target_arm": self._fault_arm,
+                "target_objects": sorted(self._released_objects),
+                "relation_restored": (
+                    self._relation_restored
+                    if relation_fault and self._triggered
+                    else None
+                ),
+                "relation_restoration_policy_step": (
+                    self._relation_restoration_policy_step
+                ),
+                "cycles_to_relation_restoration": (
+                    None
+                    if self._relation_restoration_policy_step is None
+                    else self._relation_restoration_policy_step
+                    - int(self.events[0]["policy_step"])
+                ),
+            },
         }
 
     @staticmethod
@@ -195,6 +320,7 @@ class FaultInjectingTaskEnvironment:
 
     def _trigger_event(self, kind: str, **fields: Any) -> None:
         self._triggered = True
+        self._fault_background_ready_at_trigger = self._background_ready
         self.events.append(
             {
                 "kind": kind,
@@ -240,6 +366,12 @@ class FaultInjectingTaskEnvironment:
                 observation, arm, bimanual=bimanual
             )
         self._active_cycles -= 1
+        self._effect_observed = True
+        self._effect_policy_step = (
+            self._policy_step
+            if self._effect_policy_step is None
+            else self._effect_policy_step
+        )
         self.events.append(
             {
                 "kind": "time_stall_cycle",
@@ -248,6 +380,15 @@ class FaultInjectingTaskEnvironment:
                 "protocol_effective": True,
             }
         )
+        if self._active_cycles == 0:
+            self._fault_end_policy_step = self._policy_step
+            self.events.append(
+                {
+                    "kind": "time_stall_ended",
+                    "policy_step": self._policy_step,
+                    "protocol_effective": True,
+                }
+            )
         return stalled
 
     def _apply_grasp_failure(self, action: np.ndarray, *, bimanual: bool) -> np.ndarray:
@@ -266,6 +407,8 @@ class FaultInjectingTaskEnvironment:
             and close_requested
         ):
             self._failed_close_active = True
+            self._fault_arm = selected[0]
+            self._relation_restored = False
             self._trigger_event(
                 self.spec.kind.value,
                 arm=selected[0],
@@ -276,6 +419,7 @@ class FaultInjectingTaskEnvironment:
             return action
         if not close_requested:
             self._failed_close_active = False
+            self._fault_end_policy_step = self._policy_step
             self.events.append(
                 {
                     "kind": "grasp_failure_occurrence_ended",
@@ -287,6 +431,12 @@ class FaultInjectingTaskEnvironment:
             return action
         suppressed = action.copy()
         suppressed[gripper_index] = 1.0
+        self._effect_observed = True
+        self._effect_policy_step = (
+            self._policy_step
+            if self._effect_policy_step is None
+            else self._effect_policy_step
+        )
         self.events.append(
             {
                 "kind": "grasp_close_suppressed_cycle",
@@ -297,7 +447,7 @@ class FaultInjectingTaskEnvironment:
         )
         return suppressed
 
-    def _apply_relation_fault(self, *, bimanual: bool) -> None:
+    def _apply_relation_fault(self, *, bimanual: bool) -> bool:
         selected = self._selected_arms(bimanual=bimanual)
         if len(selected) != 1:
             raise ValueError("relation faults require one selected arm")
@@ -309,7 +459,19 @@ class FaultInjectingTaskEnvironment:
             or self._policy_step < self.spec.earliest_step
             or self._grasped_cycles < self.spec.minimum_grasped_cycles
         ):
-            return
+            return False
+        self._fault_arm = selected[0]
+        self._released_objects = {
+            name: obj for name, obj in zip(self._object_names(grasped), grasped)
+        }
+        self._released_object_positions = {}
+        for name, obj in self._released_objects.items():
+            get_position = getattr(obj, "get_position", None)
+            if callable(get_position):
+                self._released_object_positions[name] = np.asarray(
+                    get_position(), dtype=np.float64
+                ).copy()
+        self._relation_restored = False
         names = self._object_names(grasped)
         gripper.release()
         displaced = False
@@ -334,15 +496,136 @@ class FaultInjectingTaskEnvironment:
                 list(self.spec.mismatch_translation) if displaced else None
             ),
         )
+        return True
+
+    def _force_release_action(
+        self, action: np.ndarray, *, bimanual: bool
+    ) -> np.ndarray:
+        """Open the selected gripper on the release cycle.
+
+        ``gripper.release()`` removes the simulator attachment, while the open
+        command prevents the policy's still-closed command from immediately
+        re-attaching the same object in that environment step.  This is the
+        executable meaning of the preregistered physical ``release`` and does
+        not alter policy state or observations.
+        """
+
+        if self._fault_arm is None:
+            raise RuntimeError("relation fault was triggered without a target arm")
+        _pose_slice, gripper_index = self._arm_slice(self._fault_arm, bimanual=bimanual)
+        released = action.copy()
+        released[gripper_index] = 1.0
+        return released
+
+    def _audit_physical_effect(self, *, bimanual: bool) -> None:
+        if not self._triggered or self._fault_arm is None:
+            return
+        gripper = self._gripper(self._fault_arm, bimanual=bimanual)
+        grasped = list(gripper.get_grasped_objects())
+        grasped_names = set(self._object_names(grasped))
+
+        if self.spec.kind == FaultInjectionKind.GRASP_FAILURE:
+            if (
+                self._effect_observed
+                and not self._failed_close_active
+                and self._relation_restored is False
+                and grasped_names
+            ):
+                self._relation_restored = True
+                self._relation_restoration_policy_step = self._policy_step
+                self.events.append(
+                    {
+                        "kind": "relation_restored",
+                        "policy_step": self._policy_step,
+                        "arm": self._fault_arm,
+                        "attached_objects": sorted(grasped_names),
+                        "protocol_effective": True,
+                    }
+                )
+            return
+
+        if self.spec.kind not in {
+            FaultInjectionKind.RELATION_MISMATCH,
+            FaultInjectionKind.UNEXPECTED_DROP,
+        }:
+            return
+
+        target_names = set(self._released_objects)
+        still_attached = sorted(target_names.intersection(grasped_names))
+        if self._effect_observed is None:
+            displacement_by_object: dict[str, float | None] = {}
+            for name, obj in self._released_objects.items():
+                get_position = getattr(obj, "get_position", None)
+                before = self._released_object_positions.get(name)
+                displacement_by_object[name] = (
+                    None
+                    if before is None or not callable(get_position)
+                    else float(
+                        np.linalg.norm(
+                            np.asarray(get_position(), dtype=np.float64) - before
+                        )
+                    )
+                )
+            detached = not still_attached
+            if self.spec.kind == FaultInjectionKind.RELATION_MISMATCH:
+                expected = float(np.linalg.norm(self.spec.mismatch_translation))
+                displaced = all(
+                    value is not None and value >= max(0.0, expected - 0.01)
+                    for value in displacement_by_object.values()
+                )
+            else:
+                displaced = True
+            self._effect_observed = detached and displaced
+            self._effect_policy_step = self._policy_step
+            self._fault_end_policy_step = self._policy_step
+            self.events.append(
+                {
+                    "kind": "physical_fault_effect_audit",
+                    "policy_step": self._policy_step,
+                    "arm": self._fault_arm,
+                    "detached": detached,
+                    "still_attached_objects": still_attached,
+                    "displacement_by_object": displacement_by_object,
+                    "protocol_effective": self._effect_observed,
+                }
+            )
+            return
+
+        if (
+            self._effect_observed
+            and self._relation_restored is False
+            and still_attached
+        ):
+            self._relation_restored = True
+            self._relation_restoration_policy_step = self._policy_step
+            self.events.append(
+                {
+                    "kind": "relation_restored",
+                    "policy_step": self._policy_step,
+                    "arm": self._fault_arm,
+                    "attached_objects": still_attached,
+                    "protocol_effective": True,
+                }
+            )
 
     def step(self, action: Any):
         values = np.asarray(action, dtype=np.float64)
         bimanual = self._is_bimanual_action(values)
+        if self._background_required and not self._background_configured:
+            raise RuntimeError(
+                "formal fault episode did not configure its dynamic background"
+            )
+        if not self._background_ready:
+            result = self._environment.step(values)
+            self._pre_background_policy_steps += 1
+            self._policy_step += 1
+            return result
+        relation_fault_triggered = False
         if self.spec.kind in {
             FaultInjectionKind.RELATION_MISMATCH,
             FaultInjectionKind.UNEXPECTED_DROP,
         }:
-            self._apply_relation_fault(bimanual=bimanual)
+            relation_fault_triggered = self._apply_relation_fault(bimanual=bimanual)
         current_observation = self._environment.get_observation()
         applied = values
         if self.spec.kind == FaultInjectionKind.TIME_STALL:
@@ -351,7 +634,10 @@ class FaultInjectingTaskEnvironment:
             )
         elif self.spec.kind == FaultInjectionKind.GRASP_FAILURE:
             applied = self._apply_grasp_failure(values, bimanual=bimanual)
+        elif relation_fault_triggered:
+            applied = self._force_release_action(values, bimanual=bimanual)
         result = self._environment.step(applied)
+        self._audit_physical_effect(bimanual=bimanual)
         self._policy_step += 1
         return result
 

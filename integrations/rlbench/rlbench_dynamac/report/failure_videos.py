@@ -32,7 +32,11 @@ from integrations.rlbench.rlbench_dynamac.eval import (
     table_iii_coordination,
     unimanual_evaluate,
 )
-from integrations.rlbench.rlbench_dynamac.eval.eval_set import _is_sha256, fixed_coordination_sources, fixed_environment_plans
+from integrations.rlbench.rlbench_dynamac.eval.eval_set import (
+    _is_sha256,
+    fixed_coordination_sources,
+    fixed_environment_plans,
+)
 from integrations.rlbench.rlbench_dynamac.core.records import atomic_json
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
@@ -52,7 +56,9 @@ from integrations.rlbench.rlbench_dynamac.protocols.store_bottle_eval_v4 import 
     load_v4_store_motion_source_protocol,
     v4_store_task_identity_components,
 )
-from integrations.rlbench.rlbench_dynamac.protocols.store_bottle_semantics import STORE_BOTTLE_TASK_NAME
+from integrations.rlbench.rlbench_dynamac.protocols.store_bottle_semantics import (
+    STORE_BOTTLE_TASK_NAME,
+)
 from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
     load_v3_intervention_protocol,
     load_v3_motion_source_protocol,
@@ -73,6 +79,7 @@ from integrations.rlbench.rlbench_dynamac.protocols.v4_dynamic_protocol import (
 )
 
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
+
 DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
 DEFAULT_OUTPUT_ROOT = INTEGRATION_ROOT / "results" / "failure_videos" / "v3"
 DEFAULT_REPLAY_OVERHEAD_PERSPECTIVE_DEGREES = 70.0
@@ -360,7 +367,9 @@ def _load_source(path, task, episode_indices, *, expected_success=False):
     if not isinstance(payload.get("horizon"), int) or payload["horizon"] < 1:
         raise ValueError("source evaluation has an invalid horizon")
     model_identity = payload.get("model_identity")
-    if not isinstance(model_identity, dict) or not model_identity.get("manifest_authenticated"):
+    if not isinstance(model_identity, dict) or not model_identity.get(
+        "manifest_authenticated"
+    ):
         raise ValueError("source evaluation is not bound to an authenticated model")
     _validate_v4_store_source_identity(payload, task)
     _validate_v4_lift_source_identity(payload, task)
@@ -392,13 +401,10 @@ def _load_source(path, task, episode_indices, *, expected_success=False):
         # only an effective prefix).  Admit those canonical accounting states;
         # older rows without that accounting retain the original requirement
         # that the intervention was effective.
-        if (
-            _protocol_condition_signature(payload, row) is None
-            and not _protocol_effective(payload, row)
-        ):
-            raise ValueError(
-                f"episode {episode} did not exercise the source scenario"
-            )
+        if _protocol_condition_signature(
+            payload, row
+        ) is None and not _protocol_effective(payload, row):
+            raise ValueError(f"episode {episode} did not exercise the source scenario")
         selected[episode] = row
     return payload, selected, hashlib.sha256(raw).hexdigest(), source_path
 
@@ -419,7 +425,9 @@ def _auxiliary_source_rows(source, episode_indices):
     selected = {}
     for episode in episode_indices:
         if episode not in by_episode:
-            raise ValueError(f"warm-up episode {episode} is absent from the source evaluation")
+            raise ValueError(
+                f"warm-up episode {episode} is absent from the source evaluation"
+            )
         selected[episode] = by_episode[episode]
     return selected
 
@@ -471,10 +479,11 @@ def _load_sealed_replay_batch(source, task):
         # The cell-selected batch remains a strict identity boundary.
         if (
             eval_set_id != V4_EVALUATION_SET_ID
-            or fixed.get("formal_access")
-            != "canonical_id_read_only_no_generation"
+            or fixed.get("formal_access") != "canonical_id_read_only_no_generation"
         ):
-            raise RuntimeError("source result has an invalid formal fixed eval identity")
+            raise RuntimeError(
+                "source result has an invalid formal fixed eval identity"
+            )
         for field in ("manifest_sha256", "spec_sha256"):
             if not _is_sha256(fixed.get(field)):
                 raise RuntimeError(
@@ -788,7 +797,9 @@ class ObservationRecorder:
         return 0 if self._writer is None else self._writer.frames
 
     def capture(self, observation):
-        cameras = self.requested_cameras if self.used_cameras is None else self.used_cameras
+        cameras = (
+            self.requested_cameras if self.used_cameras is None else self.used_cameras
+        )
         frame, used = _compose_frame(observation, cameras)
         if self.used_cameras is None:
             # Front is the stable common view.  Overhead is included when the
@@ -856,17 +867,11 @@ def _protocol_effective(source, replay):
                 and intervention.get("schema")
                 == "dynamac-coordination-policy-clocked-smooth-intervention-v4"
                 and intervention.get("protocol_id") == V4_COORDINATION_PROTOCOL_ID
-                and intervention.get("perturbed_arm")
-                == protocol.get("perturbed_arm")
-                and intervention.get("trigger_step")
-                == V4_COORDINATION_TRIGGER_STEP
+                and intervention.get("perturbed_arm") == protocol.get("perturbed_arm")
+                and intervention.get("trigger_step") == V4_COORDINATION_TRIGGER_STEP
                 and replay.get("committed_policy_steps", 0)
-                >= (
-                    V4_COORDINATION_TRIGGER_STEP
-                    + V4_COORDINATION_SMOOTH_POLICY_TICKS
-                )
-                and replay.get("perturbed_steps")
-                == V4_COORDINATION_SMOOTH_POLICY_TICKS
+                >= (V4_COORDINATION_TRIGGER_STEP + V4_COORDINATION_SMOOTH_POLICY_TICKS)
+                and replay.get("perturbed_steps") == V4_COORDINATION_SMOOTH_POLICY_TICKS
                 and intervention.get("smooth_policy_ticks_planned")
                 == V4_COORDINATION_SMOOTH_POLICY_TICKS
                 and intervention.get("smooth_policy_ticks_elapsed")
@@ -987,7 +992,9 @@ def _protocol_effective(source, replay):
         return bool(effective)
 
     protocol = (
-        source.get("scenario_protocol", {}) if family == "bimanual" else source.get("protocol", {})
+        source.get("scenario_protocol", {})
+        if family == "bimanual"
+        else source.get("protocol", {})
     )
     expected_calls = protocol.get(
         "smooth_interpolation_calls",
@@ -1330,8 +1337,7 @@ def _source_protocol_budgets(source):
     )
     if (
         not isinstance(settling, dict)
-        or settling.get("maximum_physics_steps")
-        != expected_settling_steps
+        or settling.get("maximum_physics_steps") != expected_settling_steps
     ):
         raise RuntimeError("source result has noncanonical execution budgets")
     protocol = (
@@ -1340,8 +1346,7 @@ def _source_protocol_budgets(source):
         else source.get("protocol", {}) if family == "unimanual" else {}
     )
     if family == "bimanual" and (
-        protocol.get("max_sampling_attempts")
-        != motion["goal_sampling_max_attempts"]
+        protocol.get("max_sampling_attempts") != motion["goal_sampling_max_attempts"]
         or protocol.get("smooth_interpolation_calls")
         != (
             intervention.get("smooth_steps")
@@ -1358,9 +1363,7 @@ def _source_protocol_budgets(source):
         raise RuntimeError("source unimanual intervention budgets are invalid")
     return {
         "smooth_steps": (
-            DEFAULT_SCENARIO_STEPS
-            if v4_lift
-            else intervention.get("smooth_steps")
+            DEFAULT_SCENARIO_STEPS if v4_lift else intervention.get("smooth_steps")
         ),
         "motion_attempts": motion["goal_sampling_max_attempts"],
         "final_settling_steps": expected_settling_steps,
@@ -1493,8 +1496,7 @@ def _authenticated_replay_trigger(source, task, worker, budgets):
         protocol.get("trigger_authentication") != authentication
         or protocol.get("trigger_policy_step") != trigger
         or protocol.get("intervention_registry_schema") != registry["schema"]
-        or protocol.get("intervention_registry_fingerprint")
-        != registry["fingerprint"]
+        or protocol.get("intervention_registry_fingerprint") != registry["fingerprint"]
     ):
         raise RuntimeError(
             "source trigger is not authenticated by the loaded checkpoint"
@@ -1546,6 +1548,7 @@ def _run_selected_episode(
             scenario=source["scenario"],
             max_primary_action_attempts=budgets["primary_action_attempts"],
             motion_plan=motion_plan,
+            scenario_steps=budgets["smooth_steps"],
             final_settling_steps=budgets["final_settling_steps"],
             descriptions=descriptions,
             observation=observation,
@@ -1685,7 +1688,9 @@ def _validate_output_key(value):
     if not value or any(
         character not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for character in value
     ):
-        raise ValueError("--output-key must contain only lowercase letters, digits, '_' or '-'")
+        raise ValueError(
+            "--output-key must contain only lowercase letters, digits, '_' or '-'"
+        )
     return value
 
 
@@ -1865,12 +1870,18 @@ def record(args):
         getattr(args, "max_replay_attempts_per_episode", 1)
     )
     attempt_protocol = _replay_attempt_protocol(maximum_attempts)
-    minimum_confirmed = len(episodes) if args.minimum_confirmed is None else args.minimum_confirmed
+    minimum_confirmed = (
+        len(episodes) if args.minimum_confirmed is None else args.minimum_confirmed
+    )
     if minimum_confirmed < 1 or minimum_confirmed > len(episodes):
-        raise ValueError("--minimum-confirmed must be between one and the number of candidates")
+        raise ValueError(
+            "--minimum-confirmed must be between one and the number of candidates"
+        )
     source_path = args.source_result or DEFAULT_SOURCE_RESULTS.get(args.task)
     if source_path is None:
-        raise ValueError(f"--source-result is required because {args.task!r} has no default")
+        raise ValueError(
+            f"--source-result is required because {args.task!r} has no default"
+        )
     source, originals, source_sha, resolved_source = _load_source(
         source_path,
         args.task,
@@ -1881,7 +1892,9 @@ def record(args):
     replay_protocol_id = _require_current_evaluator_protocol(source, args.task)
     replay_batch = _load_sealed_replay_batch(source, args.task)
     budgets = _source_protocol_budgets(source)
-    output_key = _validate_output_key(args.output_key or _default_output_key(source, args.task))
+    output_key = _validate_output_key(
+        args.output_key or _default_output_key(source, args.task)
+    )
     target = _validate_replay_output_target(
         Path(args.output_root).resolve() / output_key
     )
@@ -1892,7 +1905,9 @@ def record(args):
     if target.is_symlink() or (target_existed_before_run and not target.is_dir()):
         raise RuntimeError("replay output target must be a real directory")
     target.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f".{output_key}.staging-", dir=str(target.parent)))
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{output_key}.staging-", dir=str(target.parent))
+    )
     environment = worker = None
     launched = False
     manifest_rows = []
@@ -1902,7 +1917,9 @@ def record(args):
     try:
         environment, worker, task_class = _runtime_components(args, source)
         if worker.model_identity != source["model_identity"]:
-            raise RuntimeError("loaded model identity differs from the source evaluation")
+            raise RuntimeError(
+                "loaded model identity differs from the source evaluation"
+            )
         trigger_step = _authenticated_replay_trigger(
             source,
             args.task,
@@ -1922,12 +1939,10 @@ def record(args):
             getattr(args, "camera_perspective_degrees", None),
         )
         for warmup_episode in warmup_episodes:
-            warmup_plan, warmup_variation, warmup_reset_seed = (
-                _sealed_episode_plan(
-                    replay_batch,
-                    warmup_originals[warmup_episode],
-                    warmup_episode,
-                )
+            warmup_plan, warmup_variation, warmup_reset_seed = _sealed_episode_plan(
+                replay_batch,
+                warmup_originals[warmup_episode],
+                warmup_episode,
             )
             (
                 warmup_environment,
@@ -1973,9 +1988,7 @@ def record(args):
                     "formal_reset_seed": warmup_reset_seed,
                     "variation": warmup_variation,
                     "sealed_plan_fingerprint": warmup_plan.fingerprint(),
-                    "fresh_generation_index": warmup_generation.get(
-                        "generation_index"
-                    ),
+                    "fresh_generation_index": warmup_generation.get("generation_index"),
                     "source_outcome": (
                         "success" if warmup_source.get("success") else "failure"
                     ),

@@ -82,7 +82,9 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
 from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
     load_v3_intervention_protocol,
     load_v3_motion_source_protocol,
-    resolve_authenticated_v3_trigger,
+)
+from integrations.rlbench.rlbench_dynamac.protocols.phase6_dynamic_protocol import (
+    resolve_phase6_dynamic_trigger,
 )
 from integrations.rlbench.rlbench_dynamac.protocols.v4_dynamic_protocol import (
     V4_LIFT_MOTION_PROTOCOL_ID,
@@ -439,28 +441,29 @@ def _validate_v3_protocol_budgets(args):
     return protocol
 
 
-def _authenticated_v3_dynamic_trigger(args, worker):
-    """Resolve the preregistered tick from authenticated checkpoint evidence."""
+def _authenticated_phase6_dynamic_trigger(args, worker):
+    """Resolve the smooth trigger against the checkpoint actually loaded."""
 
     protocol = _validate_v3_protocol_budgets(args)
-    authentication = resolve_authenticated_v3_trigger(
+    authentication = resolve_phase6_dynamic_trigger(
         worker.model_identity,
-        task=args.task,
+        args.task,
+        args.scenario_steps,
     )
     authenticated_step = authentication["trigger_step"]
     requested_step = getattr(args, "scenario_trigger_step", None)
     if requested_step is not None and requested_step != authenticated_step:
         raise RuntimeError(
-            "command-line trigger step differs from authenticated V3 preregistration"
+            "command-line trigger step differs from authenticated Stage-six trigger"
         )
     if authenticated_step >= worker.policy_steps:
         raise RuntimeError(
-            "authenticated V3 trigger lies outside the loaded policy clock"
+            "authenticated Stage-six trigger lies outside the loaded policy clock"
         )
     requested_reference = getattr(args, "scenario_reference_steps", None)
     if requested_reference is not None and requested_reference != worker.policy_steps:
         raise RuntimeError(
-            "V3 trigger reference must equal the authenticated loaded policy clock"
+            "Stage-six trigger reference must equal the loaded policy clock"
         )
     return protocol, authentication
 
@@ -502,10 +505,8 @@ def _validate_v4_store_protocol_args(args):
 
     intervention = load_v4_store_intervention_protocol()
     motion = load_v4_store_motion_source_protocol()
-    if args.scenario not in intervention["formal_scenarios"]:
-        raise ValueError(
-            "StoreBottle V4 formal evaluation supports only static/teleport"
-        )
+    if args.scenario not in {*intervention["formal_scenarios"], "smooth"}:
+        raise ValueError("StoreBottle V4 formal evaluation scenario is unsupported")
     if args.scenario_max_attempts != motion["goal_sampling_max_attempts"]:
         raise RuntimeError("StoreBottle V4 goal-sampling budget differs from protocol")
     if args.final_settling_steps != intervention["final_settling_physics_steps"]:
@@ -546,8 +547,8 @@ def _validate_v4_lift_protocol_args(args):
 
     intervention = load_v4_lift_intervention_protocol()
     motion = load_v4_lift_motion_source_protocol()
-    if args.scenario not in intervention["formal_scenarios"]:
-        raise ValueError("V4 LiftTray formal evaluation supports only static/teleport")
+    if args.scenario not in {*intervention["formal_scenarios"], "smooth"}:
+        raise ValueError("V4 LiftTray formal evaluation scenario is unsupported")
     if args.scenario_max_attempts != motion["goal_sampling_max_attempts"]:
         raise RuntimeError("V4 LiftTray goal-sampling budget differs from protocol")
     if args.final_settling_steps != intervention["final_settling_physics_steps"]:
@@ -1104,6 +1105,9 @@ def _apply_scenario(controller, task_environment, observation, *, step, horizon)
 
     event = controller.apply(task_environment, step=step, horizon=horizon)
     if event["applied"]:
+        recorder = getattr(task_environment, "record_background_event", None)
+        if callable(recorder):
+            recorder(event)
         observation = task_environment.get_observation()
         event["policy_observation_refreshed"] = True
     else:
@@ -1257,6 +1261,7 @@ def _run_v4_store_episode(
     max_primary_action_attempts,
     retry_exhaustion_mode=FORMAL_PRIMARY_RETRY_EXHAUSTION_MODE,
     motion_plan,
+    scenario_steps,
     final_settling_steps,
     descriptions,
     observation,
@@ -1282,7 +1287,17 @@ def _run_v4_store_episode(
         )
     ):
         raise RuntimeError("formal StoreBottle episode requires fresh task input")
-    controller = StoreBottleMultiEntityController(plan=motion_plan, scenario=scenario)
+    controller = StoreBottleMultiEntityController(
+        plan=motion_plan,
+        scenario=scenario,
+        total_steps=scenario_steps,
+    )
+    background_configurer = getattr(task_environment, "configure_background", None)
+    if callable(background_configurer) and scenario == "smooth":
+        background_configurer(
+            scenario=scenario,
+            expected_segments=len(controller.required_entities),
+        )
     source_binding = controller.bind_source(
         task_environment,
         descriptions=descriptions,
@@ -1344,7 +1359,9 @@ def _run_v4_store_episode(
         )
         required = set(controller.required_entities)
         applied = {
-            event["entity"] for event in scenario_events if event.get("applied") is True
+            event["entity"]
+            for event in scenario_events
+            if event.get("applied") is True and event.get("complete") is True
         }
         per_entity = {}
         for name in ("bottle", "fridge"):
@@ -1360,7 +1377,7 @@ def _run_v4_store_episode(
                 "effective": entity_applied if is_required else None,
                 "complete": entity_applied if is_required else None,
             }
-        dynamic = scenario == "teleport"
+        dynamic = scenario != "static"
         all_reached = bool(dynamic and required and required <= reached_entities)
         all_applied = bool(dynamic and required and required <= applied)
         any_applied = bool(applied)
@@ -1414,6 +1431,10 @@ def _run_v4_store_episode(
                 observation,
                 policy_step=committed_policy_steps,
             )
+            recorder = getattr(task_environment, "record_background_event", None)
+            if callable(recorder):
+                for event in events:
+                    recorder(event)
             scenario_events.extend(events)
             last_scenario_policy_step = committed_policy_steps
         response = worker.request("act", observation)
@@ -1612,6 +1633,7 @@ def _run_episode(
             max_primary_action_attempts=max_primary_action_attempts,
             retry_exhaustion_mode=retry_exhaustion_mode,
             motion_plan=motion_plan,
+            scenario_steps=scenario_steps,
             final_settling_steps=final_settling_steps,
             descriptions=descriptions,
             observation=observation,
@@ -1637,6 +1659,9 @@ def _run_episode(
         max_attempts=scenario_max_attempts,
         motion_plan=motion_plan,
     )
+    background_configurer = getattr(task_environment, "configure_background", None)
+    if callable(background_configurer) and scenario == "smooth":
+        background_configurer(scenario=scenario, expected_segments=1)
     if scenario_reference_steps is None:
         scenario_reference_steps = horizon
     trigger_step = (
@@ -2237,7 +2262,7 @@ def _evaluate_reserved(args):
             )
         else:
             intervention_registry, trigger_authentication = (
-                _authenticated_v3_dynamic_trigger(args, worker)
+                _authenticated_phase6_dynamic_trigger(args, worker)
             )
         scenario_reference_steps = worker.policy_steps
         scenario_reference_source = (
@@ -2371,6 +2396,7 @@ def _evaluate_reserved(args):
         motion_protocol = StoreBottleMultiEntityController(
             plan=motion_plans[0],
             scenario=args.scenario,
+            total_steps=args.scenario_steps,
         ).protocol_metadata()
     else:
         motion_protocol = ScenarioController(

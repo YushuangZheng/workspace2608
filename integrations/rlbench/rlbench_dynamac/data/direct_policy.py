@@ -59,6 +59,9 @@ from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
     build_v3_trigger_anchor_evidence,
     checkpoint_trigger_audit,
 )
+from integrations.rlbench.rlbench_dynamac.protocols.phase6_dynamic_protocol import (
+    build_phase6_dynamic_trigger_evidence,
+)
 
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
 
@@ -551,6 +554,16 @@ class PolicyServer:
             if self.bimanual
             else DynaMAC.load(task_dir / "model.npz")
         )
+        phase6_dynamic_trigger_evidence = None
+        if manifest_authenticated and manifest.get("manifest_schema") in {
+            TRAINING_MANIFEST_SCHEMA_V3,
+            TRAINING_MANIFEST_SCHEMA_STATIC_V1,
+        }:
+            phase6_dynamic_trigger_evidence = build_phase6_dynamic_trigger_evidence(
+                task,
+                manifest["checkpoint_trigger_audit"],
+                manifest,
+            )
         self.model_identity = (
             {
                 "model_schema_version": self.policy.left.summary()[
@@ -587,6 +600,7 @@ class PolicyServer:
                     if manifest_authenticated
                     else None
                 ),
+                "phase6_dynamic_trigger_evidence": phase6_dynamic_trigger_evidence,
             }
             if self.bimanual
             else {
@@ -620,6 +634,7 @@ class PolicyServer:
                     if manifest_authenticated
                     else None
                 ),
+                "phase6_dynamic_trigger_evidence": phase6_dynamic_trigger_evidence,
             }
         )
         if "training_identity" in manifest:
