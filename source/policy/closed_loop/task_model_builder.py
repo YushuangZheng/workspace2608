@@ -1819,6 +1819,40 @@ class ClosedLoopTaskModelBuilder:
                                 ),
                             )
 
+        # A cross-skill grasp can first appear as an unexcited pending close in
+        # one skill and receive enough kinematic evidence to become a formal
+        # LINK in a later skill.  These are two observations of the same
+        # physical occurrence, not two recovery alternatives.  Retain the
+        # formal event whenever the pending candidate falls in (or within the
+        # alignment tolerance immediately before) its finite confirmation
+        # interval.  Pending remains only for occurrences that the successful
+        # demonstrations never confirm.
+        confirmed_link_intervals: dict[tuple[str, str, int], list[tuple[int, int]]] = {}
+        for event_id, anchor in links.items():
+            indices = [
+                int(skill_offsets[state.skill_index]) + state.local_index
+                for state in anchor.linked_entry_states
+            ]
+            if not indices:
+                continue
+            confirmed_link_intervals.setdefault(
+                (event_id.arm_id, event_id.frame_id, event_id.mode), []
+            ).append((min(indices), max(indices)))
+
+        pending_links = {
+            event_id: candidate
+            for event_id, candidate in pending_links.items()
+            if not any(
+                start - self.config.relation_event_alignment_tolerance
+                <= int(skill_offsets[candidate.candidate_state.skill_index])
+                + candidate.candidate_state.local_index
+                <= stop
+                for start, stop in confirmed_link_intervals.get(
+                    (event_id.arm_id, event_id.frame_id, event_id.mode), ()
+                )
+            )
+        }
+
         # Raw per-state covariance evidence may flicker even though a physical
         # connection cannot disappear without a confirmed UNLINK.  Reconcile
         # deployment priors and origins from the accepted event state machine;
