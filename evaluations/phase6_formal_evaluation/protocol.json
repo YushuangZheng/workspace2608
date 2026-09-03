@@ -4,7 +4,7 @@
   "active_implementation": {
     "controller_profile": "stage6_hybrid_cartesian_executor_v19",
     "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v23",
-    "validated_mechanism_parent_commit": "b590e643cc398dc23e8bf65428404fff4b3600fe",
+    "validated_mechanism_parent_commit": "57dcf5e8a73e7bd6bba88ea447c0e94bc540eec1",
     "retained_formal_results_before_activation": false
   },
   "evaluation_set": {
@@ -49,7 +49,7 @@
     "base_models_dir": "integrations/rlbench/models/phase6_v1",
     "base_models_fingerprint": "1fc31fe8a4c416000a3ee2e68caef7429a9dc3bde51faf5375df2c1a6064ddf9",
     "closed_loop_models_dir": "integrations/rlbench/models/closed_loop_phase6_v1",
-    "closed_loop_models_fingerprint": "5f29584aeefc0bc8fa3603b318ec373e20b23e7c5da55bab3340d3c47b5a404c",
+    "closed_loop_models_fingerprint": "060ebf5a43791789d7bf749ee4c3c1ed198fd0825aa6331b2e8a9892a31dcea3",
     "scenario_by_experiment": {
       "normal": "static",
       "dynamic": "smooth",

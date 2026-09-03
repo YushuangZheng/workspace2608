@@ -10,11 +10,11 @@
   "fault_episode_count_per_task": 50,
   "files": {
     "episodes.jsonl": "265a7207ba7926e4af2cdc7612d305c969d3561093ec1543590a38ac51245957",
-    "faults.json": "f3022443643fc3953d24a60bba13b3991cfaaae05ecae1069161d70afc5a64c4",
+    "faults.json": "b32d160d1897ab4883b07630841bc1e933ba65c4a6e7c6089ee46d05b77f3e25",
     "result_schema.json": "b9f773a16d3a482fd2703148f01773317c0e4920e3cbfd470f32fcab2ab341b8"
   },
   "formal_protocol": "evaluations/phase6_formal_evaluation/protocol.json",
-  "formal_protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
+  "formal_protocol_sha256": "8f84cd11419923ba6262faa4bdea2081b8985089c1e1c03845b80232cb3eeebd",
   "methods": [
     "dynamac_v4",
     "progress_only",

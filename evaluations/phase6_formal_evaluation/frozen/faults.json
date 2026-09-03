@@ -10,7 +10,7 @@
     "grasp_failure": {
       "arm_by_task": {
         "bimanual_handover_item": "right",
-        "bimanual_lift_tray": "left",
+        "bimanual_lift_tray": "right",
         "bimanual_put_bottle_in_fridge": "left",
         "bimanual_sweep_to_dustpan": "left",
         "open_microwave": "single",
@@ -25,7 +25,7 @@
     "relation_mismatch": {
       "arm_by_task": {
         "bimanual_handover_item": "right",
-        "bimanual_lift_tray": "left",
+        "bimanual_lift_tray": "right",
         "bimanual_put_bottle_in_fridge": "left",
         "bimanual_sweep_to_dustpan": "left",
         "open_microwave": "single",
@@ -61,7 +61,7 @@
     "unexpected_drop": {
       "arm_by_task": {
         "bimanual_handover_item": "right",
-        "bimanual_lift_tray": "left",
+        "bimanual_lift_tray": "right",
         "bimanual_put_bottle_in_fridge": "left",
         "bimanual_sweep_to_dustpan": "left",
         "open_microwave": "single",

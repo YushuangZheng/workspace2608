@@ -1,6 +1,6 @@
 {
-  "active_protocol_sha256": "c31a20162ce17064c47ff052e13107366458496512e42924fb1b84e2cd63a866",
-  "reason": "Retain byte-identical completed normal, dynamic-no-fault, and unaffected non-grasp fault cells. All grasp_failure cells are rerun under the physical-interaction occurrence protocol; LiftTray relation_mismatch and unexpected_drop are rerun on the arm that performs the selected grasp.",
+  "active_protocol_sha256": "8f84cd11419923ba6262faa4bdea2081b8985089c1e1c03845b80232cb3eeebd",
+  "reason": "Retain byte-identical completed normal, unaffected dynamic-no-fault, and unaffected completed fault cells. Restart all interrupted fault cells from clean one-episode shards and rerun LiftTray Full dynamic after restoring its learned joint transaction and bounded LINK confirmation semantics.",
   "records": {
     "dynamic/bimanual_handover_item/dynamac_v4": {
       "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
@@ -31,12 +31,6 @@
       "path": "dynamic/bimanual_lift_tray/dynamac_v4_n50.json",
       "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
       "sha256": "3d0d1af9387f899d4aeed7f0442363d1e9812cf40577d644cf7bba00e1d76ed1"
-    },
-    "dynamic/bimanual_lift_tray/full": {
-      "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
-      "path": "dynamic/bimanual_lift_tray/full_n50.json",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "c64af2144251e9957f3ce9c71c31ccf9d4fa0e0fab27af981772d125412498ba"
     },
     "dynamic/bimanual_lift_tray/progress_dynamic_roles": {
       "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
