@@ -265,6 +265,28 @@ def test_bimanual_unresolved_close_retries_attachment_without_reclosing(
     assert left.releases == 1
 
 
+def test_bimanual_attachment_suppression_is_arm_local(
+    fake_vendor_gripper_modes,
+) -> None:
+    right_object = object()
+    left_object = object()
+    right = _OwnershipGripper(open_amount=1.0, detected=True)
+    left = _OwnershipGripper(open_amount=1.0, detected=True)
+    scene = _scene(right_gripper=right, left_gripper=left)
+    scene.task.get_graspable_objects = lambda: [right_object, left_object]
+    # Give each simulated receiver one distinct eligible object.
+    right._proximity_sensor.is_detected = lambda obj: obj is right_object
+    left._proximity_sensor.is_detected = lambda obj: obj is left_object
+    mode = DiscreteGripperProtocol(bimanual=True).make_action_mode()
+    mode.action_shape = lambda robot: (2,)
+    mode._dynamac_attachment_suppressed_arms = {"left"}
+
+    mode.action(scene, np.asarray([0.0, 0.0]))
+
+    assert right.grasped == [right_object]
+    assert left.grasped == []
+
+
 def test_unimanual_unresolved_close_retries_attachment_without_reclosing(
     fake_vendor_gripper_modes,
 ) -> None:
@@ -280,4 +302,22 @@ def test_unimanual_unresolved_close_retries_attachment_without_reclosing(
     gripper._proximity_sensor.detected = True
     mode.action(scene, np.asarray([0.0]))
 
+    assert gripper.grasped == [obj]
+
+
+def test_unimanual_attachment_suppression_preserves_pending_close(
+    fake_vendor_gripper_modes,
+) -> None:
+    obj = object()
+    gripper = _OwnershipGripper(open_amount=1.0, detected=True)
+    scene = _scene(gripper=gripper)
+    scene.task.get_graspable_objects = lambda: [obj]
+    mode = DiscreteGripperProtocol(bimanual=False).make_action_mode()
+    mode._dynamac_attachment_suppressed_arms = {"single"}
+
+    mode.action(scene, np.asarray([0.0]))
+    assert gripper.grasped == []
+
+    mode._dynamac_attachment_suppressed_arms = set()
+    mode.action(scene, np.asarray([0.0]))
     assert gripper.grasped == [obj]

@@ -102,6 +102,7 @@ class ReentrySelector:
         current_reference: StateId,
         permitted_boundaries: frozenset[BoundaryId] = frozenset(),
         mode_by_skill: Mapping[int, int] | None = None,
+        required_relations: Mapping[str, RelationDecision] | None = None,
     ) -> ReentryEvaluation:
         unique = tuple(dict.fromkeys(candidates))
         if not unique:
@@ -123,6 +124,7 @@ class ReentrySelector:
             estimate.decision_state != RelationDecision.UNKNOWN
             for estimate in belief.relation_estimates.values()
         )
+        required = {} if required_relations is None else dict(required_relations)
         for state in unique:
             score = scores[state]
             reasons = []
@@ -157,6 +159,11 @@ class ReentrySelector:
                 < self.config.minimum_relation_compatibility
             ):
                 reasons.append("relation_incompatible")
+            for frame, expected in required.items():
+                estimate = belief.relation_estimates.get(frame)
+                if estimate is None or estimate.decision_state != expected:
+                    reasons.append("recovered_relation_not_preserved")
+                    break
             if (
                 score.normalized_explanation_score
                 < self.config.minimum_explanation_score

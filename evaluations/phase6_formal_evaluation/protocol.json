@@ -84,7 +84,7 @@
         "wipe_desk": "single",
         "bimanual_put_bottle_in_fridge": "left",
         "bimanual_handover_item": "right",
-        "bimanual_lift_tray": "left",
+        "bimanual_lift_tray": "right",
         "bimanual_sweep_to_dustpan": "left"
       },
       "earliest_step": 0,
@@ -98,7 +98,7 @@
         "wipe_desk": "single",
         "bimanual_put_bottle_in_fridge": "left",
         "bimanual_handover_item": "right",
-        "bimanual_lift_tray": "left",
+        "bimanual_lift_tray": "right",
         "bimanual_sweep_to_dustpan": "left"
       },
       "earliest_step": 0,
@@ -113,7 +113,7 @@
         "wipe_desk": "single",
         "bimanual_put_bottle_in_fridge": "left",
         "bimanual_handover_item": "right",
-        "bimanual_lift_tray": "left",
+        "bimanual_lift_tray": "right",
         "bimanual_sweep_to_dustpan": "left"
       },
       "earliest_step": 0,

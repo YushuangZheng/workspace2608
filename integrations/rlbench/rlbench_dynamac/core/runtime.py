@@ -2006,7 +2006,14 @@ def _make_discrete_gripper_action_mode(protocol: DiscreteGripperProtocol) -> Any
                 arm_id: str,
             ) -> None:
                 pending = self._pending_close()
-                if not pending[arm_id] or not self._attach_grasped_objects:
+                suppressed = set(
+                    getattr(self, "_dynamac_attachment_suppressed_arms", ())
+                )
+                if (
+                    not pending[arm_id]
+                    or not self._attach_grasped_objects
+                    or arm_id in suppressed
+                ):
                     return
                 if arm_id == "right":
                     receiver = scene.robot.right_gripper
@@ -2128,7 +2135,14 @@ def _make_discrete_gripper_action_mode(protocol: DiscreteGripperProtocol) -> Any
                 return bool(getattr(self, "_dynamac_pending_close_attachment", False))
 
             def _attempt_pending_close(self, scene: Any) -> None:
-                if not self._pending_close() or not self._attach_grasped_objects:
+                suppressed = set(
+                    getattr(self, "_dynamac_attachment_suppressed_arms", ())
+                )
+                if (
+                    not self._pending_close()
+                    or not self._attach_grasped_objects
+                    or "single" in suppressed
+                ):
                     return
                 gripper = scene.robot.gripper
                 if gripper.get_grasped_objects():

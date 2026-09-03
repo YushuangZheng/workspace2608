@@ -31,11 +31,32 @@ class _Object:
     def set_position(self, position):
         self.position = np.asarray(position, dtype=np.float64).copy()
 
+    def get_pose(self):
+        return np.concatenate((self.position, [0.0, 0.0, 0.0, 1.0]))
+
+    def set_pose(self, pose):
+        self.position = np.asarray(pose, dtype=np.float64)[:3].copy()
+
+    def is_dynamic(self):
+        return True
+
+    def is_respondable(self):
+        return True
+
+
+class _Sensor:
+    def __init__(self, detected=()) -> None:
+        self.detected = set(detected)
+
+    def is_detected(self, obj):
+        return obj in self.detected
+
 
 class _Gripper:
-    def __init__(self, objects=()) -> None:
+    def __init__(self, objects=(), detected=()) -> None:
         self.objects = list(objects)
         self.release_calls = 0
+        self._proximity_sensor = _Sensor(detected)
 
     def get_grasped_objects(self):
         return list(self.objects)
@@ -48,25 +69,30 @@ class _Gripper:
 class _TaskEnvironment:
     def __init__(self, *, bimanual=False, objects=()) -> None:
         self.bimanual = bimanual
+        graspables = list(objects)
         if bimanual:
             robot = SimpleNamespace(
-                right_gripper=_Gripper(objects),
-                left_gripper=_Gripper(),
+                right_gripper=_Gripper(objects, detected=graspables),
+                left_gripper=_Gripper(detected=graspables),
             )
             self.observation = SimpleNamespace(
                 right=SimpleNamespace(gripper_pose=_pose(0.1)),
                 left=SimpleNamespace(gripper_pose=_pose(-0.1)),
             )
         else:
-            robot = SimpleNamespace(gripper=_Gripper(objects))
+            robot = SimpleNamespace(gripper=_Gripper(objects, detected=graspables))
             self.observation = SimpleNamespace(gripper_pose=_pose(0.1))
-        self._scene = SimpleNamespace(robot=robot)
+        self._scene = SimpleNamespace(
+            robot=robot,
+            task=SimpleNamespace(get_graspable_objects=lambda: list(graspables)),
+        )
         self._gripper_action_mode = SimpleNamespace(_attach_grasped_objects=True)
         self._action_mode = SimpleNamespace(
             gripper_action_mode=self._gripper_action_mode
         )
         self.actions = []
         self.attachment_enabled = []
+        self.attachment_suppressed = []
 
     def get_observation(self):
         return self.observation
@@ -75,6 +101,15 @@ class _TaskEnvironment:
         self.actions.append(np.asarray(action, dtype=np.float64).copy())
         self.attachment_enabled.append(
             bool(self._gripper_action_mode._attach_grasped_objects)
+        )
+        self.attachment_suppressed.append(
+            frozenset(
+                getattr(
+                    self._gripper_action_mode,
+                    "_dynamac_attachment_suppressed_arms",
+                    (),
+                )
+            )
         )
         return self.observation, 0.0, False
 
@@ -198,7 +233,8 @@ def test_bimanual_time_stall_uses_right_first_wire_layout() -> None:
 
 
 def test_grasp_failure_suppresses_attachment_not_gripper_close_occurrence() -> None:
-    environment = _TaskEnvironment()
+    item = _Object("item")
+    environment = _TaskEnvironment(objects=[item])
     wrapped = FaultInjectingTaskEnvironment(
         environment,
         FaultInjectionSpec(
@@ -226,10 +262,105 @@ def test_grasp_failure_suppresses_attachment_not_gripper_close_occurrence() -> N
         1.0,
         0.0,
     ]
-    assert environment.attachment_enabled == [True, True, False, False, True, True]
+    assert environment.attachment_enabled == [True] * 6
+    assert environment.attachment_suppressed == [
+        frozenset(),
+        frozenset(),
+        frozenset({"single"}),
+        frozenset({"single"}),
+        frozenset(),
+        frozenset(),
+    ]
     assert environment._gripper_action_mode._attach_grasped_objects is True
+    assert not getattr(
+        environment._gripper_action_mode,
+        "_dynamac_attachment_suppressed_arms",
+        set(),
+    )
     assert wrapped.events[0]["close_occurrence"] == 2
     assert wrapped.events[-1]["kind"] == "grasp_failure_occurrence_ended"
+
+
+def test_bimanual_grasp_failure_suppresses_only_selected_arm() -> None:
+    item = _Object("item")
+    environment = _TaskEnvironment(bimanual=True, objects=[item])
+    # The right gripper already owns the item; a failed left receiver close
+    # must leave right-arm attachment available and must not pose-lock it.
+    wrapped = FaultInjectingTaskEnvironment(
+        environment,
+        FaultInjectionSpec(
+            FaultInjectionKind.GRASP_FAILURE,
+            arm="left",
+            close_occurrence=1,
+        ),
+    )
+    right = np.concatenate((_pose(0.1), [0.0, 0.0]))
+    left = np.concatenate((_pose(-0.1), [0.0, 0.0]))
+
+    wrapped.step(np.concatenate((right, left)))
+
+    assert environment.attachment_suppressed == [frozenset({"left"})]
+    assert environment._scene.robot.right_gripper.get_grasped_objects() == [item]
+    audit = wrapped.protocol_metadata()["physical_audit"]
+    assert audit["target_objects"] == ["item"]
+    assert audit["effect_observed"] is True
+
+
+def test_grasp_failure_captures_detected_contact_target_outside_grasp_registry() -> (
+    None
+):
+    tray = _Object("tray")
+    environment = _TaskEnvironment(bimanual=True)
+    environment._scene.robot.left_gripper._proximity_sensor.detected.add(tray)
+    environment._scene.task.get_base = lambda: SimpleNamespace(
+        get_objects_in_tree=lambda **_kwargs: [tray]
+    )
+    wrapped = FaultInjectingTaskEnvironment(
+        environment,
+        FaultInjectionSpec(
+            FaultInjectionKind.GRASP_FAILURE,
+            arm="left",
+            close_occurrence=1,
+        ),
+    )
+    right = np.concatenate((_pose(0.1), [1.0, 0.0]))
+    left = np.concatenate((_pose(-0.1), [0.0, 0.0]))
+
+    wrapped.step(np.concatenate((right, left)))
+
+    audit = wrapped.protocol_metadata()["physical_audit"]
+    assert audit["target_objects"] == ["tray"]
+    assert audit["effect_observed"] is True
+
+
+def test_grasp_occurrence_ignores_close_without_physical_target() -> None:
+    item = _Object("item")
+    environment = _TaskEnvironment(objects=[item])
+    sensor = environment._scene.robot.gripper._proximity_sensor
+    sensor.detected.clear()
+    wrapped = FaultInjectingTaskEnvironment(
+        environment,
+        FaultInjectionSpec(
+            FaultInjectionKind.GRASP_FAILURE,
+            close_occurrence=1,
+        ),
+    )
+    open_action = np.concatenate((_pose(0.1), [1.0, 0.0]))
+    close_action = np.concatenate((_pose(0.1), [0.0, 0.0]))
+
+    wrapped.step(close_action)
+    wrapped.step(open_action)
+    assert wrapped.triggered is False
+    assert wrapped._close_occurrences == 0
+
+    sensor.detected.add(item)
+    wrapped.step(close_action)
+
+    assert wrapped.triggered is True
+    assert wrapped._close_occurrences == 1
+    trigger = wrapped.events[0]
+    assert trigger["close_occurrence"] == 1
+    assert trigger["target_objects"] == ["item"]
 
 
 @pytest.mark.parametrize(

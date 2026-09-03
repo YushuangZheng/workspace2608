@@ -40,6 +40,7 @@ from essay2608.policy.closed_loop import (
     RelationEventId,
     RelationGuardDistribution,
     ReliabilityStatistics,
+    RelationVerificationRequest,
     RecoveryConfig,
     RecoveryTriggerTracker,
     RuntimeFeatureBuilder,
@@ -777,6 +778,12 @@ def test_cross_arm_relation_guard_uses_other_arm_current_belief() -> None:
         models,
         RecoveryConfig(boundary_relation_mismatch_cycles=1),
     )
+    failed_link = replace(
+        failed_link,
+        verification_requests=(
+            RelationVerificationRequest("right", "target", "linked", pending_id),
+        ),
+    )
     pending_trigger = pending_tracker.update(
         {"left": empty, "right": empty},
         transition_requests={"left": failed_link},
@@ -790,6 +797,7 @@ def test_cross_arm_relation_guard_uses_other_arm_current_belief() -> None:
     assert pending_trigger.intents[0].frame_id == "target"
     assert pending_trigger.intents[0].expected_relation == RelationDecision.LINKED
     assert pending_trigger.intents[0].actual_relation == RelationDecision.EXTERNAL
+    assert pending_trigger.intents[0].origin_event_id == pending_id
 
 
 @pytest.mark.parametrize("transaction_group", ["joint_boundary", None])

@@ -257,19 +257,28 @@ class RecoveryTriggerTracker:
                         intents[(intent.arm_id, intent.frame_id)] = intent
 
         active_boundary_keys = set()
-        prepared_link_events: dict[tuple[str, str], RelationEventId] = {}
+        boundary_link_events: dict[tuple[str, str], RelationEventId] = {}
         for prepared_request in transition_requests.values():
             preparation = prepared_request.preparation
-            if preparation is None:
-                continue
-            for event_id in preparation.event_ids:
+            event_ids = [] if preparation is None else list(preparation.event_ids)
+            # After TransitionPreparation has physically closed the gripper,
+            # the preparation field is consumed but the boundary retains the
+            # exact Pending occurrence in its verification request.  Preserve
+            # that identity so a verified external result is routed to the
+            # matching temporary recovery template instead of guessed from
+            # the current StateId.
+            event_ids.extend(
+                request.pending_event_id
+                for request in prepared_request.verification_requests
+            )
+            for event_id in event_ids:
                 if event_id.transition not in {"link", "link_pending"}:
                     continue
                 key = (event_id.arm_id, event_id.frame_id)
-                previous = prepared_link_events.get(key)
+                previous = boundary_link_events.get(key)
                 if previous is not None and previous != event_id:
                     raise RuntimeError("同一边界周期的 arm-frame 存在多个关系建立事件")
-                prepared_link_events[key] = event_id
+                boundary_link_events[key] = event_id
         for arm, request in transition_requests.items():
             if arm not in self.task_models:
                 raise KeyError(f"恢复触发器缺少机械臂模型 {arm}")
@@ -307,7 +316,7 @@ class RecoveryTriggerTracker:
                 expected = self._required_decision(condition.required_state)
                 if expected == estimate.decision_state:
                     continue
-                prepared_event = prepared_link_events.get((relation_arm, frame))
+                boundary_event = boundary_link_events.get((relation_arm, frame))
                 if (
                     condition_id.kind == ConditionKind.GUARD_RELATION
                     and relation_arm != arm
@@ -346,7 +355,7 @@ class RecoveryTriggerTracker:
                         )
                     )
                     registry = EpisodeLinkAnchorRegistry(self.task_models[relation_arm])
-                    if prepared_event is None and not any(
+                    if boundary_event is None and not any(
                         registry.has_pending_recovery_candidate(
                             frame,
                             relation_state,
@@ -366,7 +375,7 @@ class RecoveryTriggerTracker:
                         expected_relation=expected,
                         actual_relation=estimate.decision_state,
                         origin_event_id=(
-                            prepared_event
+                            boundary_event
                             if expected == RelationDecision.LINKED
                             and estimate.decision_state == RelationDecision.EXTERNAL
                             else None
@@ -463,6 +472,12 @@ class RelationRecoveryController:
     @property
     def legal_reentry_states(self) -> tuple[StateId, ...]:
         return tuple(self._reentry_states)
+
+    @property
+    def completed_goals(self) -> tuple[RelationGoal, ...]:
+        """Relation repairs that must remain true through task reentry."""
+
+        return tuple(self._completed)
 
     @property
     def has_relation_goals(self) -> bool:
@@ -641,7 +656,6 @@ class RelationRecoveryController:
         waypoint_poses: Sequence[Array],
     ) -> None:
         history = [self._pose(value, "LINK 恢复锚点") for value in waypoint_poses]
-        history = history[-self.verification_config.task_history_length :]
         if len(history) < 2:
             self._fail("link_probe_direction_unavailable")
             return
@@ -849,15 +863,15 @@ class RelationRecoveryController:
                 self._link_anchor_frame_pose,
                 self.config.covariance_inflation,
             )
+            first_closing_waypoint = next(
+                (
+                    index
+                    for index, waypoint in enumerate(waypoints)
+                    if np.any(waypoint.gripper_command <= 0.5)
+                ),
+                len(waypoints),
+            )
             if self._goal_phase == RelationGoalPhase.TRACK:
-                first_closing_waypoint = next(
-                    (
-                        index
-                        for index, waypoint in enumerate(waypoints)
-                        if np.any(waypoint.gripper_command <= 0.5)
-                    ),
-                    len(waypoints),
-                )
                 if self._waypoint_index < first_closing_waypoint:
                     translation, rotation = self._frame_pose_distance(
                         self._link_anchor_frame_pose,
@@ -915,9 +929,16 @@ class RelationRecoveryController:
                     return self._snapshot(None)
                 final = waypoints[-1]
                 if self._link_probe_phase is None:
+                    # The anchor deliberately contains post-close holding
+                    # states so recovery can reproduce the demonstrated
+                    # interaction.  Those repeated terminal poses must not
+                    # replace the actual pre-close approach when deriving the
+                    # reverse probe direction.  Use the learned anchor only
+                    # through its first close command.
+                    approach_end = min(len(waypoints), first_closing_waypoint + 1)
                     self._begin_link_probe(
                         current,
-                        tuple(waypoint.pose for waypoint in waypoints),
+                        tuple(waypoint.pose for waypoint in waypoints[:approach_end]),
                     )
                     if self.phase == RecoveryPhase.FAILED:
                         return self._snapshot(None)
@@ -1277,6 +1298,14 @@ class ClosedLoopRecoveryManager:
             current_reference=self._frozen_reference,
             permitted_boundaries=permitted_boundaries,
             mode_by_skill=mode_by_skill,
+            required_relations={
+                goal.frame_id: (
+                    RelationDecision.LINKED
+                    if goal.kind == RelationGoalKind.LINK
+                    else RelationDecision.EXTERNAL
+                )
+                for goal in self.recovery.completed_goals
+            },
         )
 
     def commit_reentry(

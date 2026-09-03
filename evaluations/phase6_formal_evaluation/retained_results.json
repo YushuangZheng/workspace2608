@@ -1,6 +1,6 @@
 {
-  "active_protocol_sha256": "441a40d072b6454dd1a7ad02270f6f9dfe306ad4018845d4632320ab7caaa58a",
-  "reason": "Retain byte-identical completed normal, dynamic-no-fault, and non-grasp fault cells: removing a Pending candidate superseded by a formal LINK changes only the previously invalid missed-attachment path; the corrected attachment-suppression grasp_failure cells are rerun.",
+  "active_protocol_sha256": "c31a20162ce17064c47ff052e13107366458496512e42924fb1b84e2cd63a866",
+  "reason": "Retain byte-identical completed normal, dynamic-no-fault, and unaffected non-grasp fault cells. All grasp_failure cells are rerun under the physical-interaction occurrence protocol; LiftTray relation_mismatch and unexpected_drop are rerun on the arm that performs the selected grasp.",
   "records": {
     "dynamic/bimanual_handover_item/dynamac_v4": {
       "git_commit": "872b157b9c3e350c32fd66eefa81f15a550ed1e0",
@@ -602,30 +602,6 @@
       "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
       "sha256": "5e4d22a71a0a476e16f8155b2e96105ee552d50935b7fe700dcc0a870f44fd5a"
     },
-    "fault/relation_mismatch/bimanual_lift_tray/dynamac_v4": {
-      "path": "fault/relation_mismatch/bimanual_lift_tray/dynamac_v4_n50.json",
-      "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "be651c984f68098affc0679a549969438a216d84761fda8b8e9058f9ed0dda90"
-    },
-    "fault/relation_mismatch/bimanual_lift_tray/progress_only": {
-      "path": "fault/relation_mismatch/bimanual_lift_tray/progress_only_n50.json",
-      "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "15b87e5faa951abcebab2c09ea130951b619ddc5fc7863ec1776c138c066ce5e"
-    },
-    "fault/relation_mismatch/bimanual_lift_tray/progress_dynamic_roles": {
-      "path": "fault/relation_mismatch/bimanual_lift_tray/progress_dynamic_roles_n50.json",
-      "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "ae74ce5ca156a1ed5cf2a65b2a9175a254c47eac9dd615f41ff18950f1557726"
-    },
-    "fault/relation_mismatch/bimanual_lift_tray/full": {
-      "path": "fault/relation_mismatch/bimanual_lift_tray/full_n50.json",
-      "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "f764afe1090bf0eba58cfaa7dea886c993d1dd60d0e44988fca51b458d83b91a"
-    },
     "fault/relation_mismatch/bimanual_sweep_to_dustpan/dynamac_v4": {
       "path": "fault/relation_mismatch/bimanual_sweep_to_dustpan/dynamac_v4_n50.json",
       "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
@@ -793,30 +769,6 @@
       "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
       "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
       "sha256": "64702a424f0a0404b6b885ca99224f8fc8a146c38e1cb3952c5206b16b4ad58c"
-    },
-    "fault/unexpected_drop/bimanual_lift_tray/dynamac_v4": {
-      "path": "fault/unexpected_drop/bimanual_lift_tray/dynamac_v4_n50.json",
-      "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "90ebdeb170adf95ceebacb45c0a975382687b8c3046e459b02ebb84b53682008"
-    },
-    "fault/unexpected_drop/bimanual_lift_tray/progress_only": {
-      "path": "fault/unexpected_drop/bimanual_lift_tray/progress_only_n50.json",
-      "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "09fb5f4fd440b2101c0d78825edbb8f808990c4f3f67fe85e6261a6f74f568f4"
-    },
-    "fault/unexpected_drop/bimanual_lift_tray/progress_dynamic_roles": {
-      "path": "fault/unexpected_drop/bimanual_lift_tray/progress_dynamic_roles_n50.json",
-      "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "47291f23a5adec0315a2f3e70463d5847030ec5c5c765e8e3766c4008b6b5039"
-    },
-    "fault/unexpected_drop/bimanual_lift_tray/full": {
-      "path": "fault/unexpected_drop/bimanual_lift_tray/full_n50.json",
-      "git_commit": "5aa19d6a1bb51690689a58cd2454c7be09023838",
-      "protocol_sha256": "97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65",
-      "sha256": "ed6c3a7d6287af86a911cec7c5b22edc1f01696e2d94ba6ab41f759bf4395ade"
     },
     "fault/unexpected_drop/bimanual_sweep_to_dustpan/dynamac_v4": {
       "path": "fault/unexpected_drop/bimanual_sweep_to_dustpan/dynamac_v4_n50.json",

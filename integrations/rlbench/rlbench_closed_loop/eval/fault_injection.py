@@ -127,7 +127,9 @@ class FaultInjectingTaskEnvironment:
         self._active_cycles = 0
         self._close_occurrences = 0
         self._previous_close_request = False
+        self._current_close_counted = False
         self._failed_close_active = False
+        self._failed_grasp_target_poses: dict[str, tuple[Any, np.ndarray]] = {}
         self._grasped_cycles = 0
         self._fault_arm: str | None = None
         self._released_objects: dict[str, Any] = {}
@@ -398,27 +400,54 @@ class FaultInjectingTaskEnvironment:
         _pose_slice, gripper_index = self._arm_slice(selected[0], bimanual=bimanual)
         close_requested = bool(action[gripper_index] <= 0.5)
         if close_requested and not self._previous_close_request:
-            self._close_occurrences += 1
+            self._current_close_counted = False
         self._previous_close_request = close_requested
+        detected_targets: tuple[Any, ...] = ()
+        if close_requested and not self._current_close_counted:
+            detected_targets = self._detected_grasp_targets(
+                arm=selected[0],
+                bimanual=bimanual,
+            )
+            if detected_targets:
+                # ``close_occurrence`` counts physical interaction attempts,
+                # not arbitrary close-valued commands in free space.  A
+                # target may first enter the sensor after the fingers have
+                # already begun closing, so the occurrence is counted on the
+                # first detected cycle of that same close interval.
+                self._close_occurrences += 1
+                self._current_close_counted = True
         if (
             not self._triggered
             and self._policy_step >= self.spec.earliest_step
             and self._close_occurrences == self.spec.close_occurrence
             and close_requested
         ):
-            self._failed_close_active = True
             self._fault_arm = selected[0]
+            self._capture_failed_grasp_targets(
+                bimanual=bimanual,
+                detected_targets=detected_targets or None,
+            )
+            # A commanded close is not by itself a physical interaction.  Do
+            # not mark the formal fault triggered until the selected gripper
+            # actually detects a dynamic task target for this occurrence.
+            if not self._released_objects:
+                return action
+            self._failed_close_active = True
             self._relation_restored = False
             self._trigger_event(
                 self.spec.kind.value,
                 arm=selected[0],
                 close_occurrence=self._close_occurrences,
+                target_objects=sorted(self._released_objects),
                 end_condition="explicit_open_then_new_close_occurrence",
             )
         if not self._failed_close_active:
+            if not close_requested:
+                self._current_close_counted = False
             return action
         if not close_requested:
             self._failed_close_active = False
+            self._current_close_counted = False
             self._fault_end_policy_step = self._policy_step
             self.events.append(
                 {
@@ -429,36 +458,162 @@ class FaultInjectingTaskEnvironment:
                 }
             )
             return action
+        self._capture_failed_grasp_targets(bimanual=bimanual)
         # Preserve the commanded gripper motion while suppressing only the
         # attachment it is meant to establish.  Replacing the close command
         # with an open command conflates a missed interaction with gripper
         # actuator failure: the task executor then correctly waits for its
         # unapplied discrete command and never reaches the relation evidence
         # that this fault is intended to test.
-        self._effect_observed = True
-        self._effect_policy_step = (
-            self._policy_step
-            if self._effect_policy_step is None
-            else self._effect_policy_step
-        )
         self.events.append(
             {
                 "kind": "grasp_attachment_suppressed_cycle",
                 "policy_step": self._policy_step,
                 "arm": selected[0],
-                "protocol_effective": True,
+                "target_objects": sorted(self._released_objects),
+                "protocol_effective": bool(self._released_objects),
             }
         )
         return action
 
-    def _set_grasp_attachment_enabled(self, enabled: bool) -> bool:
-        """Temporarily control the aligned RLBench attachment protocol.
+    def _detected_grasp_targets(
+        self,
+        *,
+        arm: str,
+        bimanual: bool,
+    ) -> tuple[Any, ...]:
+        """Return dynamic task objects physically detected by one gripper."""
+
+        scene = getattr(self._environment, "_scene", None)
+        task = getattr(scene, "task", None)
+        graspables_fn = getattr(task, "get_graspable_objects", None)
+        if not callable(graspables_fn):
+            raise RuntimeError("grasp failure requires task graspable-object access")
+        gripper = self._gripper(arm, bimanual=bimanual)
+        sensor = getattr(gripper, "_proximity_sensor", None)
+        detects = getattr(sensor, "is_detected", None)
+        if not callable(detects):
+            raise RuntimeError("grasp failure requires gripper proximity detection")
+        candidates = list(graspables_fn())
+        # Some RLBench interactions are contact grasps rather than simulator
+        # attachments (for example a gripper closing on a tray handle).  Such
+        # an object need not appear in ``get_graspable_objects`` even though it
+        # is the physical target of the close.  Add only dynamic, respondable
+        # task-tree shapes detected by the same gripper proximity sensor.  The
+        # rule is task-independent and keeps static tables/fixtures out.
+        get_base = getattr(task, "get_base", None)
+        if callable(get_base):
+            base = get_base()
+            get_tree = getattr(base, "get_objects_in_tree", None)
+            if callable(get_tree):
+                for obj in get_tree(exclude_base=False):
+                    is_dynamic = getattr(obj, "is_dynamic", None)
+                    is_respondable = getattr(obj, "is_respondable", None)
+                    if (
+                        callable(is_dynamic)
+                        and callable(is_respondable)
+                        and bool(is_dynamic())
+                        and bool(is_respondable())
+                    ):
+                        candidates.append(obj)
+        detected: list[Any] = []
+        seen: set[int] = set()
+        for obj in candidates:
+            if id(obj) in seen:
+                continue
+            seen.add(id(obj))
+            if bool(detects(obj)):
+                detected.append(obj)
+        return tuple(detected)
+
+    def _capture_failed_grasp_targets(
+        self,
+        *,
+        bimanual: bool,
+        detected_targets: Sequence[Any] | None = None,
+    ) -> None:
+        """Record objects physically eligible for the selected close occurrence.
+
+        A missed interaction suppresses the selected gripper's attachment while
+        leaving its commanded closing motion intact.  An unattached object in
+        the fingers can otherwise be carried by contact friction and create a
+        false kinematic LINK.  We therefore preserve the pre-interaction pose
+        of detected, currently unowned graspable objects until the policy opens
+        and begins a genuinely new close occurrence.  Objects held by the peer
+        arm (handover) remain under that arm's physical control and are not
+        pose-locked here.
+        """
+
+        if self._fault_arm is None:
+            raise RuntimeError("grasp failure was activated without a target arm")
+        peer_owned_ids: set[int] = set()
+        if bimanual:
+            peer = "left" if self._fault_arm == "right" else "right"
+            peer_owned_ids.update(
+                id(obj)
+                for obj in self._gripper(
+                    peer,
+                    bimanual=True,
+                ).get_grasped_objects()
+            )
+        candidates = (
+            tuple(detected_targets)
+            if detected_targets is not None
+            else self._detected_grasp_targets(
+                arm=self._fault_arm,
+                bimanual=bimanual,
+            )
+        )
+        for obj in candidates:
+            name = self._object_names((obj,))[0]
+            self._released_objects[name] = obj
+            if id(obj) in peer_owned_ids:
+                continue
+            if name in self._failed_grasp_target_poses:
+                continue
+            get_pose = getattr(obj, "get_pose", None)
+            if not callable(get_pose):
+                raise RuntimeError("grasp-failure target lacks pose observation")
+            pose = np.asarray(get_pose(), dtype=np.float64)
+            if pose.shape != (7,) or not np.all(np.isfinite(pose)):
+                raise RuntimeError("grasp-failure target pose must be finite [7]")
+            self._failed_grasp_target_poses[name] = (obj, pose.copy())
+
+    def _restore_failed_grasp_targets(self, *, bimanual: bool) -> bool:
+        """Undo contact-only carriage during one deliberately missed grasp."""
+
+        if not self._failed_close_active or self._fault_arm is None:
+            return False
+        gripper = self._gripper(self._fault_arm, bimanual=bimanual)
+        target_ids = {
+            id(obj) for obj, _pose in self._failed_grasp_target_poses.values()
+        }
+        if target_ids.intersection(id(obj) for obj in gripper.get_grasped_objects()):
+            gripper.release()
+        restored = False
+        for obj, pose in self._failed_grasp_target_poses.values():
+            setter = getattr(obj, "set_pose", None)
+            if not callable(setter):
+                raise RuntimeError("grasp-failure target lacks pose mutation API")
+            setter(pose)
+            restored = True
+        if restored:
+            self._effect_observed = True
+            if self._effect_policy_step is None:
+                self._effect_policy_step = self._policy_step
+        return restored
+
+    def _set_grasp_attachment_suppressed(
+        self,
+        arm: str,
+        suppressed: bool,
+    ) -> frozenset[str]:
+        """Temporarily suppress attachment for exactly one selected gripper.
 
         The formal executor uses ``DiscreteGripperProtocol`` whose concrete
-        gripper action mode exposes the same ``_attach_grasped_objects`` flag
-        for single- and dual-arm control.  The fault wrapper changes only this
-        physical attachment operation; it does not alter policy state,
-        observations, gripper targets, or task progress.
+        action mode exposes an episode-local suppression set.  This avoids a
+        left-arm fault disabling a simultaneous right-arm grasp while changing
+        neither policy state, observations, gripper targets, nor task progress.
         """
 
         action_mode = getattr(self._environment, "_action_mode", None)
@@ -467,9 +622,26 @@ class FaultInjectingTaskEnvironment:
             raise RuntimeError(
                 "grasp failure requires the aligned gripper attachment protocol"
             )
-        previous = bool(gripper_mode._attach_grasped_objects)
-        gripper_mode._attach_grasped_objects = bool(enabled)
+        previous = frozenset(
+            getattr(gripper_mode, "_dynamac_attachment_suppressed_arms", ())
+        )
+        current = set(previous)
+        if suppressed:
+            current.add(arm)
+        else:
+            current.discard(arm)
+        gripper_mode._dynamac_attachment_suppressed_arms = current
         return previous
+
+    def _restore_grasp_attachment_suppression(
+        self,
+        previous: frozenset[str],
+    ) -> None:
+        action_mode = getattr(self._environment, "_action_mode", None)
+        gripper_mode = getattr(action_mode, "gripper_action_mode", None)
+        if gripper_mode is None:
+            raise RuntimeError("grasp failure lost the gripper action mode")
+        gripper_mode._dynamac_attachment_suppressed_arms = set(previous)
 
     def _apply_relation_fault(self, *, bimanual: bool) -> bool:
         selected = self._selected_arms(bimanual=bimanual)
@@ -549,6 +721,12 @@ class FaultInjectingTaskEnvironment:
         grasped_names = set(self._object_names(grasped))
 
         if self.spec.kind == FaultInjectionKind.GRASP_FAILURE:
+            target_names = set(self._released_objects)
+            target_grasped = target_names.intersection(grasped_names)
+            if self._failed_close_active and target_names and not target_grasped:
+                self._effect_observed = True
+                if self._effect_policy_step is None:
+                    self._effect_policy_step = self._policy_step
             if (
                 self._effect_observed
                 and not self._failed_close_active
@@ -660,17 +838,26 @@ class FaultInjectingTaskEnvironment:
             applied = self._apply_grasp_failure(values, bimanual=bimanual)
         elif relation_fault_triggered:
             applied = self._force_release_action(values, bimanual=bimanual)
-        restore_attachment: bool | None = None
+        restore_attachment: frozenset[str] | None = None
         if (
             self.spec.kind == FaultInjectionKind.GRASP_FAILURE
             and self._failed_close_active
         ):
-            restore_attachment = self._set_grasp_attachment_enabled(False)
+            assert self._fault_arm is not None
+            restore_attachment = self._set_grasp_attachment_suppressed(
+                self._fault_arm,
+                True,
+            )
         try:
             result = self._environment.step(applied)
         finally:
             if restore_attachment is not None:
-                self._set_grasp_attachment_enabled(restore_attachment)
+                self._restore_grasp_attachment_suppression(restore_attachment)
+        if self.spec.kind == FaultInjectionKind.GRASP_FAILURE:
+            restored = self._restore_failed_grasp_targets(bimanual=bimanual)
+            if restored:
+                observation = self._environment.get_observation()
+                result = (observation, result[1], result[2])
         self._audit_physical_effect(bimanual=bimanual)
         self._policy_step += 1
         return result

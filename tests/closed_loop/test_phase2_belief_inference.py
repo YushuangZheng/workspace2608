@@ -19,6 +19,7 @@ from essay2608.policy.closed_loop import (
     ClosedLoopTaskModelBuilder,
     FactorDistribution,
     FactorId,
+    LinkPendingCandidate,
     ProgressFilter,
     ProgressPriorBuilder,
     ProgressPriorConfig,
@@ -27,6 +28,7 @@ from essay2608.policy.closed_loop import (
     RelationEstimate,
     RelationFilter,
     RelationFilterConfig,
+    RelationEventId,
     RuntimeFeatureBuilder,
     RuntimeObservation,
     StateEvaluator,
@@ -1034,6 +1036,72 @@ def test_absolute_explanation_removes_soft_relation_prior_peak_scale(
         # cross-family absolute explanation uses the attainable-peak scale.
         assert ambiguous.relation_log_compatibility == pytest.approx(math.log(0.5))
     finally:
+        node.demo_relation_priors["object"] = original
+
+
+def test_pending_link_prior_remains_soft_without_formal_relation_origin(
+    phase2_model,
+) -> None:
+    model, demonstrations = phase2_model
+    demo = demonstrations[0]
+    state_id = model.skill_states[0][-1]
+    node = model.state(state_id)
+    anchor = next(iter(model.link_anchors.values()))
+    event_id = RelationEventId(
+        model.arm_id,
+        "object",
+        state_id.skill_index,
+        0,
+        99,
+        "link_pending",
+    )
+    candidate = LinkPendingCandidate(
+        event_id=event_id,
+        arm_id=model.arm_id,
+        frame_id="object",
+        candidate_state=state_id,
+        context_state=model.skill_states[0][0],
+        local_means=anchor.local_means,
+        local_covariances=anchor.local_covariances,
+        gripper_commands=anchor.gripper_commands,
+    )
+    original = node.demo_relation_priors["object"].copy()
+    runtime = RuntimeObservation(
+        tick=1,
+        ee_pose=demo.ee_pose[state_id.local_index],
+        frame_poses={"object": demo.frames["object"][state_id.local_index]},
+        gripper_state=np.asarray([1.0]),
+        previous_command_pose=demo.action_pose[max(0, state_id.local_index - 1)],
+        previous_ee_pose=demo.ee_pose[max(0, state_id.local_index - 1)],
+        tracking_reliability={"object": 1.0},
+        frame_visibility={"object": True},
+    )
+    estimate = {
+        "object": relation_estimate("object", (0.85, 0.15), RelationDecision.EXTERNAL)
+    }
+    try:
+        node.demo_relation_priors["object"][0] = np.asarray([0.3, 0.7])
+        model.link_pending_events[event_id] = candidate
+        pending_score = StateEvaluator(model).evaluate(
+            state_id,
+            RuntimeFeatureBuilder().build(runtime),
+            estimate,
+            mode_by_skill={0: 0},
+        )
+        assert pending_score.relation_state_compatibility == pytest.approx(
+            pending_score.relation_peak_normalized_compatibility
+        )
+
+        model.link_pending_events.pop(event_id)
+        unsupported_score = StateEvaluator(model).evaluate(
+            state_id,
+            RuntimeFeatureBuilder().build(runtime),
+            estimate,
+            mode_by_skill={0: 0},
+        )
+        assert unsupported_score.relation_state_compatibility == 0.0
+    finally:
+        model.link_pending_events.pop(event_id, None)
         node.demo_relation_priors["object"] = original
 
 

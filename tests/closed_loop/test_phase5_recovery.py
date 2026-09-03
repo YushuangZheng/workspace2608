@@ -366,13 +366,13 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
     entry = pose(0.02)
     signature = VerificationAttemptSignature(
         initial_relation,
-        pending.candidate_state,
+        pending.candidate_state.skill_index,
         "grasp-0",
     )
     controller.start(
         request,
         pending,
-        task_state=signature.task_state,
+        task_state=pending.candidate_state,
         relation_state=signature.relation_state,
         grasp_event=signature.grasp_event,
         entry_pose=entry,
@@ -428,16 +428,26 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
         controller.start(
             request,
             pending,
-            task_state=signature.task_state,
+            task_state=pending.candidate_state,
             relation_state=signature.relation_state,
             grasp_event=signature.grasp_event,
             entry_pose=entry,
             gripper_command=np.asarray([-1.0]),
             recent_task_poses=(pose(0.0), entry),
         )
-    assert controller.attempts.can_attempt(
-        pending.event_id,
-        replace(signature, task_state=StateId(1, 2)),
+    # Moving to another tau of the same skill is not a new interaction
+    # opportunity; changing the skill is.
+    assert not controller.can_attempt(
+        pending,
+        task_state=StateId(pending.candidate_state.skill_index, 99),
+        relation_state=initial_relation,
+        grasp_event="grasp-0",
+    )
+    assert controller.can_attempt(
+        pending,
+        task_state=StateId(pending.candidate_state.skill_index + 1, 0),
+        relation_state=initial_relation,
+        grasp_event="grasp-0",
     )
 
 
@@ -1558,6 +1568,18 @@ def test_reentry_relation_threshold_uses_soft_peak_scale_and_physical_direction(
     assert matching.scores[state].relation_compatibility < 0.6
     assert matching.scores[state].relation_state_compatibility > 0.6
     assert matching.decision is not None
+
+    required_mismatch = selector.select(
+        (state,),
+        matching_belief,
+        current_reference=state,
+        mode_by_skill={state.skill_index: 0},
+        required_relations={"object": RelationDecision.EXTERNAL},
+    )
+    assert required_mismatch.decision is None
+    assert (
+        "recovered_relation_not_preserved" in required_mismatch.rejection_reasons[state]
+    )
 
     opposing_belief = replace(
         matching_belief,

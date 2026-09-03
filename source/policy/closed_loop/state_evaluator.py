@@ -18,6 +18,7 @@ from .relation_filter import RelationDecision, RelationEstimate
 from .runtime_features import RuntimeFeatures
 from .scene_factors import FactorDistribution, FactorId
 from .state_index import StateId
+from .relation_events import RelationStateKey
 from .task_model import ClosedLoopTaskModel, StateNode
 
 Array = np.ndarray
@@ -642,7 +643,45 @@ class StateEvaluator:
                 float(np.max(demo_prior)), self.config.probability_floor
             )
             peak_normalized = float(np.clip(compatibility / attainable_peak, 0.0, 1.0))
-            if not np.isclose(demo_prior[0], demo_prior[1]):
+            # A LINK_PENDING interval is deliberately only a soft hypothesis:
+            # the demonstrations contain a repeatable close but not enough
+            # post-close excitation to confirm the physical relation.  Its
+            # soft overlap remains useful in the progress posterior, but it
+            # must not be promoted to the same absolute direction constraint
+            # as a confirmed LINK origin.  If that relation is actually
+            # required, the role/boundary layer requests verification and the
+            # recovery reentry layer separately preserves the repaired goal.
+            directional_modes = tuple(
+                mode
+                for mode, weight in enumerate(mode_weights)
+                if weight > 0.0
+                and node.demo_relation_priors[frame][mode, 1]
+                > node.demo_relation_priors[frame][mode, 0]
+            )
+            pending_only_link_hypothesis = bool(directional_modes) and all(
+                RelationStateKey(
+                    self.task_model.arm_id,
+                    frame,
+                    node.state_id,
+                    mode,
+                )
+                not in self.task_model.link_origins
+                and (
+                    (
+                        candidate := self.task_model.active_link_pending_candidate(
+                            frame,
+                            node.state_id,
+                            {node.state_id.skill_index: mode},
+                        )
+                    )
+                    is not None
+                    and candidate.event_id.mode == mode
+                )
+                for mode in directional_modes
+            )
+            if not pending_only_link_hypothesis and not np.isclose(
+                demo_prior[0], demo_prior[1]
+            ):
                 expected = (
                     RelationDecision.LINKED
                     if demo_prior[1] > demo_prior[0]

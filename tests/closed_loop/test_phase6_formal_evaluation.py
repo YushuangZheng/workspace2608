@@ -457,7 +457,7 @@ def test_shard_merge_is_resumable_and_rejects_incomplete_coverage(
         ("stack_wine", "single"),
         ("bimanual_put_bottle_in_fridge", "left"),
         ("bimanual_handover_item", "right"),
-        ("bimanual_lift_tray", "left"),
+        ("bimanual_lift_tray", "right"),
         ("bimanual_sweep_to_dustpan", "left"),
     ),
 )
@@ -518,9 +518,13 @@ def test_unaffected_formal_results_are_content_addressed() -> None:
             cell
             for cell in launch.build_cells(run_cell.load_protocol(), "fault")
             if cell.fault != "grasp_failure"
+            and not (
+                cell.task == "bimanual_lift_tray"
+                and cell.fault in {"relation_mismatch", "unexpected_drop"}
+            )
         ),
     )
-    assert len(records) == 160
+    assert len(records) == 152
     assert set(records) == {cell.cell_id for cell in expected_cells}
     assert all(len(record["sha256"]) == 64 for record in records.values())
     assert all(len(record["protocol_sha256"]) == 64 for record in records.values())

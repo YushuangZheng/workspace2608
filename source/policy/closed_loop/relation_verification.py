@@ -127,7 +127,7 @@ class RelationVerificationConfig:
 @dataclass(frozen=True)
 class VerificationAttemptSignature:
     relation_state: RelationDecision
-    task_state: StateId
+    skill_index: int
     grasp_event: Hashable
 
 
@@ -311,7 +311,12 @@ class RelationVerificationController:
 
         return VerificationAttemptSignature(
             relation_state=relation_state,
-            task_state=task_state,
+            # A Pending occurrence is a skill-level interaction event.  A
+            # local tau update does not create a new physical opportunity to
+            # verify the same close, and must not re-arm TASK->VERIFY_LINK.
+            # Relation direction, skill identity, or a new grasp occurrence
+            # are the three causal changes defined by the method.
+            skill_index=task_state.skill_index,
             grasp_event=grasp_event,
         )
 
