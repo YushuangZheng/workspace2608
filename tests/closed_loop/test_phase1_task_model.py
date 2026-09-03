@@ -28,7 +28,7 @@ from essay2608.policy.closed_loop import (
     RelationEventId,
     StateId,
 )
-from essay2608.policy.closed_loop.task_model_builder import (
+from essay2608.policy.closed_loop.model.task_model_builder import (
     _fit_pose_samples,
     _relation_prior,
 )

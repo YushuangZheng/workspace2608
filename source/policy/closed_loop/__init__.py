@@ -1,13 +1,13 @@
 """Closed-loop relation-progress policy components."""
 
-from .boundary_model import (
+from .model.boundary_model import (
     BoundaryId,
     BoundaryModel,
     LocalCompletionModel,
     RelationGuardDistribution,
     ReliabilityStatistics,
 )
-from .boundary_runtime import (
+from .control.boundary_runtime import (
     BoundaryCalibration,
     BoundaryRuntimeConfig,
     ConditionId,
@@ -17,12 +17,12 @@ from .boundary_runtime import (
     TransitionPreparation,
     TransitionRequest,
 )
-from .bimanual_controller import (
+from .control.bimanual_controller import (
     BimanualBoundaryController,
     BoundaryCycleResult,
     MultiArmBoundaryController,
 )
-from .belief_updater import (
+from .inference.belief_updater import (
     BeliefUpdater,
     BeliefUpdaterConfig,
     CandidateExpansionConfig,
@@ -31,15 +31,15 @@ from .belief_updater import (
 from .ablation import ClosedLoopFeatureProfile
 from .config import ClosedLoopPolicyConfig
 from .diagnostics import DiagnosticRecorder, json_ready
-from .execution_controller import (
+from .control.execution_controller import (
     ClosedLoopExecutionConfig,
     ClosedLoopExecutionController,
     ControlEquivalenceAssessment,
     ExecutionCycleResult,
 )
-from .execution_cursor import ClosedLoopCursor, ExecutionDecision
-from .entry_guard import EntryGuard
-from .frame_roles import (
+from .control.execution_cursor import ClosedLoopCursor, ExecutionDecision
+from .control.entry_guard import EntryGuard
+from .control.frame_roles import (
     FrameRole,
     FrameRoleConfig,
     FrameRoleDecision,
@@ -48,7 +48,7 @@ from .frame_roles import (
     RelationRecoveryIntent,
     RelationVerificationRequest,
 )
-from .mismatch import (
+from .control.mismatch import (
     MismatchConfig,
     MismatchCounters,
     MismatchEvent,
@@ -56,20 +56,20 @@ from .mismatch import (
     MismatchTracker,
     MismatchUpdate,
 )
-from .link_anchors import (
+from .model.link_anchors import (
     EpisodeLinkAnchorRegistry,
     InstantiatedLinkWaypoint,
     RuntimeLinkAnchor,
 )
-from .progress_filter import (
+from .inference.progress_filter import (
     ProgressEstimate,
     ProgressFilter,
     ProgressFilterConfig,
     ProgressStatus,
 )
-from .progress_prior import ProgressPrior, ProgressPriorBuilder, ProgressPriorConfig
+from .inference.progress_prior import ProgressPrior, ProgressPriorBuilder, ProgressPriorConfig
 from .policy import ClosedLoopMultiStreamPolicy
-from .recovery import (
+from .recovery.manager import (
     ClosedLoopRecoveryConfig,
     ClosedLoopRecoveryManager,
     ExecutionMode,
@@ -84,14 +84,14 @@ from .recovery import (
     RelationGoalPhase,
     RelationRecoveryController,
 )
-from .reentry import (
+from .recovery.reentry import (
     ReentryConfig,
     ReentryDecision,
     ReentryEvaluation,
     ReentrySelector,
 )
-from .relation_goals import RelationGoal, RelationGoalKind, RelationGoalPlanner
-from .relation_verification import (
+from .recovery.relation_goals import RelationGoal, RelationGoalKind, RelationGoalPlanner
+from .recovery.relation_verification import (
     AuxiliaryAction,
     ProbeExitReason,
     RelationVerificationConfig,
@@ -102,44 +102,44 @@ from .relation_verification import (
     VerificationAttemptSignature,
     VerificationPhase,
 )
-from .query_adapter import StateQueryAdapter
-from .relation_filter import (
+from .control.query_adapter import StateQueryAdapter
+from .inference.relation_filter import (
     RelationChange,
     RelationDecision,
     RelationEstimate,
     RelationFilter,
     RelationFilterConfig,
 )
-from .relation_events import (
+from .model.relation_events import (
     LinkPendingCandidate,
     LinkRecoveryAnchor,
     RelationEventId,
     RelationStateKey,
     UnlinkEventMetadata,
 )
-from .scene_factors import FactorDistribution, FactorId
-from .runtime_features import (
+from .model.scene_factors import FactorDistribution, FactorId
+from .inference.runtime_features import (
     RuntimeFeatureBuilder,
     RuntimeFeatureConfig,
     RuntimeFeatures,
 )
-from .runtime_observation import RuntimeObservation
-from .state_evaluator import (
+from .inference.runtime_observation import RuntimeObservation
+from .inference.state_evaluator import (
     CandidateScore,
     GaussianComponentAudit,
     StateEvaluator,
     StateEvaluatorConfig,
 )
-from .state_index import StateId, StateTopology, build_state_topology
+from .model.state_index import StateId, StateTopology, build_state_topology
 from .state import ArmCommand, ArmCycleResult, PolicyCycleResult, PolicyLifecycle
-from .task_model import ClosedLoopTaskModel, StateNode
-from .task_model_builder import ClosedLoopTaskModelBuilder, ClosedLoopTaskModelConfig
-from .transition_transaction import (
+from .model.task_model import ClosedLoopTaskModel, StateNode
+from .model.task_model_builder import ClosedLoopTaskModelBuilder, ClosedLoopTaskModelConfig
+from .control.transition_transaction import (
     TransitionCommitResult,
     TransitionTransactionCoordinator,
 )
-from .unlink_metadata import InstantiatedUnlinkTarget, UnlinkMetadataRepository
-from .weighted_poe import (
+from .model.unlink_metadata import InstantiatedUnlinkTarget, UnlinkMetadataRepository
+from .control.weighted_poe import (
     WeightedPoEExecutor,
     WeightedPoEResult,
     weighted_product_of_experts,

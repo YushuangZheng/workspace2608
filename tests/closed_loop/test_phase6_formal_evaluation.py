@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from evaluations.phase6_formal_evaluation import launch, run_cell, summarize
-from evaluations.phase6_rlbench_integration import launch_sharded_normal
+from evaluations.development.phase6_formal_evaluation import launch, run_cell, summarize
+from evaluations.development.phase6_rlbench_integration import launch_sharded_normal
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     STAGE6_IK_CONTROLLER_PROFILE,
 )
@@ -507,24 +507,16 @@ def test_formal_cell_paths_are_separate_from_v4_release_results() -> None:
         assert cell.result.is_relative_to(launch.RESULTS_ROOT)
 
 
-def test_unaffected_formal_results_are_content_addressed() -> None:
-    run_cell.load_protocol()
+def test_all_formal_results_are_content_addressed() -> None:
+    protocol = run_cell.load_protocol()
     records = launch._retained_records()
 
     expected_cells = (
-        *launch.build_cells(run_cell.load_protocol(), "normal"),
-        *launch.build_cells(run_cell.load_protocol(), "dynamic"),
-        *(
-            cell
-            for cell in launch.build_cells(run_cell.load_protocol(), "fault")
-            if cell.fault != "grasp_failure"
-            and not (
-                cell.task == "bimanual_lift_tray"
-                and cell.fault in {"relation_mismatch", "unexpected_drop"}
-            )
-        ),
+        *launch.build_cells(protocol, "normal"),
+        *launch.build_cells(protocol, "dynamic"),
+        *launch.build_cells(protocol, "fault"),
     )
-    assert len(records) == 152
+    assert len(records) == 192
     assert set(records) == {cell.cell_id for cell in expected_cells}
     assert all(len(record["sha256"]) == 64 for record in records.values())
     assert all(len(record["protocol_sha256"]) == 64 for record in records.values())

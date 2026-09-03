@@ -11,17 +11,17 @@ import numpy as np
 
 from ..dynamac import DynaMAC, DynaMACAction, DynaMACObservation
 from .ablation import ClosedLoopFeatureProfile
-from .belief_updater import BeliefUpdater, ClosedLoopBelief
-from .bimanual_controller import BoundaryCycleResult, MultiArmBoundaryController
+from .inference.belief_updater import BeliefUpdater, ClosedLoopBelief
+from .control.bimanual_controller import BoundaryCycleResult, MultiArmBoundaryController
 from .config import ClosedLoopPolicyConfig
 from .diagnostics import DiagnosticRecorder, json_ready, state_token
-from .execution_controller import (
+from .control.execution_controller import (
     ClosedLoopExecutionController,
     ExecutionCycleResult,
 )
-from .frame_roles import RelationVerificationRequest
-from .progress_filter import ProgressStatus
-from .recovery import (
+from .control.frame_roles import RelationVerificationRequest
+from .inference.progress_filter import ProgressStatus
+from .recovery.manager import (
     ClosedLoopRecoveryManager,
     ExecutionMode,
     RecoveryManagerResult,
@@ -30,18 +30,18 @@ from .recovery import (
     RecoveryTriggerDecision,
     RecoveryTriggerTracker,
 )
-from .reentry import ReentryEvaluation
-from .relation_filter import RelationDecision
-from .relation_verification import (
+from .recovery.reentry import ReentryEvaluation
+from .inference.relation_filter import RelationDecision
+from .recovery.relation_verification import (
     AuxiliaryAction,
     SafetyConstraintStatus,
     VerificationPhase,
 )
-from .runtime_observation import RuntimeObservation
-from .serialization import load_policy_bundle, save_policy_bundle
+from .inference.runtime_observation import RuntimeObservation
+from .model.serialization import load_policy_bundle, save_policy_bundle
 from .state import ArmCommand, ArmCycleResult, PolicyCycleResult, PolicyLifecycle
-from .state_index import StateId
-from .task_model import ClosedLoopTaskModel
+from .model.state_index import StateId
+from .model.task_model import ClosedLoopTaskModel
 
 Array = np.ndarray
 

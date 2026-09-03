@@ -10,7 +10,7 @@ from integrations.rlbench.rlbench_closed_loop.eval.fault_injection import (
     FaultInjectionSpec,
     FaultInjectingTaskEnvironment,
 )
-from evaluations.phase6_rlbench_integration import run_fault_diagnostic_subset
+from evaluations.development.phase6_rlbench_integration import run_fault_diagnostic_subset
 
 
 def _pose(x: float) -> np.ndarray:

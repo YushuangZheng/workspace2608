@@ -7,10 +7,10 @@ from enum import Enum
 
 import numpy as np
 
-from .belief_updater import ClosedLoopBelief
-from .bimanual_controller import BoundaryCycleResult
-from .execution_controller import ExecutionCycleResult
-from .recovery import ExecutionMode, RecoveryManagerResult
+from .inference.belief_updater import ClosedLoopBelief
+from .control.bimanual_controller import BoundaryCycleResult
+from .control.execution_controller import ExecutionCycleResult
+from .recovery.manager import ExecutionMode, RecoveryManagerResult
 
 Array = np.ndarray
 

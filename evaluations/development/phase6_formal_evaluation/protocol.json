@@ -1,0 +1,195 @@
+{
+  "schema": "essay2608.phase6_formal_protocol.v1",
+  "status": "preregistered_active",
+  "active_implementation": {
+    "controller_profile": "stage6_hybrid_cartesian_executor_v19",
+    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v23",
+    "validated_mechanism_parent_commit": "0cbfa3b4ad3fb0d885f622129335335fe4715aad",
+    "retained_formal_results_before_activation": false
+  },
+  "evaluation_set": {
+    "id": "rlbench_eval_v2",
+    "seed_start": 2608000000,
+    "available_episodes_per_task": 200,
+    "normal_episode_index_range": [0, 199],
+    "dynamic_episode_index_range": [0, 49],
+    "fault_episode_index_range": [0, 49]
+  },
+  "tasks": [
+    "bimanual_handover_item",
+    "bimanual_lift_tray",
+    "bimanual_sweep_to_dustpan",
+    "bimanual_put_bottle_in_fridge",
+    "place_cups",
+    "open_microwave",
+    "wipe_desk",
+    "stack_wine"
+  ],
+  "methods": {
+    "dynamac_v4": {
+      "policy_type": "dynamac",
+      "feature_profile": null
+    },
+    "progress_only": {
+      "policy_type": "closed_loop_multistream",
+      "feature_profile": "progress_only"
+    },
+    "progress_dynamic_roles": {
+      "policy_type": "closed_loop_multistream",
+      "feature_profile": "progress_dynamic_roles"
+    },
+    "full": {
+      "policy_type": "closed_loop_multistream",
+      "feature_profile": "full"
+    }
+  },
+  "shared_execution": {
+    "controller_profile": "stage6_hybrid_cartesian_executor_v19",
+    "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v23",
+    "base_models_dir": "integrations/rlbench/models/phase6_v1",
+    "base_models_fingerprint": "1fc31fe8a4c416000a3ee2e68caef7429a9dc3bde51faf5375df2c1a6064ddf9",
+    "closed_loop_models_dir": "integrations/rlbench/models/closed_loop_phase6_v1",
+    "closed_loop_models_fingerprint": "060ebf5a43791789d7bf749ee4c3c1ed198fd0825aa6331b2e8a9892a31dcea3",
+    "scenario_by_experiment": {
+      "normal": "static",
+      "dynamic": "smooth",
+      "fault": "smooth"
+    },
+    "smooth_steps": 10,
+    "horizon": 1000,
+    "policy_timeout_seconds": 120.0,
+    "reason": "All methods use the same executor. Static nominal execution is retained; dynamic no-fault and fault cells share the same smooth A-to-B background so dynamic adaptation is separated from the four physical fault labels."
+  },
+  "faults": {
+    "time_stall": {
+      "arm_by_task": {
+        "stack_wine": "all",
+        "place_cups": "all",
+        "open_microwave": "all",
+        "wipe_desk": "all",
+        "bimanual_put_bottle_in_fridge": "all",
+        "bimanual_handover_item": "all",
+        "bimanual_lift_tray": "all",
+        "bimanual_sweep_to_dustpan": "all"
+      },
+      "earliest_step": 40,
+      "duration_cycles": 12,
+      "motion_trigger_distance": 0.01
+    },
+    "grasp_failure": {
+      "arm_by_task": {
+        "stack_wine": "single",
+        "place_cups": "single",
+        "open_microwave": "single",
+        "wipe_desk": "single",
+        "bimanual_put_bottle_in_fridge": "left",
+        "bimanual_handover_item": "right",
+        "bimanual_lift_tray": "right",
+        "bimanual_sweep_to_dustpan": "left"
+      },
+      "earliest_step": 0,
+      "close_occurrence": 1
+    },
+    "relation_mismatch": {
+      "arm_by_task": {
+        "stack_wine": "single",
+        "place_cups": "single",
+        "open_microwave": "single",
+        "wipe_desk": "single",
+        "bimanual_put_bottle_in_fridge": "left",
+        "bimanual_handover_item": "right",
+        "bimanual_lift_tray": "right",
+        "bimanual_sweep_to_dustpan": "left"
+      },
+      "earliest_step": 0,
+      "minimum_grasped_cycles": 5,
+      "mismatch_translation": [0.04, 0.0, 0.0]
+    },
+    "unexpected_drop": {
+      "arm_by_task": {
+        "stack_wine": "single",
+        "place_cups": "single",
+        "open_microwave": "single",
+        "wipe_desk": "single",
+        "bimanual_put_bottle_in_fridge": "left",
+        "bimanual_handover_item": "right",
+        "bimanual_lift_tray": "right",
+        "bimanual_sweep_to_dustpan": "left"
+      },
+      "earliest_step": 0,
+      "minimum_grasped_cycles": 8
+    }
+  },
+  "statistics": {
+    "primary_metric": "episode_success_rate",
+    "normal_noninferiority_margin": 0.05,
+    "confidence_interval": "wilson_95_percent",
+    "paired_comparison": "exact_mcnemar",
+    "multiple_comparison_correction": "holm",
+    "aggregate": "task_macro_average_with_paired_bootstrap_10000",
+    "fault_primary_population": "intention_to_treat_all_preregistered_episodes",
+    "fault_secondary_metric": "conditional_recovery_success_among_triggered_episodes",
+    "failure_taxonomy": [
+      "success",
+      "benchmark_or_horizon_failure",
+      "invalid_action",
+      "structured_policy_failure",
+      "controller_or_ik_failure",
+      "recovery_failure",
+      "fault_not_triggered_before_terminal_state",
+      "infrastructure_failure"
+    ],
+    "threshold_tuning_from_fault_results": false
+  },
+  "resource_plan": {
+    "parallel_lanes": 48,
+    "gpu_indices": [0, 1, 2, 3, 4, 5, 6, 7],
+    "render_backend": "xvfb_software_gl",
+    "gpu_assignment_semantics": "48 isolated simulator workers reuse the eight GPU identities round-robin; CUDA identity is isolated per process and rendering remains software Xvfb",
+    "cpu_affinity": "non-overlapping NUMA-local physical-core partitions with each allocated core's SMT sibling; at least one physical core per worker",
+    "normal_matrix_effective_parallelism": "min(48, pending normal cells)",
+    "fault_matrix_effective_parallelism": "min(48, pending fault cells)",
+    "concurrency_admission": {
+      "schema": "essay2608.phase6_concurrency_probe.v1",
+      "run_id": "20260831T084113Z-w48",
+      "workers": 48,
+      "horizon": 200,
+      "peak_active_workers": 48,
+      "all_workers_valid": true,
+      "fatal_log_patterns_absent": true,
+      "stale_result_locks_absent": true,
+      "minimum_memory_available_gib": 994.2,
+      "admission_record": "evaluations/development/phase6_formal_evaluation/concurrency_admission.json",
+      "summary": "integrations/rlbench/results/phase6_concurrency_probe/20260831T084113Z-w48/summary.json"
+    },
+    "hardware_rendering_admission": "rejected_before_formal_run",
+    "hardware_rendering_probe": {
+      "date_utc": "2026-08-29",
+      "task": "stack_wine",
+      "episode_index": 0,
+      "method": "full",
+      "egl_surfaceless": {
+        "success": true,
+        "control_cycles": 178
+      },
+      "xvfb_software_gl": {
+        "success": true,
+        "control_cycles": 177
+      },
+      "decision": "EGL was stable for one episode but failed exact trajectory equivalence; retain the validated software backend for all compared methods."
+    }
+  },
+  "claims": {
+    "normal_cells": 32,
+    "normal_episodes": 6400,
+    "dynamic_cells": 32,
+    "dynamic_episodes": 1600,
+    "fault_cells": 128,
+    "fault_episodes": 6400,
+    "total_episodes": 14400,
+    "dynamic_is_fault_label": false,
+    "fault_requires_completed_dynamic_background": true,
+    "seed_or_episode_selection_based_on_results": false,
+    "policy_internal_state_mutated_by_fault_injector": false
+  }
+}

@@ -1,16 +1,33 @@
 # 闭环多流策略模块
 
-本目录按照《新方法代码开发计划》组织关系—进度信念驱动方法。阶段一离线任务模型、阶段二关系—进度联合信念推断、阶段三闭环正常执行控制、阶段四对象中心入口守卫与事务提交，以及阶段五主动关系验证、统一关系恢复与任务重入均已实现。阶段六的环境无关顶层策略、序列化、逐周期诊断和 RLBench 适配已经接入，并已完成正常小样本门控和受控故障组件级 pilot；扩大任务、variation、seed 与样本数的论文正式评测仍待执行。
+本目录按照《新方法代码开发计划》组织关系—进度信念驱动方法。阶段一离线任务模型、阶段二关系—进度联合信念推断、阶段三闭环正常执行控制、阶段四对象中心入口守卫与事务提交，以及阶段五主动关系验证、统一关系恢复与任务重入均已实现。阶段六的环境无关顶层策略、序列化、逐周期诊断和 RLBench 适配也已接入；当前正式正常、平滑动态无故障与受控故障矩阵共 192 个单元、14,400 回合，最终统计与深度审计位于 `evaluations/development/phase6_formal_evaluation/results/v2/`。
+
+核心实现按职责分层：
+
+```text
+closed_loop/
+├── model/       离线正常任务、关系事件、场景因子和边界模型
+├── inference/   在线观测特征、关系后验、进度先验与进度校正
+├── control/     动态流角色、动作执行、入口守卫和多臂事务
+├── recovery/    主动关系验证、关系修复和合法任务重入
+├── policy.py    环境无关的完整闭环策略入口
+├── config.py    顶层配置聚合
+├── state.py     顶层周期输入输出状态
+├── diagnostics.py
+└── ablation.py
+```
+
+包根 `__init__.py` 继续提供原有公共类型的统一导入入口；子目录只改变代码组织，不改变算法和运行协议。
 
 ## 阶段一公式到代码的映射
 
-- `state_index.py`：统一 `StateId=(skill_index, local_index)` 和前驱/后继状态图，mode 作为节点内部混合分量；
-- `task_model.py`：`ClosedLoopTaskModel`、逐状态 `StateNode`、附加统计序列化及基础 DynaMAC 指纹绑定；
-- `task_model_builder.py`：从同一批正常示范对齐构建关系先验、场景因子、边界模型和关系事件；
-- `scene_factors.py`：实体构型与实体间相对构型的流形高斯分布，以及留一示范评分；
-- `boundary_model.py`：本地完成、边界关系条件、边界场景条件和多臂事务元数据；
-- `relation_events.py`：事件级 LINK 恢复锚点、未确认 LINK_PENDING 模板及 UNLINK 合法重入元数据；
-- `query_adapter.py`：不推进基础策略时钟的指定状态动作查询。
+- `model/state_index.py`：统一 `StateId=(skill_index, local_index)` 和前驱/后继状态图，mode 作为节点内部混合分量；
+- `model/task_model.py`：`ClosedLoopTaskModel`、逐状态 `StateNode`、附加统计序列化及基础 DynaMAC 指纹绑定；
+- `model/task_model_builder.py`：从同一批正常示范对齐构建关系先验、场景因子、边界模型和关系事件；
+- `model/scene_factors.py`：实体构型与实体间相对构型的流形高斯分布，以及留一示范评分；
+- `model/boundary_model.py`：本地完成、边界关系条件、边界场景条件和多臂事务元数据；
+- `model/relation_events.py`：事件级 LINK 恢复锚点、未确认 LINK_PENDING 模板及 UNLINK 合法重入元数据；
+- `control/query_adapter.py`：不推进基础策略时钟的指定状态动作查询。
 
 逐状态关系先验使用：
 
@@ -136,7 +153,7 @@ $$
 
 `MultiArmBoundaryController` 要求所有机械臂提供同一 tick 的 pre-action 信念快照，先计算全部 `TransitionRequest`，再交由 `TransitionTransactionCoordinator` 统一提交。独立边界可以异步提交；同一事务组只有在全部成员同周期放行时才原子提交。等待期间不改变已就绪机械臂的当前引用状态，阶段三仍继续用最新对象位姿查询当前状态动作并动态伺服。提交结果通过 `permitted_boundaries` 明确传回下一周期的阶段二候选传播。
 
-运行参数按任务保存在 `configs/closed_loop_boundary/`。`theta_local` 和 `H` 只由五条正常示范的原始 RLBench 控制周期回放标定，并且只读取本地完成分数，不用守卫是否已经放行筛选本地正样本。对每个边界，`H` 取正常进度进入末端窗口前最长偶发就绪连续段加一，再由正常末端保持验证可持续性，不附加全局最短时长。当前30个边界使用 `H=1`、9个使用 `H=2`、WipeDesk `1→2` 使用 `H=3`。正式复核覆盖40个边界、200个边界×示范实例，边界前提前放行为0，正常末端保持后的200次决策均符合放行或定向等待语义；LiftTray `1→2` 的真实事务组在5/5条正常示范中双方共同就绪。当前40个边界统一使用 `evaluations/phase4_boundary_calibration/results/v5`；其中 `L_goal` 将当前 mode 的全部最终目标流变换到世界坐标系后，以精度加权 PoE 构造单一联合末端目标，再对真实末端位姿评分一次，不重复相乘多个坐标表达的边缘支持。
+运行参数按任务保存在 `configs/closed_loop_boundary/`。`theta_local` 和 `H` 只由五条正常示范的原始 RLBench 控制周期回放标定，并且只读取本地完成分数，不用守卫是否已经放行筛选本地正样本。对每个边界，`H` 取正常进度进入末端窗口前最长偶发就绪连续段加一，再由正常末端保持验证可持续性，不附加全局最短时长。当前30个边界使用 `H=1`、9个使用 `H=2`、WipeDesk `1→2` 使用 `H=3`。正式复核覆盖40个边界、200个边界×示范实例，边界前提前放行为0，正常末端保持后的200次决策均符合放行或定向等待语义；LiftTray `1→2` 的真实事务组在5/5条正常示范中双方共同就绪。当前40个边界统一使用 `evaluations/development/phase4_boundary_calibration/results/v5`；其中 `L_goal` 将当前 mode 的全部最终目标流变换到世界坐标系后，以精度加权 PoE 构造单一联合末端目标，再对真实末端位姿评分一次，不重复相乘多个坐标表达的边缘支持。
 
 ## 阶段五主动验证、恢复与重入
 
@@ -152,11 +169,11 @@ $$
 
 关系目标完成后只在事件元数据提供的合法状态中比较当前完整机器人轨迹、稀疏场景和关系解释度；无关系目标的 `NO_PLAUSIBLE_STATE` 恢复可搜索全任务，但同技能之外只允许经入口守卫放行的相邻下一技能，禁止后退或跨多技能直接跳转。正常进度评分仍使用原始示范轨迹协方差；只有恢复后的重入机器人轨迹项复用既有 `lambda_rec`，按 `Sigma_reentry=Sigma+lambda_rec I` 评分，使恢复动作分布与其完成判定具有相同精度口径。重入机器人绝对准入读取联合可达峰值归一支持，逐流兼容度只作审计；重入关系项使用 `relation_state_compatibility`，将峰值归一的软先验支持度与已经确认的 external/linked 方向一致性统一成单一分数，未确认 Pending 仍保持软语义。本次恢复已经完成的全部 LINK/UNLINK 目标必须在重入时继续由在线关系决策保持。场景、候选范围、入口守卫和兼容度阈值不变。已通过场景/关系检查但尚未达到正式重入阈值的候选，可使用该候选自身的关系期望和流角色生成对齐动作；不能再用故障时冻结后验的旧关系语义否决该动作。这只是只读动作查询视图，真实 `beta/StateId/reference_state`、mode、角色历史和任务时钟仍冻结。重入选择、进度后验 one-hot 重置、执行 `reference_state` 设置和返回 TASK 只在完整阈值通过后由管理器原子完成，不恢复旧故障时钟。
 
-阶段五配置集中于 `configs/closed_loop_recovery.json`。组件测试覆盖冻结更新、反向探测/原路返回、超时与安全、重复验证抑制、episode Pending、事件锚点实例化、UNLINK、目标排序、硬上限、完整状态重入及模式切换。真实 V4 元数据验收覆盖12个任务/机械臂模型、11个正式 LINK、7个 Pending、3个 UNLINK 和904个状态级 `link_origin`，结果位于 `evaluations/phase5_recovery_acceptance/results/v1`。受控行为 A/B 位于 `evaluations/phase5_behavior_ab/results/v5`：Pending 主动验证和统一关系恢复均从无动作对照的0%提高到100%，任务重入 StateId MAE 从37.0000降至0.6375，且进度冻结、反向探测、原路返回、重复抑制、有界失败和跨技能许可约束均通过。重入机器人兼容度只用240条正常回放从0.01标定为0.001，状态选择239→240、精确选择180→181、错误选择保持59→59；以上均为确定性理想执行器下的组件结果，不等同于完整 RLBench 在线故障恢复成功率，完整仿真验收结果见阶段六正式结果目录。
+阶段五配置集中于 `configs/closed_loop_recovery.json`。组件测试覆盖冻结更新、反向探测/原路返回、超时与安全、重复验证抑制、episode Pending、事件锚点实例化、UNLINK、目标排序、硬上限、完整状态重入及模式切换。真实 V4 元数据验收覆盖12个任务/机械臂模型、11个正式 LINK、7个 Pending、3个 UNLINK 和904个状态级 `link_origin`，结果位于 `evaluations/development/phase5_recovery_acceptance/results/v1`。受控行为 A/B 位于 `evaluations/development/phase5_behavior_ab/results/v5`：Pending 主动验证和统一关系恢复均从无动作对照的0%提高到100%，任务重入 StateId MAE 从37.0000降至0.6375，且进度冻结、反向探测、原路返回、重复抑制、有界失败和跨技能许可约束均通过。重入机器人兼容度只用240条正常回放从0.01标定为0.001，状态选择239→240、精确选择180→181、错误选择保持59→59；以上均为确定性理想执行器下的组件结果，不等同于完整 RLBench 在线故障恢复成功率，完整仿真验收结果见阶段六正式结果目录。
 
 ## 阶段六顶层策略与 RLBench 适配
 
-环境无关核心位于 `policy.py / config.py / state.py / diagnostics.py / serialization.py`。`ClosedLoopMultiStreamPolicy` 每个 pre-action tick 依次完成统一观测信念更新、动态角色与加权动作、边界事务、主动验证/恢复和状态重入，并以 `act → commit/abort` 保证环境拒绝动作时能够回滚本周期全部内部状态。阶段二至五的算法模块不依赖 RLBench。
+环境无关顶层入口位于 `policy.py / config.py / state.py / diagnostics.py`，模型序列化位于 `model/serialization.py`。`ClosedLoopMultiStreamPolicy` 每个 pre-action tick 依次完成统一观测信念更新、动态角色与加权动作、边界事务、主动验证/恢复和状态重入，并以 `act → commit/abort` 保证环境拒绝动作时能够回滚本周期全部内部状态。阶段二至五的算法模块不依赖 RLBench。
 
 RLBench 专用代码位于 `integrations/rlbench/rlbench_closed_loop/`，负责低维观测适配、双臂联合快照、策略进程协议和命令格式；benchmark 执行器位于 `integrations/rlbench/rlbench_dynamac/core/runtime.py` 与 `trac_ik.py`。现有 `direct_evaluate` 通过 `policy_type=closed_loop_multistream` 复用同一评测集和结果 schema，同时保留 `policy_type=dynamac` 的冻结 V4 执行器对照路径。跨技能事务提交周期仍执行源技能最终连续位姿目标，入口夹爪命令直接读取入口 `StateNode`；关系建立闭爪可以由核心边界层作为未提交边动作准备，RLBench 适配器只执行显式授权，不识别任务或 StateId。目标技能虚拟帧仍只在正式提交后的桥接动作下一次真实观测中捕获，下一周期进度质量同时原子投影到入口状态。
 
@@ -164,7 +181,7 @@ RLBench 专用代码位于 `integrations/rlbench/rlbench_closed_loop/`，负责�
 
 逐周期诊断除原始进度后验、关系后验、角色、PoE、边界和恢复信息外，还保存 `ControlEquivalenceAssessment`：原始进度标签、控制等价状态集合、聚合置信度、类别熵、最小动作兼容度和是否接受。该记录不改写阶段二信念，并区分 `control_equivalent_progress_uncertainty` 与 `control_equivalent_backward_realignment`。
 
-阶段六的当前结果入口唯一为 `evaluations/phase6_formal_evaluation/`。小样本正常回放、定向故障和机制修复运行只用于正式启动前的可行性门控；旧执行器产生的 pilot、诊断与预正式结果不作为当前交付保留，也不得与正式矩阵混合。当前 v19/v23 协议的正常、动态背景和故障矩阵共192个单元、14400回合已完成并通过深度审计，最终机器可读统计位于 `evaluations/phase6_formal_evaluation/results/v2/`。
+阶段六的当前结果入口唯一为 `evaluations/development/phase6_formal_evaluation/`。小样本正常回放、定向故障和机制修复运行只用于正式启动前的可行性门控；旧执行器产生的 pilot、诊断与预正式结果不作为当前交付保留，也不得与正式矩阵混合。当前 v19/v23 协议的正常、动态背景和故障矩阵共192个单元、14400回合已完成并通过深度审计，最终机器可读统计位于 `evaluations/development/phase6_formal_evaluation/results/v2/`。
 
 ## 查询语义
 

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from .belief_updater import BeliefUpdaterConfig
-from .boundary_runtime import BoundaryRuntimeConfig
-from .execution_controller import ClosedLoopExecutionConfig
-from .recovery import ClosedLoopRecoveryConfig
+from .inference.belief_updater import BeliefUpdaterConfig
+from .control.boundary_runtime import BoundaryRuntimeConfig
+from .control.execution_controller import ClosedLoopExecutionConfig
+from .recovery.manager import ClosedLoopRecoveryConfig
 
 
 @dataclass(frozen=True)

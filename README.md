@@ -1,173 +1,81 @@
-# DynaMAC Reproduction
+# Relational-Progress Closed-Loop Manipulation
 
-This repository contains an independent implementation of DynaMAC and
-MiDiGaP, together with an RLBench reproduction suite for simulator Tables
-I–III. It is based on the papers, pinned public TAPAS/RLBench code, and written
-implementation clarifications; it does not contain unreleased author code.
+本仓库包含两部分相互区分的实现：冻结的 DynaMAC V4 复现，以及建立在该动作策略之上的关系—进度闭环技术路线。核心算法保持 benchmark 无关；RLBench 只负责观测、控制器、数据和评测协议适配。
 
-The RLBench integration and its default artifact paths target the frozen local
-`v3` protocol. Completed `v1` and `v2` checkpoints and results remain immutable
-historical provenance. V3 uses a sealed, reusable fixed evaluation set; its
-formal 200-episode matrix is complete, while dynamic results remain explicitly
-non-comparable diagnostics wherever the paper protocol is unpublished.
+当前状态：
 
-## What is implemented
+- DynaMAC V4 baseline 已冻结，标签为 `dynamac-v4.0`；
+- 技术路线阶段一至五的环境无关模块与阶段六 RLBench 集成已经完成；
+- 阶段六正式矩阵包含正常、平滑动态无故障和四类故障，共 192 个单元、14,400 回合；
+- 当前唯一正式统计入口为 `evaluations/development/phase6_formal_evaluation/results/v2/`，深度审计已通过。
 
-- DynaMAC with single-mode DiGaP trajectory models on the product manifold
-  `R³ × S³`, including task-frame transforms, Riemannian Gaussian fitting,
-  kinematic-link analysis, task-frame selection, and product-of-experts
-  inference.
-- MiDiGaP clustering and multimodal policy support as a separate core module.
-- Environment-independent TAPAS-style skill segmentation from end-effector
-  velocity, gripper-state changes, and task-frame distance signals.
-- Single-arm and dual-arm RLBench adapters, training entry points, evaluators,
-  result authentication, comparison reports, and failure-replay tooling.
-- Offline regression tests for core mathematics, segmentation, model identity,
-  controller transactions, scene launch, dynamic interventions, and reporting.
+## 项目结构
 
-## Main mechanisms in the current reproduction
+| 路径 | 内容 |
+|---|---|
+| `source/policy/dynamac.py` | 冻结 DynaMAC 多流动作策略接口 |
+| `source/policy/closed_loop/` | 阶段一至五及阶段六顶层策略的环境无关核心算法 |
+| `source/data/` | 通用示范数据结构与校验 |
+| `configs/` | 闭环任务模型、信念更新、执行、边界与恢复配置 |
+| `integrations/rlbench/rlbench_dynamac/` | DynaMAC 的 RLBench 数据、控制器、评测和报告适配 |
+| `integrations/rlbench/rlbench_closed_loop/` | 闭环策略的 RLBench 观测、联合快照与进程协议适配 |
+| `integrations/rlbench/configs/` | RLBench 任务、分段、运动源和干预协议 |
+| `integrations/rlbench/data/` | 五条正常示范与封存评测集；大文件不进入 Git |
+| `integrations/rlbench/models/` | V4 baseline、阶段六动作模型与闭环 sidecar；权重不进入 Git |
+| `integrations/rlbench/results/` | V4 baseline 与阶段六正式原始结果；大文件不进入 Git |
+| `evaluations/` | 评测总入口；`development/` 归档技术路线开发期验收，后续论文实验直接按实验目的建目录 |
+| `tests/closed_loop/` | 闭环核心模块和跨阶段回归测试 |
+| `integrations/rlbench/tests/` | RLBench 适配、执行器和评测协议测试 |
+| `新方法代码开发计划.md` | 当前实现口径和阶段开发计划 |
+| `阶段开发记录.md` | 各阶段最终保留的实现，不记录已淘汰方案 |
+| `开发日志.md` | 开发、诊断和修复过程记录 |
+| `技术路线报告.md` | 理论动机、模型定义和整体技术路线 |
+| `iclr2027/` | 论文正文、实验设计、提纲与参考文献；当前作为本地写作目录管理 |
+| `release-artifacts/` | 已发布版本的本地打包副本，不参与运行时加载 |
 
-### Skill segmentation
+## 当前正式资产
 
-The generic implementation lives in
-[`source/policy/tapas_segmentation.py`](source/policy/tapas_segmentation.py) and
-accepts normalized NumPy trajectories rather than RLBench objects. It produces
-candidate boundaries from end-effector stops, binary gripper transitions, and
-optional task-frame distance events, then merges and aligns corresponding
-stages across demonstrations.
+### DynaMAC V4 baseline
 
-For dual-arm demonstrations, `independent` segmentation lets each arm retain
-its own boundaries and schedule. `shared_union` takes the union of both arms'
-candidate events and assigns the resulting shared boundaries to both policies.
-The choice and task-specific thresholds are dataset protocol, not a universal
-DynaMAC equation.
+- 正常示范：`integrations/rlbench/data/training/`
+- 封存评测集：`integrations/rlbench/data/evaluation/`
+- 模型：`integrations/rlbench/models/v4/`
+- 结果与回放：`integrations/rlbench/results/v4/`
+- 协议：[integrations/rlbench/V4_PROTOCOL.md](integrations/rlbench/V4_PROTOCOL.md)
+- RLBench 使用说明：[integrations/rlbench/README.md](integrations/rlbench/README.md)
 
-RLBench observation extraction, current-observation signed gripper encoding, task
-profiles, configuration paths, and debug plots remain in
-[`integrations/rlbench/rlbench_dynamac/`](integrations/rlbench/rlbench_dynamac/).
+### 闭环技术路线
 
-### Task frames and model selection
+- 阶段六动作模型：`integrations/rlbench/models/phase6_v1/`
+- 闭环任务模型：`integrations/rlbench/models/closed_loop_phase6_v1/`
+- 正式协议：[evaluations/development/phase6_formal_evaluation/PROTOCOL.md](evaluations/development/phase6_formal_evaluation/PROTOCOL.md)
+- 最终统计：`evaluations/development/phase6_formal_evaluation/results/v2/`
+- 正式原始结果：`integrations/rlbench/results/phase6_formal_v1/`
+- 正常矩阵专项审计：[evaluations/development/phase6_formal_evaluation/NORMAL_AUDIT.md](evaluations/development/phase6_formal_evaluation/NORMAL_AUDIT.md)
 
-- Equation (5) detects kinematic links from position covariance using
-  `tau_M=0.005`. A strict skill majority decides only whether to enable the raw
-  per-time-step mask; availability itself remains time-indexed.
-- Equation (6) uses `tau_omega=0.5`. The current `v3` configuration evaluates
-  it in the same Equation (5)-weighted subspace: 3D position under position and
-  rotation weights `1/0`. At each time step its denominator includes only
-  available frames, and final participation is
-  `Eq6Selected(frame) AND Eq5Available(frame,t)`.
-- If strict Equation (6) thresholding selects no frame, the executable local
-  protocol keeps the numerical argmax. This is an explicit local completion,
-  not a confirmed author-side rule.
-- Each skill has a frozen virtual frame captured at its first sample. Earlier
-  virtual frames remain available to later skills.
-- Current RLBench models use aligned time-state observations, TAPAS-style
-  index subsampling, diagonal empirical covariance plus a `1e-6` ridge, and a
-  single mode per skill.
+阶段一至五的最终组件验收分别保存在 `evaluations/development/phase23_component_ab/`、`evaluations/development/phase4_*`、`evaluations/development/peer_execution_dependency/` 和 `evaluations/development/phase5_*`。每个目录只保留当前正式结果版本。
 
-The exact Equation (6) covariance subspace, empty-selection behavior, and some
-task-specific segmentation settings remain author-side reproduction questions.
-They are serialized in every checkpoint; authenticated evaluator and report
-validation reject mixed `v1`/`v2`/`v3` model and result identities.
+## 核心与集成边界
 
-### Dual-arm coordination
+`source/policy/closed_loop/` 不依赖 RLBench。它实现任务模型、关系与进度信念、动态流角色、边界事务、主动关系验证、恢复和合法重入。`integrations/rlbench/` 将这些接口连接到 RLBench 低维观测、CoppeliaSim 和共享执行器。迁移到其他 benchmark 时，应优先新增对应集成层，而不是在核心算法中加入任务名或 benchmark 专属分支。
 
-The bimanual wrapper runs two DynaMAC policies concurrently. Each arm can use
-the other end effector as a candidate dynamic task frame, and both predictions
-are computed from the same pre-action simulator snapshot. The arms retain
-their own skill clocks; an arm that finishes first holds its final command
-while the other completes. RLBench-specific action layout, IK, gripper control,
-and simulator stepping are kept outside the core policy.
+## 环境与验证
 
-### Evaluation protocol
-
-- Policies command absolute world-frame end-effector poses. Jacobian IK is
-  attempted before sampling IK.
-- Grippers actuate at `0.04`, matching the pinned demonstration generator
-  rather than the vendor evaluation default `0.2`.
-- A policy tick is transactional. An RLBench `InvalidAction` aborts the
-  tentative target and recomputes the same tick from a fresh observation, with
-  `max_primary_action_attempts=3`.
-- This retry budget handles controller execution failures only. It is not a
-  DynaMAC grasp-retry mechanism: an action that executes but misses contact is
-  committed, and the fixed skill schedule is not extended.
-- Static, smooth, and teleport conditions reuse the same sealed per-episode
-  source state; smooth and teleport also share the same preregistered goal B.
-  Disposable offline generations certify A and B, while formal rollout binds
-  A and never samples, restores, or selects a scene from policy outcomes.
-- Dynamic onset uses preregistered task/skill ticks on the committed policy
-  clock. Every boundary-root command preserves structural and semantic
-  invariants. Its exact robot-contact delta is authenticated as a diagnostic,
-  not used to censor a fixed episode based on one policy's evolved pose.
-- Policy task-frame inputs are simulator-state ground-truth poses, not outputs
-  from a visual pose detector.
-
-These evaluator rules are task-independent local reproduction protocols. The
-paper does not fully specify controller failure handling or the exact dynamic
-environment intervention implementation.
-
-## Repository layout
-
-- [`source/policy/`](source/policy/): DynaMAC/DiGaP policy logic, MiDiGaP, and
-  generic skill segmentation.
-- [`source/data/`](source/data/): core demonstration schema and validation.
-- [`configs/`](configs/): explicit core and smoke configurations.
-- [`scripts/run.py`](scripts/run.py): compact fit, verify, and inspect commands.
-- [`tests/`](tests/): core mathematical, persistence, integration, and oracle
-  tests.
-- [`integrations/rlbench/`](integrations/rlbench/): pinned-source metadata,
-  RLBench adapters, task profiles, training/evaluation commands, and tests.
-
-## Local releases and artifacts
-
-The working reproduction workspace currently uses:
-
-- 45 demonstrations in nine five-demo cohorts under
-  `integrations/rlbench/data/training/`;
-- the sealed 200-episode V4 evaluation data under
-  `integrations/rlbench/data/evaluation/`;
-- `integrations/rlbench/models/v4/` and `integrations/rlbench/results/v4/` as
-  the current model and 22-cell evaluation release;
-- post-evaluation replay evidence under
-  `integrations/rlbench/results/v4/replay_video/`.
-
-Demonstrations, checkpoints, result JSON, videos, reference-paper copies,
-RoboTwin, RoboDojo, RLBench, TAPAS, PyRep, and CoppeliaSim are intentionally
-excluded from Git. The repository publishes the independent implementation,
-frozen protocols, tests, dependency pins, patches, and commands needed to
-rebuild the external environment and regenerate experiment artifacts. Raw RGB,
-depth, and mask streams are not used for policy fitting and are not retained in
-the compact local dataset.
-
-## Installation and verification
-
-The core package requires Python 3.10 or newer:
+核心包要求 Python 3.10 或更新版本：
 
 ```bash
 python -m pip install -e '.[test,midigap]' ruff
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q -p no:cacheprovider
-ruff check --no-cache .
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q -p no:cacheprovider tests/closed_loop
+ruff check --no-cache source tests evaluations integrations
 ```
 
-The optional core smoke command takes an explicitly supplied local
-demonstration bundle:
+RLBench、PyRep、TAPAS 和 CoppeliaSim 为本地第三方依赖，不纳入主仓库版本控制。固定修订、补丁和 Python 3.8/3.10 环境要求见 [integrations/rlbench/THIRD_PARTY.md](integrations/rlbench/THIRD_PARTY.md) 与 [integrations/rlbench/README.md](integrations/rlbench/README.md)。
+
+验证阶段六最终统计文件：
 
 ```bash
-python scripts/run.py verify --data /path/to/dynamac_demos.npz
+cd evaluations/development/phase6_formal_evaluation/results/v2
+sha256sum -c SHA256SUMS
 ```
 
-No demonstration bundle is tracked in Git. The smoke bundle uses precomputed
-coarse skill labels and is separate from the RLBench/TAPAS segmentation
-pipeline.
-
-## RLBench reproduction
-
-See [`integrations/rlbench/README.md`](integrations/rlbench/README.md) for
-dependency setup, the low-dimensional demonstration layout, training and
-evaluation commands, release directories, and report generation.
-
-The current frozen V4 mechanism, trigger, controller, and artifact contract is
-in [integrations/rlbench/V4_PROTOCOL.md](integrations/rlbench/V4_PROTOCOL.md).
-
-Pinned external revisions and licenses are recorded in
-[`integrations/rlbench/THIRD_PARTY.md`](integrations/rlbench/THIRD_PARTY.md).
+训练数据、模型权重、逐回合原始结果、视频、第三方源码和论文副本均作为本地或 Release 资产管理；Git 只保留实现、协议、紧凑清单、测试和最终汇总。

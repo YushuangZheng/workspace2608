@@ -26,8 +26,8 @@ from essay2608.policy.closed_loop import (
     StateId,
     TransitionPreparation,
 )
-from essay2608.policy.closed_loop.boundary_model import BoundaryId
-from essay2608.policy.closed_loop.boundary_runtime import TransitionRequest
+from essay2608.policy.closed_loop.model.boundary_model import BoundaryId
+from essay2608.policy.closed_loop.control.boundary_runtime import TransitionRequest
 from integrations.rlbench.rlbench_closed_loop.observation_adapter import (
     ClosedLoopObservationAdapter,
     commands_to_rlbench,

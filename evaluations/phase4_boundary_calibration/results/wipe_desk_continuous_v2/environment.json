@@ -1,9 +1,0 @@
-{
-  "generated_at_utc": "2026-09-01T22:41:29.758762+00:00",
-  "python": "3.10.20 (main, Jun 11 2026, 15:17:37) [GCC 14.3.0]",
-  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.39",
-  "git_head": "201c895ccae36910d51604c5adc6ee4b6af38b1f",
-  "git_status_porcelain": " M integrations/rlbench/configs/tasks.json\n D integrations/rlbench/rlbench_dynamac/wipe_desk_task_frames.py\n M integrations/rlbench/tests/data/test_rlbench_adapter.py\n M tests/closed_loop/test_phase6_policy_integration.py\n?? evaluations/phase4_boundary_calibration/results/wipe_desk_continuous_v2/\n",
-  "numpy": "1.26.4",
-  "control_period_source_sha256": "e00a3e7bc2b6bcedfb564b707e721670680b69f0db3b4861a9ea7eca34f2f625"
-}

@@ -53,9 +53,9 @@ from essay2608.policy.dynamac import (
     relative_pose,
     transform_marginal,
 )
-from essay2608.policy.closed_loop.entry_guard import _factor_observation
-from essay2608.policy.closed_loop.state_evaluator import joint_poe_pose_support
-from evaluations.phase4_boundary_calibration.run import (
+from essay2608.policy.closed_loop.control.entry_guard import _factor_observation
+from essay2608.policy.closed_loop.inference.state_evaluator import joint_poe_pose_support
+from evaluations.development.phase4_boundary_calibration.run import (
     _acceptance_rows,
     _calibrate,
 )
