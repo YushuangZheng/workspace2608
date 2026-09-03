@@ -1,0 +1,98 @@
+{
+  "schema": "essay2608.phase6_formal_audit.v1",
+  "passed": true,
+  "protocol_path": "evaluations/phase6_formal_evaluation/protocol.json",
+  "protocol_sha256": "2f187c5f08e9dac3936170c0bd150f017de84a8b3512ed3a1d319b68368115a6",
+  "result_root": "integrations/rlbench/results/phase6_formal_v1",
+  "launcher_record": "integrations/rlbench/results/phase6_formal_v1/_launch/runs/20260903T094341Z-pid1768725/launch_summary.json",
+  "launcher_valid": true,
+  "cells": 192,
+  "episodes": 14400,
+  "experiment_counts": {
+    "normal": {
+      "episodes": 6400,
+      "successes": 5597
+    },
+    "dynamic": {
+      "episodes": 1600,
+      "successes": 1413
+    },
+    "fault": {
+      "episodes": 6400,
+      "successes": 2795
+    }
+  },
+  "dynamic_checks": {
+    "dynamic_condition_exercised": 1600,
+    "intervention_complete": 1600,
+    "intervention_effective": 1600
+  },
+  "fault_family_counts": {
+    "grasp_failure": {
+      "background_ready": 1600,
+      "effect_observed": 1501,
+      "episodes": 1600,
+      "legal_reentry": 339,
+      "pre_fault_reentry_ignored": 0,
+      "relation_restored": 289,
+      "successes": 375,
+      "triggered": 1501
+    },
+    "relation_mismatch": {
+      "background_ready": 1600,
+      "effect_observed": 1332,
+      "episodes": 1600,
+      "legal_reentry": 176,
+      "pre_fault_reentry_ignored": 5,
+      "relation_restored": 357,
+      "successes": 363,
+      "triggered": 1338
+    },
+    "time_stall": {
+      "background_ready": 1600,
+      "effect_observed": 1600,
+      "episodes": 1600,
+      "legal_reentry": 63,
+      "pre_fault_reentry_ignored": 0,
+      "relation_restored": 0,
+      "successes": 1274,
+      "triggered": 1600
+    },
+    "unexpected_drop": {
+      "background_ready": 1600,
+      "effect_observed": 1338,
+      "episodes": 1600,
+      "legal_reentry": 65,
+      "pre_fault_reentry_ignored": 5,
+      "relation_restored": 481,
+      "successes": 783,
+      "triggered": 1339
+    }
+  },
+  "result_commits": {
+    "dynamic:45f48bc3e0e12d131ee9395ccddb76c6ba45685b": 1,
+    "dynamic:872b157b9c3e350c32fd66eefa81f15a550ed1e0": 30,
+    "dynamic:8fd261c61a018f617075e9704d44041181495065": 1,
+    "fault:45f48bc3e0e12d131ee9395ccddb76c6ba45685b": 4,
+    "fault:5aa19d6a1bb51690689a58cd2454c7be09023838": 85,
+    "fault:8fd261c61a018f617075e9704d44041181495065": 39,
+    "normal:0401a1066f32b2d7f2842956f84c91082500b268": 13,
+    "normal:45f48bc3e0e12d131ee9395ccddb76c6ba45685b": 1,
+    "normal:a111eac9defd80e454e6d3d63cfdc6484bc9524b": 6,
+    "normal:cd3eba1dfd349ff078855af995cb16333c6d3710": 12
+  },
+  "embedded_protocols": {
+    "dynamic:2f187c5f08e9dac3936170c0bd150f017de84a8b3512ed3a1d319b68368115a6": 1,
+    "dynamic:8f84cd11419923ba6262faa4bdea2081b8985089c1e1c03845b80232cb3eeebd": 1,
+    "dynamic:97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65": 30,
+    "fault:2f187c5f08e9dac3936170c0bd150f017de84a8b3512ed3a1d319b68368115a6": 4,
+    "fault:8f84cd11419923ba6262faa4bdea2081b8985089c1e1c03845b80232cb3eeebd": 39,
+    "fault:97ad201e169d36404ec75552cdc6bd559d92c21ef88a1e73403af2dda7f3fc65": 85,
+    "normal:1a6417738ce4e7ded1b1faa8ada24ca805687552d9aecf342a895183aaacacfb": 6,
+    "normal:2f187c5f08e9dac3936170c0bd150f017de84a8b3512ed3a1d319b68368115a6": 1,
+    "normal:c39e00d5207478d74c98415fa4baca8631ca180c15e7ec0b6d032727516548b7": 25
+  },
+  "fixed_motion_plan_checks": 14400,
+  "policy_state_mutations": 0,
+  "violations": []
+}

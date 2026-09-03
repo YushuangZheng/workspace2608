@@ -9,7 +9,7 @@
 | normal | static | - | bimanual_handover_item | dynamac_v4 | 175/200 | 0.875 | [0.822, 0.914] | - | - | - | - |
 | normal | static | - | bimanual_handover_item | progress_only | 149/200 | 0.745 | [0.680, 0.800] | - | - | - | - |
 | normal | static | - | bimanual_handover_item | progress_dynamic_roles | 139/200 | 0.695 | [0.628, 0.755] | - | - | - | - |
-| normal | static | - | bimanual_handover_item | full | 187/200 | 0.935 | [0.892, 0.962] | - | - | - | - |
+| normal | static | - | bimanual_handover_item | full | 182/200 | 0.910 | [0.862, 0.942] | - | - | - | - |
 | normal | static | - | bimanual_lift_tray | dynamac_v4 | 176/200 | 0.880 | [0.828, 0.918] | - | - | - | - |
 | normal | static | - | bimanual_lift_tray | progress_only | 186/200 | 0.930 | [0.886, 0.958] | - | - | - | - |
 | normal | static | - | bimanual_lift_tray | progress_dynamic_roles | 188/200 | 0.940 | [0.898, 0.965] | - | - | - | - |
@@ -41,7 +41,7 @@
 | dynamic | smooth | - | bimanual_handover_item | dynamac_v4 | 49/50 | 0.980 | [0.895, 0.996] | - | - | - | - |
 | dynamic | smooth | - | bimanual_handover_item | progress_only | 34/50 | 0.680 | [0.542, 0.792] | - | - | - | - |
 | dynamic | smooth | - | bimanual_handover_item | progress_dynamic_roles | 36/50 | 0.720 | [0.583, 0.825] | - | - | - | - |
-| dynamic | smooth | - | bimanual_handover_item | full | 49/50 | 0.980 | [0.895, 0.996] | - | - | - | - |
+| dynamic | smooth | - | bimanual_handover_item | full | 44/50 | 0.880 | [0.762, 0.944] | - | - | - | - |
 | dynamic | smooth | - | bimanual_lift_tray | dynamac_v4 | 45/50 | 0.900 | [0.786, 0.957] | - | - | - | - |
 | dynamic | smooth | - | bimanual_lift_tray | progress_only | 44/50 | 0.880 | [0.762, 0.944] | - | - | - | - |
 | dynamic | smooth | - | bimanual_lift_tray | progress_dynamic_roles | 47/50 | 0.940 | [0.838, 0.979] | - | - | - | - |
@@ -73,7 +73,7 @@
 | fault | smooth | time_stall | bimanual_handover_item | dynamac_v4 | 38/50 | 0.760 | [0.626, 0.857] | 50 | 50 | - | 0 |
 | fault | smooth | time_stall | bimanual_handover_item | progress_only | 27/50 | 0.540 | [0.404, 0.670] | 50 | 50 | - | 0 |
 | fault | smooth | time_stall | bimanual_handover_item | progress_dynamic_roles | 29/50 | 0.580 | [0.442, 0.706] | 50 | 50 | - | 0 |
-| fault | smooth | time_stall | bimanual_handover_item | full | 47/50 | 0.940 | [0.838, 0.979] | 50 | 50 | - | 9 |
+| fault | smooth | time_stall | bimanual_handover_item | full | 47/50 | 0.940 | [0.838, 0.979] | 50 | 50 | - | 8 |
 | fault | smooth | time_stall | bimanual_lift_tray | dynamac_v4 | 42/50 | 0.840 | [0.715, 0.917] | 50 | 50 | - | 0 |
 | fault | smooth | time_stall | bimanual_lift_tray | progress_only | 44/50 | 0.880 | [0.762, 0.944] | 50 | 50 | - | 0 |
 | fault | smooth | time_stall | bimanual_lift_tray | progress_dynamic_roles | 50/50 | 1.000 | [0.929, 1.000] | 50 | 50 | - | 0 |
@@ -105,7 +105,7 @@
 | fault | smooth | grasp_failure | bimanual_handover_item | dynamac_v4 | 36/50 | 0.720 | [0.583, 0.825] | 50 | 50 | 0 | 0 |
 | fault | smooth | grasp_failure | bimanual_handover_item | progress_only | 26/50 | 0.520 | [0.385, 0.652] | 29 | 29 | 0 | 0 |
 | fault | smooth | grasp_failure | bimanual_handover_item | progress_dynamic_roles | 0/50 | 0.000 | [0.000, 0.071] | 0 | 0 | - | 0 |
-| fault | smooth | grasp_failure | bimanual_handover_item | full | 8/50 | 0.160 | [0.083, 0.285] | 24 | 24 | 24 | 24 |
+| fault | smooth | grasp_failure | bimanual_handover_item | full | 38/50 | 0.760 | [0.626, 0.857] | 46 | 46 | 42 | 42 |
 | fault | smooth | grasp_failure | bimanual_lift_tray | dynamac_v4 | 0/50 | 0.000 | [0.000, 0.071] | 48 | 48 | 0 | 0 |
 | fault | smooth | grasp_failure | bimanual_lift_tray | progress_only | 0/50 | 0.000 | [0.000, 0.071] | 43 | 43 | 0 | 0 |
 | fault | smooth | grasp_failure | bimanual_lift_tray | progress_dynamic_roles | 0/50 | 0.000 | [0.000, 0.071] | 49 | 49 | 0 | 0 |
@@ -137,7 +137,7 @@
 | fault | smooth | relation_mismatch | bimanual_handover_item | dynamac_v4 | 4/50 | 0.080 | [0.032, 0.188] | 47 | 47 | 1 | 0 |
 | fault | smooth | relation_mismatch | bimanual_handover_item | progress_only | 7/50 | 0.140 | [0.070, 0.262] | 34 | 34 | 0 | 0 |
 | fault | smooth | relation_mismatch | bimanual_handover_item | progress_dynamic_roles | 6/50 | 0.120 | [0.056, 0.238] | 32 | 31 | 0 | 0 |
-| fault | smooth | relation_mismatch | bimanual_handover_item | full | 0/50 | 0.000 | [0.000, 0.071] | 47 | 47 | 1 | 9 |
+| fault | smooth | relation_mismatch | bimanual_handover_item | full | 1/50 | 0.020 | [0.004, 0.105] | 46 | 46 | 2 | 19 |
 | fault | smooth | relation_mismatch | bimanual_lift_tray | dynamac_v4 | 0/50 | 0.000 | [0.000, 0.071] | 49 | 48 | 43 | 0 |
 | fault | smooth | relation_mismatch | bimanual_lift_tray | progress_only | 0/50 | 0.000 | [0.000, 0.071] | 44 | 44 | 43 | 0 |
 | fault | smooth | relation_mismatch | bimanual_lift_tray | progress_dynamic_roles | 0/50 | 0.000 | [0.000, 0.071] | 48 | 48 | 41 | 0 |
@@ -169,7 +169,7 @@
 | fault | smooth | unexpected_drop | bimanual_handover_item | dynamac_v4 | 13/50 | 0.260 | [0.159, 0.396] | 48 | 48 | 11 | 0 |
 | fault | smooth | unexpected_drop | bimanual_handover_item | progress_only | 7/50 | 0.140 | [0.070, 0.262] | 34 | 34 | 0 | 0 |
 | fault | smooth | unexpected_drop | bimanual_handover_item | progress_dynamic_roles | 15/50 | 0.300 | [0.191, 0.438] | 39 | 39 | 1 | 0 |
-| fault | smooth | unexpected_drop | bimanual_handover_item | full | 32/50 | 0.640 | [0.501, 0.759] | 47 | 47 | 38 | 0 |
+| fault | smooth | unexpected_drop | bimanual_handover_item | full | 26/50 | 0.520 | [0.385, 0.652] | 43 | 42 | 30 | 6 |
 | fault | smooth | unexpected_drop | bimanual_lift_tray | dynamac_v4 | 44/50 | 0.880 | [0.762, 0.944] | 48 | 48 | 48 | 0 |
 | fault | smooth | unexpected_drop | bimanual_lift_tray | progress_only | 43/50 | 0.860 | [0.738, 0.930] | 44 | 44 | 43 | 0 |
 | fault | smooth | unexpected_drop | bimanual_lift_tray | progress_dynamic_roles | 48/50 | 0.960 | [0.865, 0.989] | 49 | 49 | 48 | 0 |
@@ -205,25 +205,25 @@
 |---|---|---|---:|---:|
 | dynamic | - | progress_only - dynamac_v4 | -0.087 | [-0.190, -0.005] |
 | dynamic | - | progress_dynamic_roles - progress_only | -0.003 | [-0.048, 0.040] |
-| dynamic | - | full - progress_dynamic_roles | 0.073 | [-0.022, 0.195] |
-| dynamic | - | full - dynamac_v4 | -0.018 | [-0.052, 0.013] |
+| dynamic | - | full - progress_dynamic_roles | 0.060 | [-0.022, 0.173] |
+| dynamic | - | full - dynamac_v4 | -0.030 | [-0.070, 0.007] |
 | fault | grasp_failure | progress_only - dynamac_v4 | -0.025 | [-0.085, 0.000] |
 | fault | grasp_failure | progress_dynamic_roles - progress_only | -0.065 | [-0.208, 0.000] |
-| fault | grasp_failure | full - progress_dynamic_roles | 0.708 | [0.415, 0.945] |
-| fault | grasp_failure | full - dynamac_v4 | 0.617 | [0.197, 0.943] |
+| fault | grasp_failure | full - progress_dynamic_roles | 0.782 | [0.530, 0.952] |
+| fault | grasp_failure | full - dynamac_v4 | 0.692 | [0.378, 0.943] |
 | fault | relation_mismatch | progress_only - dynamac_v4 | -0.092 | [-0.220, 0.010] |
 | fault | relation_mismatch | progress_dynamic_roles - progress_only | -0.003 | [-0.020, 0.010] |
-| fault | relation_mismatch | full - progress_dynamic_roles | 0.247 | [0.028, 0.508] |
-| fault | relation_mismatch | full - dynamac_v4 | 0.152 | [0.015, 0.313] |
+| fault | relation_mismatch | full - progress_dynamic_roles | 0.250 | [0.033, 0.510] |
+| fault | relation_mismatch | full - dynamac_v4 | 0.155 | [0.020, 0.315] |
 | fault | time_stall | progress_only - dynamac_v4 | 0.207 | [-0.020, 0.485] |
 | fault | time_stall | progress_dynamic_roles - progress_only | 0.033 | [-0.007, 0.077] |
 | fault | time_stall | full - progress_dynamic_roles | 0.077 | [-0.027, 0.205] |
-| fault | time_stall | full - dynamac_v4 | 0.318 | [0.080, 0.603] |
+| fault | time_stall | full - dynamac_v4 | 0.318 | [0.080, 0.600] |
 | fault | unexpected_drop | progress_only - dynamac_v4 | -0.295 | [-0.625, -0.035] |
 | fault | unexpected_drop | progress_dynamic_roles - progress_only | 0.030 | [-0.013, 0.085] |
-| fault | unexpected_drop | full - progress_dynamic_roles | 0.307 | [0.043, 0.617] |
-| fault | unexpected_drop | full - dynamac_v4 | 0.042 | [-0.302, 0.385] |
+| fault | unexpected_drop | full - progress_dynamic_roles | 0.292 | [0.033, 0.600] |
+| fault | unexpected_drop | full - dynamac_v4 | 0.027 | [-0.315, 0.372] |
 | normal | - | progress_only - dynamac_v4 | -0.054 | [-0.149, 0.015] |
 | normal | - | progress_dynamic_roles - progress_only | -0.008 | [-0.041, 0.024] |
-| normal | - | full - progress_dynamic_roles | 0.089 | [0.009, 0.184] |
-| normal | - | full - dynamac_v4 | 0.027 | [0.004, 0.054] |
+| normal | - | full - progress_dynamic_roles | 0.086 | [0.009, 0.180] |
+| normal | - | full - dynamac_v4 | 0.024 | [0.003, 0.049] |

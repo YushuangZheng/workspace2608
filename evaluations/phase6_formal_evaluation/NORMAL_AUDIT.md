@@ -2,7 +2,7 @@
 
 ## 结论
 
-正式正常矩阵已经完成32个单元、6400条封存episode。完整方法宏平均成功率为92.44%，冻结DynaMAC V4为89.75%；成对bootstrap差值为+2.69个百分点，95%区间为[+0.38,+5.38]个百分点，通过预注册的5个百分点非劣效判定。
+正式正常矩阵已经完成32个单元、6400条封存episode。最终Handover完整方法最小受影响重跑后，完整方法宏平均成功率为92.13%，冻结DynaMAC V4为89.75%；成对bootstrap差值为+2.38个百分点，95%区间为[+0.31,+4.94]个百分点，通过预注册的5个百分点非劣效判定。
 
 PlaceCups消融末端停滞和WipeDesk成功率不足均已进行逐episode配对审查。当前没有证据支持为这两项修改技术路线机制，也不据此重跑单元。
 
@@ -36,9 +36,9 @@ PlaceCups消融末端停滞和WipeDesk成功率不足均已进行逐episode配�
 
 ## 证据位置
 
-- 逐单元成功率：`results/v1/cell_summary.csv`
-- 成对比较：`results/v1/paired_comparisons.csv`
-- 跨任务宏平均：`results/v1/macro_bootstrap.csv`
-- 机器可读汇总：`results/v1/summary.json`
-- 文件校验：`results/v1/SHA256SUMS`
+- 逐单元成功率：`results/v2/cell_summary.csv`
+- 成对比较：`results/v2/paired_comparisons.csv`
+- 跨任务宏平均：`results/v2/macro_bootstrap.csv`
+- 机器可读汇总：`results/v2/summary.json`
+- 文件校验：`results/v2/SHA256SUMS`
 - 原始正式结果：`integrations/rlbench/results/phase6_formal_v1/normal/`

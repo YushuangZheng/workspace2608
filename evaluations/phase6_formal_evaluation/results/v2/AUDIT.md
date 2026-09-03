@@ -5,25 +5,25 @@
 - 正式单元：192
 - 正式回合：14400
 - 固定运动计划身份校验：14400
-- 故障启动器记录：`integrations/rlbench/results/phase6_formal_v1/_launch/runs/20260903T043521Z-pid313682/launch_summary.json`
+- 故障启动器记录：`integrations/rlbench/results/phase6_formal_v1/_launch/runs/20260903T094341Z-pid1768725/launch_summary.json`
 - 故障注入器改写策略内部状态：0
 
 ## 分条件回合
 
 | 条件 | 回合 | 成功 |
 |---|---:|---:|
-| normal | 6400 | 5602 |
-| dynamic | 1600 | 1418 |
-| fault | 6400 | 2770 |
+| normal | 6400 | 5597 |
+| dynamic | 1600 | 1413 |
+| fault | 6400 | 2795 |
 
 ## 故障协议审计
 
 | 故障 | 回合 | 动态背景就绪 | 触发 | 物理效果 |
 |---|---:|---:|---:|---:|
-| grasp_failure | 1600 | 1600 | 1479 | 1479 |
-| relation_mismatch | 1600 | 1600 | 1339 | 1333 |
+| grasp_failure | 1600 | 1600 | 1501 | 1501 |
+| relation_mismatch | 1600 | 1600 | 1338 | 1332 |
 | time_stall | 1600 | 1600 | 1600 | 1600 |
-| unexpected_drop | 1600 | 1600 | 1343 | 1343 |
+| unexpected_drop | 1600 | 1600 | 1339 | 1338 |
 
 所有已触发故障均在预定动态背景完成后发生；未触发回合仍按意向治疗原则保留在主成功率分母中。
 

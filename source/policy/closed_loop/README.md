@@ -152,7 +152,7 @@ $$
 
 关系目标完成后只在事件元数据提供的合法状态中比较当前完整机器人轨迹、稀疏场景和关系解释度；无关系目标的 `NO_PLAUSIBLE_STATE` 恢复可搜索全任务，但同技能之外只允许经入口守卫放行的相邻下一技能，禁止后退或跨多技能直接跳转。正常进度评分仍使用原始示范轨迹协方差；只有恢复后的重入机器人轨迹项复用既有 `lambda_rec`，按 `Sigma_reentry=Sigma+lambda_rec I` 评分，使恢复动作分布与其完成判定具有相同精度口径。重入机器人绝对准入读取联合可达峰值归一支持，逐流兼容度只作审计；重入关系项使用 `relation_state_compatibility`，将峰值归一的软先验支持度与已经确认的 external/linked 方向一致性统一成单一分数，未确认 Pending 仍保持软语义。本次恢复已经完成的全部 LINK/UNLINK 目标必须在重入时继续由在线关系决策保持。场景、候选范围、入口守卫和兼容度阈值不变。已通过场景/关系检查但尚未达到正式重入阈值的候选，可使用该候选自身的关系期望和流角色生成对齐动作；不能再用故障时冻结后验的旧关系语义否决该动作。这只是只读动作查询视图，真实 `beta/StateId/reference_state`、mode、角色历史和任务时钟仍冻结。重入选择、进度后验 one-hot 重置、执行 `reference_state` 设置和返回 TASK 只在完整阈值通过后由管理器原子完成，不恢复旧故障时钟。
 
-阶段五配置集中于 `configs/closed_loop_recovery.json`。组件测试覆盖冻结更新、反向探测/原路返回、超时与安全、重复验证抑制、episode Pending、事件锚点实例化、UNLINK、目标排序、硬上限、完整状态重入及模式切换。真实 V4 元数据验收覆盖12个任务/机械臂模型、11个正式 LINK、7个 Pending、3个 UNLINK 和904个状态级 `link_origin`，结果位于 `evaluations/phase5_recovery_acceptance/results/v1`。受控行为 A/B 位于 `evaluations/phase5_behavior_ab/results/v5`：Pending 主动验证和统一关系恢复均从无动作对照的0%提高到100%，任务重入 StateId MAE 从37.0000降至0.6375，且进度冻结、反向探测、原路返回、重复抑制、有界失败和跨技能许可约束均通过。重入机器人兼容度只用240条正常回放从0.01标定为0.001，状态选择239→240、精确选择180→181、错误选择保持59→59；以上均为确定性理想执行器下的组件结果，不等同于完整 RLBench 在线故障恢复成功率，阶段六正在继续完整仿真验收。
+阶段五配置集中于 `configs/closed_loop_recovery.json`。组件测试覆盖冻结更新、反向探测/原路返回、超时与安全、重复验证抑制、episode Pending、事件锚点实例化、UNLINK、目标排序、硬上限、完整状态重入及模式切换。真实 V4 元数据验收覆盖12个任务/机械臂模型、11个正式 LINK、7个 Pending、3个 UNLINK 和904个状态级 `link_origin`，结果位于 `evaluations/phase5_recovery_acceptance/results/v1`。受控行为 A/B 位于 `evaluations/phase5_behavior_ab/results/v5`：Pending 主动验证和统一关系恢复均从无动作对照的0%提高到100%，任务重入 StateId MAE 从37.0000降至0.6375，且进度冻结、反向探测、原路返回、重复抑制、有界失败和跨技能许可约束均通过。重入机器人兼容度只用240条正常回放从0.01标定为0.001，状态选择239→240、精确选择180→181、错误选择保持59→59；以上均为确定性理想执行器下的组件结果，不等同于完整 RLBench 在线故障恢复成功率，完整仿真验收结果见阶段六正式结果目录。
 
 ## 阶段六顶层策略与 RLBench 适配
 
@@ -164,7 +164,7 @@ RLBench 专用代码位于 `integrations/rlbench/rlbench_closed_loop/`，负责�
 
 逐周期诊断除原始进度后验、关系后验、角色、PoE、边界和恢复信息外，还保存 `ControlEquivalenceAssessment`：原始进度标签、控制等价状态集合、聚合置信度、类别熵、最小动作兼容度和是否接受。该记录不改写阶段二信念，并区分 `control_equivalent_progress_uncertainty` 与 `control_equivalent_backward_realignment`。
 
-阶段六的当前结果入口唯一为 `evaluations/phase6_formal_evaluation/`。小样本正常回放、定向故障和机制修复运行只用于正式启动前的可行性门控；旧执行器产生的 pilot、诊断与预正式结果不作为当前交付保留，也不得与正式矩阵混合。论文成功率和统计结论只读取当前 v19/v23 协议完整生成的结果。
+阶段六的当前结果入口唯一为 `evaluations/phase6_formal_evaluation/`。小样本正常回放、定向故障和机制修复运行只用于正式启动前的可行性门控；旧执行器产生的 pilot、诊断与预正式结果不作为当前交付保留，也不得与正式矩阵混合。当前 v19/v23 协议的正常、动态背景和故障矩阵共192个单元、14400回合已完成并通过深度审计，最终机器可读统计位于 `evaluations/phase6_formal_evaluation/results/v2/`。
 
 ## 查询语义
 
