@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Mapping
 
@@ -244,6 +244,54 @@ class FrameRoleRouter:
         for frame, decision in snapshot.decisions.items():
             if decision.role != FrameRole.DEFER:
                 self._last_trusted_weights[frame] = decision.execution_weight
+
+    def commit_boundary_entry(
+        self,
+        source_snapshot: FrameRoleSnapshot,
+        belief: ClosedLoopBelief,
+        entry_state: StateId,
+        *,
+        mode_by_skill: Mapping[int, int] | None = None,
+        captured_virtual_frames: frozenset[str] = frozenset(),
+    ) -> None:
+        """Commit a guarded entry while preserving its relation-event lifecycle.
+
+        A DynaMAC boundary bridge still executes the source terminal pose, so
+        its stream decisions must remain the decisions committed for this
+        cycle.  The same command can, however, apply the target entry's
+        gripper action and thereby enter a formal LINK confirmation interval.
+        Preview the entry before replacing the causal state, merge only the
+        relation-event lifecycle, and retain the source stream weights.  This
+        prevents a valid pre-grasp ``external`` posterior from becoming an
+        immediate recovery request on the next cycle.
+        """
+
+        entry_snapshot = self.route(
+            entry_state,
+            belief,
+            mode_by_skill=mode_by_skill,
+            captured_virtual_frames=captured_virtual_frames,
+            commit=False,
+        )
+        confirmed = set(source_snapshot.confirmed_link_events)
+        confirmed.update(entry_snapshot.confirmed_link_events)
+        rejected = set(source_snapshot.rejected_link_events)
+        rejected.update(entry_snapshot.rejected_link_events)
+        pending = set(source_snapshot.pending_link_confirmation_events)
+        pending.update(entry_snapshot.pending_link_confirmation_events)
+        pending.difference_update(confirmed)
+        pending.difference_update(rejected)
+        lifecycle_snapshot = replace(
+            source_snapshot,
+            confirmed_link_events=tuple(sorted(confirmed)),
+            rejected_link_events=tuple(sorted(rejected)),
+            pending_link_confirmation_events=tuple(sorted(pending)),
+        )
+        self.commit(
+            lifecycle_snapshot,
+            belief,
+            causal_state=entry_state,
+        )
 
     @staticmethod
     def _mode_for_state(

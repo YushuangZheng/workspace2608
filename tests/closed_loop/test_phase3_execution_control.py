@@ -841,6 +841,74 @@ def test_role_commit_can_record_boundary_entry_as_the_causal_state(
     assert linked_roles.decisions["object"].blocks_advance is False
 
 
+def test_boundary_entry_commit_activates_formal_link_confirmation_lifecycle(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    entry = anchor.linked_entry_states[0]
+    predecessor = model.state(entry).topology.predecessors[0]
+    modes = {
+        predecessor.skill_index: event_id.mode,
+        entry.skill_index: event_id.mode,
+    }
+    router = FrameRoleRouter(model)
+    source_belief = belief_for(
+        model,
+        demos,
+        tick=0,
+        nominal=predecessor,
+        estimated=predecessor,
+        posterior={predecessor: 1.0},
+        relation=relation_estimate(
+            "object",
+            (0.95, 0.05),
+            RelationDecision.EXTERNAL,
+            information_weight=0.0,
+        ),
+        static=True,
+    )
+    source_roles = router.route(
+        predecessor,
+        source_belief,
+        mode_by_skill=modes,
+        commit=True,
+    )
+
+    router.commit_boundary_entry(
+        source_roles,
+        source_belief,
+        entry,
+        mode_by_skill=modes,
+    )
+
+    next_cycle = router.route(
+        entry,
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=entry,
+            estimated=predecessor,
+            posterior={predecessor: 1.0},
+            relation=relation_estimate(
+                "object",
+                (0.90, 0.10),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(1.0, 0.01),
+            ),
+        ),
+        mode_by_skill=modes,
+    )
+
+    decision = next_cycle.decisions["object"]
+    assert decision.formal_link_confirmation_pending is True
+    assert decision.role == FrameRole.DEFER
+    assert decision.blocks_advance is False
+    assert next_cycle.recovery_intents == ()
+
+
 def test_formal_link_rejection_persists_across_later_low_excitation_cycle(
     phase3_model,
 ) -> None:

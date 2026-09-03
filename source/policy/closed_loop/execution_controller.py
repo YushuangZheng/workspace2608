@@ -890,10 +890,20 @@ class ClosedLoopExecutionController:
                 action=bridge_action,
             )
         # The queried continuous bridge belongs to the source terminal, but
-        # the guarded transaction has already committed the target entry.
-        # Record that causal entry so the next state's LINK confirmation logic
-        # sees its true predecessor instead of the old skill terminal.
-        self.role_router.commit(source_roles, belief, causal_state=target)
+        # the same command applies the target entry's gripper action.  Commit
+        # the source stream decisions while activating any formal relation
+        # confirmation interval entered by that target action.
+        self.role_router.commit_boundary_entry(
+            source_roles,
+            belief,
+            target,
+            mode_by_skill=mode_by_skill,
+            captured_virtual_frames=frozenset(
+                frame
+                for frame in observation.frames
+                if frame.startswith("virtual_skill_")
+            ),
+        )
         reasons: tuple[str, ...] = (
             "entry_guard_transaction_committed",
             "dynamac_boundary_terminal_bridge",
