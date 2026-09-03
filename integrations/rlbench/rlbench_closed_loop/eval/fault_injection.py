@@ -130,7 +130,10 @@ class FaultInjectingTaskEnvironment:
         self._current_close_counted = False
         self._failed_close_active = False
         self._failed_grasp_target_poses: dict[str, tuple[Any, np.ndarray]] = {}
-        self._grasped_cycles = 0
+        self._stable_interaction_signature: tuple[str, tuple[str, ...]] | None = None
+        self._stable_interaction_cycles = 0
+        self._relation_trigger_source: str | None = None
+        self._restored_contact_cycles = 0
         self._fault_arm: str | None = None
         self._released_objects: dict[str, Any] = {}
         self._released_object_positions: dict[str, np.ndarray] = {}
@@ -643,23 +646,60 @@ class FaultInjectingTaskEnvironment:
             raise RuntimeError("grasp failure lost the gripper action mode")
         gripper_mode._dynamac_attachment_suppressed_arms = set(previous)
 
-    def _apply_relation_fault(self, *, bimanual: bool) -> bool:
+    @staticmethod
+    def _gripper_is_open(gripper: Any) -> bool:
+        getter = getattr(gripper, "get_open_amount", None)
+        if not callable(getter):
+            raise RuntimeError("relation fault requires gripper opening observation")
+        values = np.asarray(getter(), dtype=np.float64).reshape(-1)
+        if values.size == 0 or not np.all(np.isfinite(values)):
+            raise RuntimeError("relation fault gripper opening must be finite")
+        return bool(np.all(values > 0.9))
+
+    def _apply_relation_fault(
+        self,
+        action: np.ndarray,
+        *,
+        bimanual: bool,
+    ) -> bool:
         selected = self._selected_arms(bimanual=bimanual)
         if len(selected) != 1:
             raise ValueError("relation faults require one selected arm")
         gripper = self._gripper(selected[0], bimanual=bimanual)
         grasped = list(gripper.get_grasped_objects())
-        self._grasped_cycles = self._grasped_cycles + 1 if grasped else 0
+        _pose_slice, gripper_index = self._arm_slice(selected[0], bimanual=bimanual)
+        close_requested = bool(action[gripper_index] <= 0.5)
+        if grasped:
+            targets = tuple(grasped)
+            source = "attachment"
+        elif close_requested:
+            targets = self._detected_grasp_targets(
+                arm=selected[0],
+                bimanual=bimanual,
+            )
+            source = "maintained_contact"
+        else:
+            targets = ()
+            source = "maintained_contact"
+        names = tuple(sorted(self._object_names(targets)))
+        signature = (source, names) if names else None
+        if signature is None:
+            self._stable_interaction_signature = None
+            self._stable_interaction_cycles = 0
+        elif signature == self._stable_interaction_signature:
+            self._stable_interaction_cycles += 1
+        else:
+            self._stable_interaction_signature = signature
+            self._stable_interaction_cycles = 1
         if (
             self._triggered
             or self._policy_step < self.spec.earliest_step
-            or self._grasped_cycles < self.spec.minimum_grasped_cycles
+            or self._stable_interaction_cycles < self.spec.minimum_grasped_cycles
         ):
             return False
         self._fault_arm = selected[0]
-        self._released_objects = {
-            name: obj for name, obj in zip(self._object_names(grasped), grasped)
-        }
+        self._relation_trigger_source = source
+        self._released_objects = {self._object_names((obj,))[0]: obj for obj in targets}
         self._released_object_positions = {}
         for name, obj in self._released_objects.items():
             get_position = getattr(obj, "get_position", None)
@@ -668,12 +708,11 @@ class FaultInjectingTaskEnvironment:
                     get_position(), dtype=np.float64
                 ).copy()
         self._relation_restored = False
-        names = self._object_names(grasped)
         gripper.release()
         displaced = False
         if self.spec.kind == FaultInjectionKind.RELATION_MISMATCH:
             delta = np.asarray(self.spec.mismatch_translation, dtype=np.float64)
-            for obj in grasped:
+            for obj in targets:
                 get_position = getattr(obj, "get_position", None)
                 set_position = getattr(obj, "set_position", None)
                 if not callable(get_position) or not callable(set_position):
@@ -685,8 +724,9 @@ class FaultInjectingTaskEnvironment:
         self._trigger_event(
             self.spec.kind.value,
             arm=selected[0],
-            released_objects=names,
-            carried_cycles=self._grasped_cycles,
+            released_objects=list(names),
+            interaction_source=source,
+            stable_interaction_cycles=self._stable_interaction_cycles,
             displaced=displaced,
             mismatch_translation=(
                 list(self.spec.mismatch_translation) if displaced else None
@@ -754,6 +794,16 @@ class FaultInjectingTaskEnvironment:
 
         target_names = set(self._released_objects)
         still_attached = sorted(target_names.intersection(grasped_names))
+        detected_names = set(
+            self._object_names(
+                self._detected_grasp_targets(
+                    arm=self._fault_arm,
+                    bimanual=bimanual,
+                )
+            )
+        )
+        still_detected = sorted(target_names.intersection(detected_names))
+        gripper_open = self._gripper_is_open(gripper)
         if self._effect_observed is None:
             displacement_by_object: dict[str, float | None] = {}
             for name, obj in self._released_objects.items():
@@ -768,7 +818,11 @@ class FaultInjectingTaskEnvironment:
                         )
                     )
                 )
-            detached = not still_attached
+            detached = (
+                not still_attached
+                if self._relation_trigger_source == "attachment"
+                else gripper_open
+            )
             if self.spec.kind == FaultInjectionKind.RELATION_MISMATCH:
                 expected = float(np.linalg.norm(self.spec.mismatch_translation))
                 displaced = all(
@@ -786,17 +840,32 @@ class FaultInjectingTaskEnvironment:
                     "policy_step": self._policy_step,
                     "arm": self._fault_arm,
                     "detached": detached,
+                    "interaction_source": self._relation_trigger_source,
+                    "gripper_open": gripper_open,
                     "still_attached_objects": still_attached,
+                    "still_detected_objects": still_detected,
                     "displacement_by_object": displacement_by_object,
                     "protocol_effective": self._effect_observed,
                 }
             )
             return
 
+        if self._relation_trigger_source == "attachment":
+            restoration_evidence = bool(still_attached)
+        else:
+            contact_restored = not gripper_open and target_names.issubset(
+                detected_names
+            )
+            self._restored_contact_cycles = (
+                self._restored_contact_cycles + 1 if contact_restored else 0
+            )
+            restoration_evidence = (
+                self._restored_contact_cycles >= self.spec.minimum_grasped_cycles
+            )
         if (
             self._effect_observed
             and self._relation_restored is False
-            and still_attached
+            and restoration_evidence
         ):
             self._relation_restored = True
             self._relation_restoration_policy_step = self._policy_step
@@ -806,6 +875,8 @@ class FaultInjectingTaskEnvironment:
                     "policy_step": self._policy_step,
                     "arm": self._fault_arm,
                     "attached_objects": still_attached,
+                    "contact_objects": still_detected,
+                    "interaction_source": self._relation_trigger_source,
                     "protocol_effective": True,
                 }
             )
@@ -827,7 +898,10 @@ class FaultInjectingTaskEnvironment:
             FaultInjectionKind.RELATION_MISMATCH,
             FaultInjectionKind.UNEXPECTED_DROP,
         }:
-            relation_fault_triggered = self._apply_relation_fault(bimanual=bimanual)
+            relation_fault_triggered = self._apply_relation_fault(
+                values,
+                bimanual=bimanual,
+            )
         current_observation = self._environment.get_observation()
         applied = values
         if self.spec.kind == FaultInjectionKind.TIME_STALL:

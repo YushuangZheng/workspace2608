@@ -57,6 +57,7 @@ class _Gripper:
         self.objects = list(objects)
         self.release_calls = 0
         self._proximity_sensor = _Sensor(detected)
+        self.open_amount = 0.0 if objects else 1.0
 
     def get_grasped_objects(self):
         return list(self.objects)
@@ -64,6 +65,9 @@ class _Gripper:
     def release(self):
         self.objects.clear()
         self.release_calls += 1
+
+    def get_open_amount(self):
+        return [self.open_amount, self.open_amount]
 
 
 class _TaskEnvironment:
@@ -98,7 +102,13 @@ class _TaskEnvironment:
         return self.observation
 
     def step(self, action):
-        self.actions.append(np.asarray(action, dtype=np.float64).copy())
+        values = np.asarray(action, dtype=np.float64).copy()
+        self.actions.append(values)
+        if self.bimanual:
+            self._scene.robot.right_gripper.open_amount = float(values[7] > 0.5)
+            self._scene.robot.left_gripper.open_amount = float(values[16] > 0.5)
+        else:
+            self._scene.robot.gripper.open_amount = float(values[7] > 0.5)
         self.attachment_enabled.append(
             bool(self._gripper_action_mode._attach_grasped_objects)
         )
@@ -420,6 +430,48 @@ def test_relation_fault_audit_observes_later_target_reattachment() -> None:
     assert audit["relation_restoration_policy_step"] == 1
     assert audit["cycles_to_relation_restoration"] == 1
     assert wrapped.events[-1]["kind"] == "relation_restored"
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_position"),
+    (
+        (FaultInjectionKind.UNEXPECTED_DROP, [0.0, 0.0, 0.0]),
+        (FaultInjectionKind.RELATION_MISMATCH, [0.04, 0.0, 0.0]),
+    ),
+)
+def test_relation_fault_accepts_stable_closed_contact_without_attachment(
+    kind, expected_position
+) -> None:
+    tray = _Object("tray")
+    environment = _TaskEnvironment(bimanual=True)
+    environment._scene.robot.right_gripper._proximity_sensor.detected.add(tray)
+    environment._scene.task.get_base = lambda: SimpleNamespace(
+        get_objects_in_tree=lambda **_kwargs: [tray]
+    )
+    wrapped = FaultInjectingTaskEnvironment(
+        environment,
+        FaultInjectionSpec(
+            kind,
+            arm="right",
+            minimum_grasped_cycles=2,
+        ),
+    )
+    right = np.concatenate((_pose(0.1), [0.0, 0.0]))
+    left = np.concatenate((_pose(-0.1), [0.0, 0.0]))
+    action = np.concatenate((right, left))
+
+    wrapped.step(action)
+    wrapped.step(action)
+
+    assert wrapped.triggered is True
+    assert environment.actions[1][7] == 1.0
+    assert np.allclose(tray.position, expected_position)
+    trigger = next(event for event in wrapped.events if event["kind"] == kind.value)
+    assert trigger["interaction_source"] == "maintained_contact"
+    assert trigger["stable_interaction_cycles"] == 2
+    audit = wrapped.protocol_metadata()["physical_audit"]
+    assert audit["effect_observed"] is True
+    assert audit["target_objects"] == ["tray"]
 
 
 def test_fault_spec_rejects_unknown_configuration_instead_of_ignoring_it() -> None:
