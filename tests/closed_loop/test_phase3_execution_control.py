@@ -1086,6 +1086,80 @@ def test_formal_link_confirmation_interval_expires_after_terminal_entry_action(
     assert event_id in expired.rejected_link_events
 
 
+@pytest.mark.parametrize(
+    ("decision_state", "posterior"),
+    (
+        (RelationDecision.UNKNOWN, (0.35, 0.65)),
+        # The formal event must not treat a low-information external decision
+        # carried over from before the grasp as fresh contradictory evidence.
+        (RelationDecision.EXTERNAL, (0.9, 0.1)),
+    ),
+)
+def test_unresolved_formal_link_requests_verification_after_natural_interval(
+    phase3_model, decision_state, posterior
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    router = FrameRoleRouter(model)
+    first = anchor.linked_entry_states[0]
+    predecessor = model.state(first).topology.predecessors[0]
+
+    # Causally execute the learned relation-changing interval.  Its response
+    # points toward LINK throughout, but the persistent posterior has not yet
+    # crossed the stable-decision threshold.
+    positive_unresolved = replace(
+        relation_estimate(
+            "object",
+            (0.4, 0.6),
+            RelationDecision.UNKNOWN,
+            information_weight=0.4,
+            observation_likelihood=(0.01, 1.0),
+            informative=True,
+        ),
+        informative_evidence_direction=RelationDecision.LINKED,
+    )
+    for tick, route_state in enumerate((predecessor, *anchor.linked_entry_states)):
+        snapshot = router.route(
+            route_state,
+            belief_for(
+                model,
+                demos,
+                tick=tick,
+                nominal=route_state,
+                estimated=route_state,
+                relation=positive_unresolved,
+            ),
+            mode_by_skill={route_state.skill_index: event_id.mode},
+        )
+    assert event_id in snapshot.unresolved_formal_link_events
+
+    terminal = anchor.linked_entry_states[-1]
+    unresolved = router.route(
+        terminal,
+        belief_for(
+            model,
+            demos,
+            tick=len(anchor.linked_entry_states) + 1,
+            nominal=terminal,
+            estimated=terminal,
+            relation=relation_estimate(
+                "object",
+                posterior,
+                decision_state,
+                information_weight=0.0,
+            ),
+            static=True,
+        ),
+        mode_by_skill={terminal.skill_index: event_id.mode},
+    )
+
+    assert unresolved.decisions["object"].formal_link_confirmation_pending is False
+    assert len(unresolved.verification_requests) == 1
+    request = unresolved.verification_requests[0]
+    assert request.event_id == event_id
+    assert request.context_state == terminal
+
+
 def test_terminal_link_response_gets_one_bounded_successor_for_confirmation(
     phase3_model,
 ) -> None:
@@ -2163,7 +2237,7 @@ def test_pending_unresolved_with_observable_low_excitation_requests_verification
     )
     assert snapshot.recovery_intents == ()
     assert len(snapshot.verification_requests) == 1
-    assert snapshot.verification_requests[0].pending_event_id == event_id
+    assert snapshot.verification_requests[0].event_id == event_id
 
 
 def test_pending_verification_does_not_require_current_poe_selection(
@@ -2227,7 +2301,7 @@ def test_pending_verification_does_not_require_current_poe_selection(
 
     assert "object" not in snapshot.decisions
     assert len(snapshot.verification_requests) == 1
-    assert snapshot.verification_requests[0].pending_event_id == event_id
+    assert snapshot.verification_requests[0].event_id == event_id
 
 
 def test_pending_event_context_remains_active_after_the_closing_state(
@@ -2284,7 +2358,7 @@ def test_pending_event_context_remains_active_after_the_closing_state(
     )
 
     assert len(snapshot.verification_requests) == 1
-    assert snapshot.verification_requests[0].pending_event_id == event_id
+    assert snapshot.verification_requests[0].event_id == event_id
 
 
 def test_pending_without_future_linked_requirement_does_not_request_verification(

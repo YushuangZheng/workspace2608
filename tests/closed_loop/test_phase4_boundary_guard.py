@@ -639,7 +639,7 @@ def test_pending_link_unresolved_requests_verification_without_permit(
     assert local.done
     assert not request.permitted
     assert len(request.verification_requests) == 1
-    assert request.verification_requests[0].pending_event_id == event_id
+    assert request.verification_requests[0].event_id == event_id
 
 
 def test_cross_arm_relation_guard_uses_other_arm_current_belief() -> None:
@@ -781,7 +781,9 @@ def test_cross_arm_relation_guard_uses_other_arm_current_belief() -> None:
     failed_link = replace(
         failed_link,
         verification_requests=(
-            RelationVerificationRequest("right", "target", "linked", pending_id),
+            RelationVerificationRequest(
+                "right", "target", "linked", pending_id, candidate_state
+            ),
         ),
     )
     pending_trigger = pending_tracker.update(

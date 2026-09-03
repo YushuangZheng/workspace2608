@@ -1,4 +1,4 @@
-"""Bounded active verification for unresolved LINK_PENDING relations."""
+"""Bounded active verification for unresolved LINK relations."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Hashable, Sequence
 import numpy as np
 
 from .frame_roles import RelationVerificationRequest
-from .relation_events import LinkPendingCandidate, RelationEventId
+from .relation_events import RelationEventId
 from .relation_filter import RelationDecision, RelationEstimate
 from .runtime_features import RuntimeFeatures
 from .state_index import StateId
@@ -132,7 +132,7 @@ class VerificationAttemptSignature:
 
 
 class VerificationAttemptRegistry:
-    """Prevent immediate TASK/VERIFY_LINK loops for one Pending occurrence."""
+    """Prevent immediate TASK/VERIFY_LINK loops for one unresolved LINK."""
 
     def __init__(self) -> None:
         self.reset()
@@ -203,7 +203,6 @@ class RelationVerificationController:
     def reset_runtime(self) -> None:
         self.phase = VerificationPhase.IDLE
         self.request: RelationVerificationRequest | None = None
-        self.candidate: LinkPendingCandidate | None = None
         self._entry_pose: Array | None = None
         self._gripper_command: Array | None = None
         self._approach_direction: Array | None = None
@@ -243,7 +242,7 @@ class RelationVerificationController:
     def approach_direction_available(self, poses: Sequence[Array]) -> bool:
         """Whether the existing reverse-probe template is currently defined.
 
-        A Pending request may remain active while TASK is holding a nearly
+        An unresolved LINK request may remain active while TASK is holding a nearly
         stationary terminal pose.  That is a normal unavailable prerequisite,
         not a policy exception: VERIFY_LINK cannot safely start until its
         direction can be estimated from the actual TASK path.
@@ -258,7 +257,6 @@ class RelationVerificationController:
     def start(
         self,
         request: RelationVerificationRequest,
-        candidate: LinkPendingCandidate,
         *,
         task_state: StateId,
         relation_state: RelationDecision,
@@ -273,8 +271,6 @@ class RelationVerificationController:
             VerificationPhase.FAILED,
         }:
             raise RuntimeError("已有主动关系验证尚未结束")
-        if request.pending_event_id != candidate.event_id:
-            raise ValueError("主动验证请求与 Pending 候选不一致")
         if relation_state == RelationDecision.LINKED:
             raise ValueError("VERIFY_LINK 不能从已经确认的 linked 关系开始")
         signature = self.attempt_signature(
@@ -282,12 +278,11 @@ class RelationVerificationController:
             relation_state=relation_state,
             grasp_event=grasp_event,
         )
-        if not self.attempts.can_attempt(candidate.event_id, signature):
-            raise RuntimeError("同一 Pending 关系事件在当前上下文中已经验证过")
+        if not self.attempts.can_attempt(request.event_id, signature):
+            raise RuntimeError("同一未决 LINK 事件在当前上下文中已经验证过")
 
         self.reset_runtime()
         self.request = request
-        self.candidate = candidate
         self._entry_pose = self._pose(entry_pose, "VERIFY_LINK 入口位姿")
         gripper = np.asarray(gripper_command, dtype=np.float64)
         if gripper.ndim == 0:
@@ -298,7 +293,7 @@ class RelationVerificationController:
         self._approach_direction = self._approach_from_history(recent_task_poses)
         self._probe_path = [self._entry_pose.copy()]
         self.phase = VerificationPhase.PROBE
-        self.attempts.record(candidate.event_id, signature)
+        self.attempts.record(request.event_id, signature)
 
     @staticmethod
     def attempt_signature(
@@ -311,7 +306,7 @@ class RelationVerificationController:
 
         return VerificationAttemptSignature(
             relation_state=relation_state,
-            # A Pending occurrence is a skill-level interaction event.  A
+            # A LINK occurrence is a skill-level interaction event.  A
             # local tau update does not create a new physical opportunity to
             # verify the same close, and must not re-arm TASK->VERIFY_LINK.
             # Relation direction, skill identity, or a new grasp occurrence
@@ -322,20 +317,20 @@ class RelationVerificationController:
 
     def can_attempt(
         self,
-        candidate: LinkPendingCandidate,
+        event_id: RelationEventId,
         *,
         task_state: StateId,
         relation_state: RelationDecision,
         grasp_event: Hashable,
     ) -> bool:
-        """Whether this Pending occurrence is re-armed in the current context."""
+        """Whether this unresolved LINK is re-armed in the current context."""
 
         signature = self.attempt_signature(
             task_state=task_state,
             relation_state=relation_state,
             grasp_event=grasp_event,
         )
-        return self.attempts.can_attempt(candidate.event_id, signature)
+        return self.attempts.can_attempt(event_id, signature)
 
     def _action(self, pose: Array, source: str) -> AuxiliaryAction:
         assert self._gripper_command is not None

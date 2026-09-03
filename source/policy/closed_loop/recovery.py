@@ -268,8 +268,7 @@ class RecoveryTriggerTracker:
             # matching temporary recovery template instead of guessed from
             # the current StateId.
             event_ids.extend(
-                request.pending_event_id
-                for request in prepared_request.verification_requests
+                request.event_id for request in prepared_request.verification_requests
             )
             for event_id in event_ids:
                 if event_id.transition not in {"link", "link_pending"}:
@@ -1089,7 +1088,7 @@ class ClosedLoopRecoveryManager:
         task_state: StateId,
         grasp_event: Hashable,
     ) -> bool:
-        """Return whether a Pending request is eligible and re-armed now.
+        """Return whether an unresolved LINK request is eligible and re-armed now.
 
         Boundary and role inference may keep emitting the same request while
         its guard remains unsatisfied.  A completed attempt is therefore a
@@ -1097,13 +1096,15 @@ class ClosedLoopRecoveryManager:
         identity changes; it is not an exceptional policy failure.
         """
 
-        candidate = self.task_model.link_pending_events.get(request.pending_event_id)
+        event_exists = bool(
+            request.event_id in self.task_model.link_pending_events
+            or request.event_id in self.task_model.link_anchors
+        )
         estimate = belief.relation_estimates.get(request.frame_id)
         features = belief.runtime_features
         return bool(
             self.mode == ExecutionMode.TASK
-            and candidate is not None
-            and request.pending_event_id == candidate.event_id
+            and event_exists
             and estimate is not None
             and estimate.decision_state != RelationDecision.LINKED
             and features.frame_pair_available.get(request.frame_id, False)
@@ -1113,7 +1114,7 @@ class ClosedLoopRecoveryManager:
             < self.verification.config.minimum_information_weight
             and self.verification.approach_direction_available(self._task_pose_history)
             and self.verification.can_attempt(
-                candidate,
+                request.event_id,
                 task_state=task_state,
                 relation_state=estimate.decision_state,
                 grasp_event=grasp_event,
@@ -1132,10 +1133,11 @@ class ClosedLoopRecoveryManager:
     ) -> None:
         if self.mode != ExecutionMode.TASK:
             raise RuntimeError("只有 TASK 模式可以进入 VERIFY_LINK")
-        try:
-            candidate = self.task_model.link_pending_events[request.pending_event_id]
-        except KeyError as exc:
-            raise KeyError("主动验证请求没有对应 Pending 候选") from exc
+        if (
+            request.event_id not in self.task_model.link_pending_events
+            and request.event_id not in self.task_model.link_anchors
+        ):
+            raise KeyError("主动验证请求没有对应 LINK 事件")
         estimate = belief.relation_estimates.get(request.frame_id)
         features = belief.runtime_features
         if (
@@ -1147,10 +1149,9 @@ class ClosedLoopRecoveryManager:
             or estimate.information_weight
             >= self.verification.config.minimum_information_weight
         ):
-            raise ValueError("主动验证请求不满足 Pending、可见可靠且动作激励不足条件")
+            raise ValueError("主动验证请求不满足未决、可见可靠且动作激励不足条件")
         self.verification.start(
             request,
-            candidate,
             task_state=task_state,
             relation_state=estimate.decision_state,
             grasp_event=grasp_event,
@@ -1179,9 +1180,12 @@ class ClosedLoopRecoveryManager:
             safety=safety,
         )
         if step.phase == VerificationPhase.COMPLETE:
-            if step.decision == RelationDecision.LINKED:
+            if (
+                step.decision == RelationDecision.LINKED
+                and self.verification.request.event_id.transition == "link_pending"
+            ):
                 self.anchor_registry.activate_pending(
-                    self.verification.request.pending_event_id
+                    self.verification.request.event_id
                 )
             self.mode = ExecutionMode.TASK
             self._frozen_reference = None

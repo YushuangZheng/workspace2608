@@ -57,7 +57,8 @@ class RelationVerificationRequest:
     arm_id: str
     frame_id: str
     relation: str
-    pending_event_id: RelationEventId
+    event_id: RelationEventId
+    context_state: StateId
 
     def __post_init__(self) -> None:
         if not self.arm_id or not self.frame_id:
@@ -65,11 +66,11 @@ class RelationVerificationRequest:
         if self.relation != "linked":
             raise ValueError("阶段三只生成 linked 主动验证请求")
         if (
-            self.pending_event_id.transition != "link_pending"
-            or self.pending_event_id.arm_id != self.arm_id
-            or self.pending_event_id.frame_id != self.frame_id
+            self.event_id.transition not in {"link", "link_pending"}
+            or self.event_id.arm_id != self.arm_id
+            or self.event_id.frame_id != self.frame_id
         ):
-            raise ValueError("主动关系验证请求与 LINK_PENDING 事件不一致")
+            raise ValueError("主动关系验证请求与 LINK 事件不一致")
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,7 @@ class FrameRoleSnapshot:
     verification_requests: tuple[RelationVerificationRequest, ...] = ()
     confirmed_link_events: tuple[RelationEventId, ...] = ()
     rejected_link_events: tuple[RelationEventId, ...] = ()
-    pending_link_confirmation_events: tuple[RelationEventId, ...] = ()
+    unresolved_formal_link_events: tuple[RelationEventId, ...] = ()
 
     @property
     def execution_weights(self) -> dict[str, float]:
@@ -185,14 +186,14 @@ class FrameRoleRouter:
         # A formal LINK confirmation window is only activated by causally
         # traversing its immediate predecessor.  Merely resetting or reentering
         # at a state whose offline prior is linked must not grant fresh grace.
-        self._pending_link_confirmation_events: set[RelationEventId] = set()
+        self._unresolved_formal_link_events: set[RelationEventId] = set()
         self._last_committed_state: StateId | None = None
 
     def reset(self) -> None:
         self._last_trusted_weights.clear()
         self._confirmed_link_events.clear()
         self._rejected_link_events.clear()
-        self._pending_link_confirmation_events.clear()
+        self._unresolved_formal_link_events.clear()
         self._last_committed_state = None
 
     def commit(
@@ -214,8 +215,8 @@ class FrameRoleRouter:
 
         self._confirmed_link_events.update(snapshot.confirmed_link_events)
         self._rejected_link_events.update(snapshot.rejected_link_events)
-        self._pending_link_confirmation_events = set(
-            snapshot.pending_link_confirmation_events
+        self._unresolved_formal_link_events = set(
+            snapshot.unresolved_formal_link_events
         )
         if causal_state is not None and causal_state not in self.task_model.states:
             raise KeyError(f"流角色提交未知因果状态 {causal_state}")
@@ -277,15 +278,15 @@ class FrameRoleRouter:
         confirmed.update(entry_snapshot.confirmed_link_events)
         rejected = set(source_snapshot.rejected_link_events)
         rejected.update(entry_snapshot.rejected_link_events)
-        pending = set(source_snapshot.pending_link_confirmation_events)
-        pending.update(entry_snapshot.pending_link_confirmation_events)
-        pending.difference_update(confirmed)
-        pending.difference_update(rejected)
+        unresolved = set(source_snapshot.unresolved_formal_link_events)
+        unresolved.update(entry_snapshot.unresolved_formal_link_events)
+        unresolved.difference_update(confirmed)
+        unresolved.difference_update(rejected)
         lifecycle_snapshot = replace(
             source_snapshot,
             confirmed_link_events=tuple(sorted(confirmed)),
             rejected_link_events=tuple(sorted(rejected)),
-            pending_link_confirmation_events=tuple(sorted(pending)),
+            unresolved_formal_link_events=tuple(sorted(unresolved)),
         )
         self.commit(
             lifecycle_snapshot,
@@ -528,7 +529,7 @@ class FrameRoleRouter:
             estimate.informative
             and estimate.informative_evidence_direction == RelationDecision.LINKED
         ):
-            for event_id in self._pending_link_confirmation_events:
+            for event_id in self._unresolved_formal_link_events:
                 if event_id.frame_id != frame:
                     continue
                 anchor = self.task_model.link_anchors.get(event_id)
@@ -550,7 +551,7 @@ class FrameRoleRouter:
         events = tuple(sorted(events))
         if not events:
             return ()
-        causally_entered = set(self._pending_link_confirmation_events)
+        causally_entered = set(self._unresolved_formal_link_events)
         causally_entered.update(
             event_id
             for event_id in events
@@ -720,7 +721,25 @@ class FrameRoleRouter:
         estimated_state: StateId,
         belief: ClosedLoopBelief,
         mode_by_skill: Mapping[int, int] | None,
+        *,
+        naturally_confirming_events: frozenset[RelationEventId] = frozenset(),
+        confirmed_events: frozenset[RelationEventId] = frozenset(),
+        rejected_events: frozenset[RelationEventId] = frozenset(),
     ) -> tuple[RelationVerificationRequest, ...]:
+        """Request bounded evidence for a necessary unresolved LINK event.
+
+        Offline ``LINK_PENDING`` occurrences need active verification because
+        their demonstrations never contained enough natural excitation.  A
+        formal LINK normally confirms during its learned carrying interval,
+        but execution-time variation can consume that interval while the
+        filter still has no stable decision.  Once the natural interval has
+        ended, such an occurrence is the same physical uncertainty problem:
+        verify it before interpreting the pre-event external memory as a
+        failed grasp.  A fresh informative external response rejects the
+        occurrence above and therefore bypasses this path for ordinary LINK
+        recovery.
+        """
+
         requests = []
         context_state = max(
             (state_id, estimated_state),
@@ -755,7 +774,53 @@ class FrameRoleRouter:
                     arm_id=self.task_model.arm_id,
                     frame_id=frame,
                     relation="linked",
-                    pending_event_id=event_id,
+                    event_id=event_id,
+                    context_state=candidate.candidate_state,
+                )
+            )
+
+        for event_id in sorted(self._unresolved_formal_link_events):
+            if (
+                event_id in naturally_confirming_events
+                or event_id in confirmed_events
+                or event_id in rejected_events
+            ):
+                continue
+            anchor = self.task_model.link_anchors.get(event_id)
+            if anchor is None or not anchor.linked_entry_states:
+                continue
+            frame = anchor.frame_id
+            if event_id not in self._link_origins_for_state(
+                frame,
+                context_state,
+                mode_by_skill,
+            ):
+                continue
+            mode = (
+                None
+                if mode_by_skill is None
+                else mode_by_skill.get(event_id.skill_index)
+            )
+            if mode is not None and mode != event_id.mode:
+                continue
+            estimate = belief.relation_estimates.get(frame)
+            features = belief.runtime_features
+            if (
+                estimate is None
+                or estimate.decision_state == RelationDecision.LINKED
+                or not features.frame_pair_available.get(frame, False)
+                or features.paired_tracking_reliability.get(frame, 0.0)
+                < self.config.minimum_tracking_reliability
+                or estimate.information_weight >= self.config.minimum_information_weight
+            ):
+                continue
+            requests.append(
+                RelationVerificationRequest(
+                    arm_id=self.task_model.arm_id,
+                    frame_id=frame,
+                    relation="linked",
+                    event_id=event_id,
+                    context_state=anchor.linked_entry_states[-1],
                 )
             )
         return tuple(requests)
@@ -798,7 +863,8 @@ class FrameRoleRouter:
         recovery_intents = []
         confirmed_link_events: set[RelationEventId] = set()
         rejected_link_events: set[RelationEventId] = set()
-        pending_link_confirmation_events: set[RelationEventId] = set()
+        unresolved_formal_link_events = set(self._unresolved_formal_link_events)
+        naturally_confirming_events: set[RelationEventId] = set()
         features = belief.runtime_features
 
         for frame in (*selected_frames, *confirmed_monitors):
@@ -861,7 +927,8 @@ class FrameRoleRouter:
                 belief,
                 mode_by_skill,
             )
-            pending_link_confirmation_events.update(confirmation_events)
+            unresolved_formal_link_events.update(confirmation_events)
+            naturally_confirming_events.update(confirmation_events)
             if actual == RelationDecision.LINKED:
                 confirmed_link_events.update(confirmation_events)
             if (
@@ -870,8 +937,10 @@ class FrameRoleRouter:
                 and actual == RelationDecision.EXTERNAL
                 and estimate is not None
                 and estimate.informative
+                and estimate.information_weight
+                >= self.config.minimum_information_weight
                 and estimate.observation_likelihood[0]
-                >= estimate.observation_likelihood[1]
+                > estimate.observation_likelihood[1]
             ):
                 rejected_link_events.update(current_link_events)
             planned_link = self._planned_link_is_direct_successor(
@@ -905,9 +974,10 @@ class FrameRoleRouter:
                 # The physical object stream must stay out of the normal PoE
                 # while its new linked relation is unresolved.  Other selected
                 # streams execute the demonstrated post-grasp motion, which is
-                # itself the non-tactile relation probe.  This is distinct from
-                # LINK_PENDING/VERIFY_LINK: the offline event is already a
-                # formal LINK and no auxiliary execution mode is entered.
+                # itself the non-tactile relation probe.  No auxiliary mode is
+                # needed while this learned interval still supplies natural
+                # confirmation.  If it ends without a stable result, the same
+                # VERIFY_LINK mode handles the unresolved formal LINK below.
                 role = FrameRole.DEFER
                 weight = 0.0
                 monitor = True
@@ -1042,6 +1112,9 @@ class FrameRoleRouter:
             belief.progress.estimated_state,
             belief,
             mode_by_skill,
+            naturally_confirming_events=frozenset(naturally_confirming_events),
+            confirmed_events=frozenset(confirmed_link_events),
+            rejected_events=frozenset(rejected_link_events),
         )
         snapshot = FrameRoleSnapshot(
             state_id=state_id,
@@ -1050,9 +1123,9 @@ class FrameRoleRouter:
             verification_requests=requests,
             confirmed_link_events=tuple(sorted(confirmed_link_events)),
             rejected_link_events=tuple(sorted(rejected_link_events)),
-            pending_link_confirmation_events=tuple(
+            unresolved_formal_link_events=tuple(
                 sorted(
-                    pending_link_confirmation_events.difference(
+                    unresolved_formal_link_events.difference(
                         confirmed_link_events, rejected_link_events
                     )
                 )

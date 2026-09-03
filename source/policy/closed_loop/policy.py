@@ -654,7 +654,7 @@ class ClosedLoopMultiStreamPolicy:
         for request in requests:
             if request.arm_id != arm:
                 continue
-            if preparation is not None and request.pending_event_id in preparation.event_ids:
+            if preparation is not None and request.event_id in preparation.event_ids:
                 # The request describes the consequence of the boundary edge
                 # close.  It cannot probe before that close has appeared in a
                 # real observation; otherwise VERIFY_LINK would freeze TASK
@@ -667,7 +667,7 @@ class ClosedLoopMultiStreamPolicy:
                     raise ValueError("关系验证准备动作与运行夹爪维度不一致")
                 if not np.array_equal(target > 0.5, current > 0.5):
                     continue
-            unique[request.pending_event_id.token] = request
+            unique[request.event_id.token] = request
         return unique[min(unique)] if unique else None
 
     @staticmethod
@@ -885,12 +885,9 @@ class ClosedLoopMultiStreamPolicy:
                     manager = self.recovery_managers[arm]
                     request = manager.verification.request
                     if request is None:
-                        raise RuntimeError("VERIFY_LINK 缺少当前 Pending 请求")
-                    candidate = self.task_models[arm].link_pending_events[
-                        request.pending_event_id
-                    ]
+                        raise RuntimeError("VERIFY_LINK 缺少当前 LINK 请求")
                     demonstration_state_by_frame = {
-                        request.frame_id: candidate.candidate_state
+                        request.frame_id: request.context_state
                     }
                 beliefs[arm] = updater.update_frozen(
                     runtime[arm],
@@ -984,7 +981,7 @@ class ClosedLoopMultiStreamPolicy:
                     None
                     if verification_request is None
                     else grasp_events.get(
-                        arm, verification_request.pending_event_id.token
+                        arm, verification_request.event_id.token
                     )
                 )
                 task_state = self.execution_controllers[arm].cursor.reference_state

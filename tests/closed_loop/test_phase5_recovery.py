@@ -361,7 +361,7 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
     )
     controller = RelationVerificationController(config)
     request = RelationVerificationRequest(
-        "single", "object", "linked", pending.event_id
+        "single", "object", "linked", pending.event_id, pending.candidate_state
     )
     entry = pose(0.02)
     signature = VerificationAttemptSignature(
@@ -371,7 +371,6 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
     )
     controller.start(
         request,
-        pending,
         task_state=pending.candidate_state,
         relation_state=signature.relation_state,
         grasp_event=signature.grasp_event,
@@ -427,7 +426,6 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
     with pytest.raises(RuntimeError, match="已经验证过"):
         controller.start(
             request,
-            pending,
             task_state=pending.candidate_state,
             relation_state=signature.relation_state,
             grasp_event=signature.grasp_event,
@@ -437,14 +435,14 @@ def test_verify_link_probes_opposite_approach_returns_and_blocks_repeat(
         )
     # Moving to another tau of the same skill is not a new interaction
     # opportunity; changing the skill is.
-    assert not controller.can_attempt(
-        pending,
+        assert not controller.can_attempt(
+            pending.event_id,
         task_state=StateId(pending.candidate_state.skill_index, 99),
         relation_state=initial_relation,
         grasp_event="grasp-0",
     )
-    assert controller.can_attempt(
-        pending,
+        assert controller.can_attempt(
+            pending.event_id,
         task_state=StateId(pending.candidate_state.skill_index + 1, 0),
         relation_state=initial_relation,
         grasp_event="grasp-0",
@@ -487,12 +485,11 @@ def test_verify_link_timeout_still_returns_and_unsafe_return_fails(
         )
     )
     request = RelationVerificationRequest(
-        "single", "object", "linked", pending.event_id
+        "single", "object", "linked", pending.event_id, pending.candidate_state
     )
     entry = pose(0.02)
     controller.start(
         request,
-        pending,
         task_state=pending.candidate_state,
         relation_state=RelationDecision.UNKNOWN,
         grasp_event=0,
@@ -538,12 +535,11 @@ def test_verify_link_can_confirm_during_return_after_probe_timeout(
     )
     controller = RelationVerificationController(config)
     request = RelationVerificationRequest(
-        "single", "object", "linked", pending.event_id
+        "single", "object", "linked", pending.event_id, pending.candidate_state
     )
     entry = pose(0.02)
     controller.start(
         request,
-        pending,
         task_state=pending.candidate_state,
         relation_state=RelationDecision.UNKNOWN,
         grasp_event=0,
@@ -600,12 +596,11 @@ def test_verify_link_rejects_single_tick_external_when_probe_window_comoves(
         )
     )
     request = RelationVerificationRequest(
-        "single", "object", "linked", pending.event_id
+        "single", "object", "linked", pending.event_id, pending.candidate_state
     )
     entry = pose(0.02)
     controller.start(
         request,
-        pending,
         task_state=pending.candidate_state,
         relation_state=RelationDecision.EXTERNAL,
         grasp_event=0,
@@ -659,12 +654,11 @@ def test_verify_link_accepts_external_when_probe_window_does_not_respond(
         )
     )
     request = RelationVerificationRequest(
-        "single", "object", "linked", pending.event_id
+        "single", "object", "linked", pending.event_id, pending.candidate_state
     )
     entry = pose(0.02)
     controller.start(
         request,
-        pending,
         task_state=pending.candidate_state,
         relation_state=RelationDecision.EXTERNAL,
         grasp_event=0,
@@ -1636,7 +1630,7 @@ def test_manager_modes_pending_activation_and_persistent_recovery_trigger(
         ),
     )
     request = RelationVerificationRequest(
-        "single", "object", "linked", pending.event_id
+        "single", "object", "linked", pending.event_id, pending.candidate_state
     )
     manager.begin_verification(
         request,
@@ -1728,6 +1722,55 @@ def test_manager_modes_pending_activation_and_persistent_recovery_trigger(
     )
 
 
+def test_manager_accepts_unresolved_formal_link_verification(phase5_case) -> None:
+    model, demonstrations, _ = phase5_case
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    state = anchor.linked_entry_states[-1]
+    manager = ClosedLoopRecoveryManager(model)
+    manager.record_task_pose(pose(0.0))
+    manager.record_task_pose(pose(0.02))
+    belief = belief_for(
+        model,
+        demonstrations,
+        state,
+        relation(RelationDecision.UNKNOWN, information=0.0),
+        motion=0.0,
+    )
+    belief = replace(
+        belief,
+        runtime_features=replace(
+            belief.runtime_features,
+            frame_pair_available={anchor.frame_id: True},
+            paired_tracking_reliability={anchor.frame_id: 1.0},
+            relation_information_weight={anchor.frame_id: 0.0},
+        ),
+    )
+    request = RelationVerificationRequest(
+        anchor.arm_id,
+        anchor.frame_id,
+        "linked",
+        event_id,
+        state,
+    )
+
+    assert manager.can_begin_verification(
+        request,
+        belief,
+        task_state=state,
+        grasp_event=event_id.token,
+    )
+    manager.begin_verification(
+        request,
+        belief,
+        task_state=state,
+        grasp_event=event_id.token,
+        current_pose=pose(0.02),
+        current_gripper=np.asarray([-1.0]),
+    )
+    assert manager.mode == ExecutionMode.VERIFY_LINK
+    assert manager.verification.request == request
+
+
 def test_pending_verification_waits_when_task_approach_direction_is_unavailable(
     phase5_case,
 ) -> None:
@@ -1757,6 +1800,7 @@ def test_pending_verification_waits_when_task_approach_direction_is_unavailable(
         pending.frame_id,
         "linked",
         pending.event_id,
+        pending.candidate_state,
     )
 
     assert not manager.can_begin_verification(

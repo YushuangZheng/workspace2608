@@ -730,7 +730,8 @@ def test_directional_boundary_verification_request_routes_to_receiver_arm() -> N
         arm_id="right",
         frame_id="item0",
         relation="linked",
-        pending_event_id=event_id,
+        event_id=event_id,
+        context_state=StateId(6, 0),
     )
     boundary = SimpleNamespace(
         requests={
@@ -754,7 +755,8 @@ def test_boundary_preparation_pending_request_waits_for_observed_close() -> None
         arm_id="right",
         frame_id="item0",
         relation="linked",
-        pending_event_id=event_id,
+        event_id=event_id,
+        context_state=StateId(6, 0),
     )
     preparation = TransitionPreparation(
         boundary_id=BoundaryId("right", 5, 6),

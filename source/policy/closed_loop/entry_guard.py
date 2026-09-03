@@ -354,7 +354,8 @@ class EntryGuard:
                 arm_id=relation_arm,
                 frame_id=frame,
                 relation="linked",
-                pending_event_id=candidate.event_id,
+                event_id=candidate.event_id,
+                context_state=candidate.candidate_state,
             )
         return None
 
@@ -541,7 +542,7 @@ class EntryGuard:
                     mode_by_arm_skill=mode_by_arm_skill,
                 )
                 if request is not None:
-                    verification_requests[request.pending_event_id.token] = request
+                    verification_requests[request.event_id.token] = request
         own_relation_compatibility = (
             min(own_relation_values) if own_relation_values else 1.0
         )
@@ -603,7 +604,7 @@ class EntryGuard:
                     mode_by_arm_skill=mode_by_arm_skill,
                 )
                 if request is not None:
-                    verification_requests[request.pending_event_id.token] = request
+                    verification_requests[request.event_id.token] = request
 
         features_by_arm = {
             arm: belief.runtime_features for arm, belief in beliefs.items()
@@ -697,7 +698,7 @@ class EntryGuard:
                     pending_event_id=event_id,
                 )
                 if request is not None:
-                    verification_requests[request.pending_event_id.token] = request
+                    verification_requests[request.event_id.token] = request
         return (
             TransitionRequest(
                 tick=tick,
