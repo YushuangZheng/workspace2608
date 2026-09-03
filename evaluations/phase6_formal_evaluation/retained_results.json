@@ -1,5 +1,5 @@
 {
-  "active_protocol_sha256": "8f84cd11419923ba6262faa4bdea2081b8985089c1e1c03845b80232cb3eeebd",
+  "active_protocol_sha256": "bfbb40dc155a1f8c1cf58277946699275d088896ea134b72ac81970ffe9b8bf6",
   "reason": "Retain byte-identical completed cells that are outside the minimal Handover Full rerun scope; the manifest authenticates exact result bytes and never changes outcomes.",
   "records": {
     "dynamic/bimanual_handover_item/dynamac_v4": {
