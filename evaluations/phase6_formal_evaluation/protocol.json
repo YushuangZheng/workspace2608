@@ -4,7 +4,7 @@
   "active_implementation": {
     "controller_profile": "stage6_hybrid_cartesian_executor_v19",
     "protocol_id": "rlbench-stage6-hybrid-cartesian-continuation-v23",
-    "validated_mechanism_parent_commit": "b65650da6c4780c4abf434374249523bf9cbf85a",
+    "validated_mechanism_parent_commit": "0cbfa3b4ad3fb0d885f622129335335fe4715aad",
     "retained_formal_results_before_activation": false
   },
   "evaluation_set": {
