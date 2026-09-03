@@ -753,6 +753,53 @@ class FaultInjectingTaskEnvironment:
         released[gripper_index] = 1.0
         return released
 
+    def _authorize_forced_release(self, *, bimanual: bool) -> None:
+        """Let an exogenous relation fault execute its one-cycle release.
+
+        The shared executor may withhold a policy-supplied gripper command until
+        its Cartesian target is complete.  A physical fault intervention is not
+        such a policy command: its release must occur at the registered physical
+        trigger even when the current task action is not gripper-authorized.
+        Preserve the other arm's authorization and override only the selected
+        arm for this one action-mode call.  The action mode consumes the value
+        immediately, so no authorization leaks into later policy cycles.
+        """
+
+        if self._fault_arm is None:
+            raise RuntimeError("relation fault was triggered without a target arm")
+        action_mode = getattr(self._environment, "_action_mode", None)
+        setter = getattr(action_mode, "set_policy_gripper_authorization", None)
+        if not callable(setter):
+            # Minimal test doubles and native action modes without the shared
+            # authorization layer execute the overwritten gripper action
+            # directly and therefore need no override.
+            return
+        current = getattr(action_mode, "_policy_gripper_authorization", None)
+        if bimanual:
+            if current is None:
+                authorization = {"right": None, "left": None}
+            elif isinstance(current, Mapping):
+                authorization = {
+                    "right": current.get("right"),
+                    "left": current.get("left"),
+                }
+            else:
+                raise RuntimeError(
+                    "bimanual executor exposed invalid gripper authorization"
+                )
+            authorization[self._fault_arm] = True
+        else:
+            authorization = {"single": True}
+        setter(authorization)
+        self.events.append(
+            {
+                "kind": "physical_fault_gripper_authorization_override",
+                "policy_step": self._policy_step,
+                "arm": self._fault_arm,
+                "protocol_effective": True,
+            }
+        )
+
     def _audit_physical_effect(self, *, bimanual: bool) -> None:
         if not self._triggered or self._fault_arm is None:
             return
@@ -912,6 +959,7 @@ class FaultInjectingTaskEnvironment:
             applied = self._apply_grasp_failure(values, bimanual=bimanual)
         elif relation_fault_triggered:
             applied = self._force_release_action(values, bimanual=bimanual)
+            self._authorize_forced_release(bimanual=bimanual)
         restore_attachment: frozenset[str] | None = None
         if (
             self.spec.kind == FaultInjectionKind.GRASP_FAILURE

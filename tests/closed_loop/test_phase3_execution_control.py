@@ -604,6 +604,67 @@ def test_formal_link_uses_learned_interval_motion_to_confirm_posterior_lag(
     assert snapshot.recovery_intents == ()
 
 
+def test_formal_link_confirmation_accepts_legal_skip_over_interval_entry(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    assert len(anchor.linked_entry_states) >= 2
+    first = anchor.linked_entry_states[0]
+    queried = anchor.linked_entry_states[1]
+    predecessor = model.state(first).topology.predecessors[0]
+    assert queried in model.state(first).topology.successors
+    router = FrameRoleRouter(model)
+    modes = {
+        predecessor.skill_index: event_id.mode,
+        queried.skill_index: event_id.mode,
+    }
+    router.route(
+        predecessor,
+        belief_for(
+            model,
+            demos,
+            tick=0,
+            nominal=predecessor,
+            estimated=predecessor,
+            relation=relation_estimate(
+                "object",
+                (0.95, 0.05),
+                RelationDecision.EXTERNAL,
+                information_weight=0.0,
+            ),
+            static=True,
+        ),
+        mode_by_skill=modes,
+    )
+
+    snapshot = router.route(
+        queried,
+        belief_for(
+            model,
+            demos,
+            tick=1,
+            nominal=queried,
+            estimated=first,
+            posterior={first: 1.0},
+            relation=relation_estimate(
+                "object",
+                (0.90, 0.10),
+                RelationDecision.EXTERNAL,
+                information_weight=0.4,
+                observation_likelihood=(1.0, 0.01),
+            ),
+        ),
+        mode_by_skill=modes,
+    )
+
+    decision = snapshot.decisions["object"]
+    assert decision.formal_link_confirmation_pending is True
+    assert decision.role == FrameRole.DEFER
+    assert decision.blocks_advance is False
+    assert snapshot.recovery_intents == ()
+
+
 def test_off_selected_formal_link_entry_is_monitored_before_posterior_catches_up(
     phase3_model,
     monkeypatch,
@@ -955,6 +1016,100 @@ def test_formal_link_confirmation_interval_expires_after_terminal_entry_action(
     assert decision.role == FrameRole.RECOVER
     assert expired.blocks_advance is True
     assert event_id in expired.rejected_link_events
+
+
+def test_terminal_link_response_gets_one_bounded_successor_for_confirmation(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    event_id, anchor = next(iter(sorted(model.link_anchors.items())))
+    router = FrameRoleRouter(model)
+    first = anchor.linked_entry_states[0]
+    predecessor = model.state(first).topology.predecessors[0]
+    route_states = (predecessor, *anchor.linked_entry_states)
+    for tick, route_state in enumerate(route_states):
+        router.route(
+            route_state,
+            belief_for(
+                model,
+                demos,
+                tick=tick,
+                nominal=route_state,
+                estimated=route_state,
+                relation=relation_estimate(
+                    "object",
+                    (0.9, 0.1),
+                    RelationDecision.EXTERNAL,
+                    information_weight=0.4,
+                    observation_likelihood=(0.01, 1.0),
+                ),
+            ),
+            mode_by_skill={route_state.skill_index: event_id.mode},
+        )
+
+    terminal = anchor.linked_entry_states[-1]
+    positive_but_unconfirmed = replace(
+        relation_estimate(
+            "object",
+            (0.4, 0.6),
+            RelationDecision.UNKNOWN,
+            information_weight=0.4,
+            observation_likelihood=(0.01, 1.0),
+            informative=True,
+        ),
+        informative_evidence_direction=RelationDecision.LINKED,
+    )
+    pending = router.route(
+        terminal,
+        belief_for(
+            model,
+            demos,
+            tick=len(route_states),
+            nominal=terminal,
+            estimated=terminal,
+            relation=positive_but_unconfirmed,
+        ),
+        mode_by_skill={terminal.skill_index: event_id.mode},
+    )
+    decision = pending.decisions["object"]
+    assert decision.formal_link_confirmation_pending is True
+    assert decision.role == FrameRole.DEFER
+    assert decision.blocks_advance is False
+
+    successor = model.state(terminal).topology.successors[0]
+    assert successor not in anchor.linked_entry_states
+    follow_through = router.route(
+        successor,
+        belief_for(
+            model,
+            demos,
+            tick=len(route_states) + 1,
+            nominal=successor,
+            estimated=successor,
+            relation=positive_but_unconfirmed,
+        ),
+        mode_by_skill={successor.skill_index: event_id.mode},
+    )
+    assert (
+        follow_through.decisions["object"].formal_link_confirmation_pending is True
+    )
+    assert follow_through.blocks_advance is False
+
+    # Once that successor is committed, the allowance is consumed even if the
+    # same inconclusive evidence is presented again.
+    consumed = router.route(
+        successor,
+        belief_for(
+            model,
+            demos,
+            tick=len(route_states) + 2,
+            nominal=successor,
+            estimated=successor,
+            relation=positive_but_unconfirmed,
+        ),
+        mode_by_skill={successor.skill_index: event_id.mode},
+    )
+    assert consumed.decisions["object"].formal_link_confirmation_pending is False
 
 
 def test_weighted_poe_one_preserves_baseline_and_zero_removes_expert() -> None:

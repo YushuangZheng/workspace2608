@@ -92,7 +92,15 @@ class _TaskEnvironment:
         )
         self._gripper_action_mode = SimpleNamespace(_attach_grasped_objects=True)
         self._action_mode = SimpleNamespace(
-            gripper_action_mode=self._gripper_action_mode
+            gripper_action_mode=self._gripper_action_mode,
+            _policy_gripper_authorization=None,
+        )
+        self._action_mode.set_policy_gripper_authorization = (
+            lambda authorization: setattr(
+                self._action_mode,
+                "_policy_gripper_authorization",
+                authorization,
+            )
         )
         self.actions = []
         self.attachment_enabled = []
@@ -103,6 +111,23 @@ class _TaskEnvironment:
 
     def step(self, action):
         values = np.asarray(action, dtype=np.float64).copy()
+        authorization = self._action_mode._policy_gripper_authorization
+        if isinstance(authorization, dict):
+            if self.bimanual:
+                for arm, index in (("right", 7), ("left", 16)):
+                    if authorization.get(arm) is False:
+                        gripper = getattr(self._scene.robot, f"{arm}_gripper")
+                        values[index] = float(
+                            all(value > 0.9 for value in gripper.get_open_amount())
+                        )
+            elif authorization.get("single") is False:
+                values[7] = float(
+                    all(
+                        value > 0.9
+                        for value in self._scene.robot.gripper.get_open_amount()
+                    )
+                )
+        self._action_mode._policy_gripper_authorization = None
         self.actions.append(values)
         if self.bimanual:
             self._scene.robot.right_gripper.open_amount = float(values[7] > 0.5)
@@ -472,6 +497,39 @@ def test_relation_fault_accepts_stable_closed_contact_without_attachment(
     audit = wrapped.protocol_metadata()["physical_audit"]
     assert audit["effect_observed"] is True
     assert audit["target_objects"] == ["tray"]
+
+
+def test_relation_fault_release_overrides_executor_gripper_hold_once() -> None:
+    tray = _Object("tray")
+    environment = _TaskEnvironment(bimanual=True)
+    environment._scene.robot.right_gripper._proximity_sensor.detected.add(tray)
+    environment._scene.task.get_base = lambda: SimpleNamespace(
+        get_objects_in_tree=lambda **_kwargs: [tray]
+    )
+    environment._action_mode.set_policy_gripper_authorization(
+        {"right": False, "left": False}
+    )
+    wrapped = FaultInjectingTaskEnvironment(
+        environment,
+        FaultInjectionSpec(
+            FaultInjectionKind.UNEXPECTED_DROP,
+            arm="right",
+            minimum_grasped_cycles=1,
+        ),
+    )
+    right = np.concatenate((_pose(0.1), [0.0, 0.0]))
+    left = np.concatenate((_pose(-0.1), [0.0, 0.0]))
+
+    wrapped.step(np.concatenate((right, left)))
+
+    assert environment.actions[0][7] == 1.0
+    assert environment.actions[0][16] == 1.0
+    assert environment._action_mode._policy_gripper_authorization is None
+    assert wrapped.protocol_metadata()["physical_audit"]["effect_observed"] is True
+    assert any(
+        event["kind"] == "physical_fault_gripper_authorization_override"
+        for event in wrapped.events
+    )
 
 
 def test_fault_spec_rejects_unknown_configuration_instead_of_ignoring_it() -> None:

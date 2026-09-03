@@ -1554,6 +1554,16 @@ def test_bimanual_transaction_group_uses_confirmed_boundary_straddling_links() -
             transaction_group=None,
         )
 
+    # The finite confirmation interval begins at the causal close, which can
+    # occur in the source skill.  Transaction evidence is the later formal
+    # kinematic confirmation (event_local_indices) and its target-skill dwell,
+    # not the first entry in this wider interval.
+    right_event_id, right_anchor = next(iter(right_model.link_anchors.items()))
+    right_model.link_anchors[right_event_id] = replace(
+        right_anchor,
+        linked_entry_states=(StateId(0, 5), *right_anchor.linked_entry_states),
+    )
+
     builder._assign_transaction_groups(left_model, right_model, left, right)
     left_boundary = next(
         boundary
@@ -1592,7 +1602,11 @@ def test_bimanual_transaction_group_uses_confirmed_boundary_straddling_links() -
             event_id=event_id,
             arm_id=model.arm_id,
             frame_id=anchor.frame_id,
-            candidate_state=anchor.linked_entry_states[0],
+            candidate_state=next(
+                state
+                for state in anchor.linked_entry_states
+                if state.skill_index == anchor.event_id.skill_index
+            ),
             context_state=anchor.context_state,
             local_means=anchor.local_means,
             local_covariances=anchor.local_covariances,

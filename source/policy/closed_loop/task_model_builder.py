@@ -2553,11 +2553,13 @@ class ClosedLoopTaskModelBuilder:
         end effector.  For cooperative grasp-and-carry skills, the physical
         attachment can therefore be established around a skill boundary while
         the formal event is first observable a few states into the target
-        skill.  Treat that event as boundary evidence only when its saved
-        approach context starts in the source skill, its first confirmed
-        linked state belongs to the target skill, and every normal
-        demonstration supports the event.  LINK_PENDING alone is deliberately
-        excluded because it is not a confirmed physical relation.
+        skill.  ``linked_entry_states`` covers the causal close through the
+        first stable kinematic confirmation, so its prefix may legitimately
+        remain in the source skill.  Treat the event as boundary evidence only
+        when its saved approach context starts in the source skill, the formal
+        confirmation and its minimum dwell belong to the target skill, and
+        every normal demonstration supports the event.  LINK_PENDING alone is
+        deliberately excluded because it is not a confirmed physical relation.
         """
 
         result = set()
@@ -2571,14 +2573,16 @@ class ClosedLoopTaskModelBuilder:
                 or anchor.support_fraction < 1.0 - 1.0e-12
                 or set(anchor.demonstration_indices) != expected_demonstrations
                 or not anchor.linked_entry_states
-                or anchor.linked_entry_states[0].skill_index != boundary.target_skill
+                or not anchor.event_local_indices
             ):
                 continue
+            first_confirmed_index = max(anchor.event_local_indices)
             target_indices = sorted(
                 {
                     state.local_index
                     for state in anchor.linked_entry_states
                     if state.skill_index == boundary.target_skill
+                    and state.local_index >= first_confirmed_index
                 }
             )
             longest_run = 0

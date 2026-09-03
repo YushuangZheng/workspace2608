@@ -389,6 +389,58 @@ class FrameRoleRouter:
             events.append(event_id)
         return tuple(events)
 
+    def _topology_reachable(self, source: StateId, target: StateId) -> bool:
+        """Return whether ``target`` follows ``source`` on the learned DAG."""
+
+        if source == target:
+            return True
+        frontier = [source]
+        visited = {source}
+        target_index = self._global_index[target]
+        while frontier:
+            current = frontier.pop()
+            for successor in self.task_model.state(current).topology.successors:
+                if successor in visited:
+                    continue
+                # StateIds are globally ordered by the learned task progress.
+                # Pruning later states keeps this small reachability query local
+                # without changing the topology that establishes causality.
+                if self._global_index[successor] > target_index:
+                    continue
+                if successor == target:
+                    return True
+                visited.add(successor)
+                frontier.append(successor)
+        return False
+
+    def _causally_enters_link_interval(
+        self,
+        event_id: RelationEventId,
+        state_id: StateId,
+    ) -> bool:
+        """Recognize a legal forward traversal into a formal LINK interval.
+
+        Belief-driven execution can legitimately skip querying the first
+        discrete state of an interval: the posterior may already explain that
+        state and command a later, topology-reachable target.  Such a traversal
+        still executed the demonstrated event and must receive the same finite
+        natural-confirmation window.  Reset/re-entry has no previous committed
+        state, and backward or off-topology jumps remain ineligible.
+        """
+
+        previous = self._last_committed_state
+        if previous is None:
+            return False
+        anchor = self.task_model.link_anchors[event_id]
+        if not anchor.linked_entry_states or state_id not in anchor.linked_entry_states:
+            return False
+        first = anchor.linked_entry_states[0]
+        if self._global_index[previous] >= self._global_index[first]:
+            return False
+        return self._topology_reachable(previous, first) and self._topology_reachable(
+            first, state_id
+        )
+
     def _formal_link_confirmation_pending(
         self,
         frame: str,
@@ -410,29 +462,64 @@ class FrameRoleRouter:
 
         if estimate is None:
             return ()
-        events = self._formal_link_confirmation_events(
-            frame,
-            state_id,
-            mode_by_skill,
+        events = set(
+            self._formal_link_confirmation_events(
+                frame,
+                state_id,
+                mode_by_skill,
+            )
         )
+        # Routing evaluates a proposed successor before committing it.  When
+        # the just-observed response to the terminal confirmation action points
+        # toward LINK but has not yet crossed the stable posterior threshold,
+        # admit that one direct successor as the final physical probe.  The
+        # event must already be pending and the last committed state must be
+        # the learned terminal entry state, so the allowance cannot propagate
+        # beyond one action or activate after reset/re-entry.
+        if (
+            estimate.informative
+            and estimate.informative_evidence_direction == RelationDecision.LINKED
+        ):
+            for event_id in self._pending_link_confirmation_events:
+                if event_id.frame_id != frame:
+                    continue
+                anchor = self.task_model.link_anchors.get(event_id)
+                if anchor is None or not anchor.linked_entry_states:
+                    continue
+                terminal = anchor.linked_entry_states[-1]
+                if self._last_committed_state != terminal:
+                    continue
+                if state_id not in self.task_model.state(terminal).topology.successors:
+                    continue
+                if mode_by_skill is not None:
+                    selected_mode = mode_by_skill.get(event_id.skill_index)
+                    if selected_mode is not None and selected_mode != event_id.mode:
+                        continue
+                if event_id not in self._confirmed_link_events and event_id not in (
+                    self._rejected_link_events
+                ):
+                    events.add(event_id)
+        events = tuple(sorted(events))
         if not events:
             return ()
         causally_entered = set(self._pending_link_confirmation_events)
-        if self._last_committed_state is not None:
-            previous = self.task_model.state(self._last_committed_state)
-            if state_id in previous.topology.successors:
-                causally_entered.update(
-                    event_id
-                    for event_id in events
-                    if self.task_model.link_anchors[event_id].linked_entry_states[0]
-                    == state_id
-                )
+        causally_entered.update(
+            event_id
+            for event_id in events
+            if self._causally_enters_link_interval(event_id, state_id)
+        )
         events = tuple(event for event in events if event in causally_entered)
         # The final learned entry state remains available while beta still
         # reports physical lag.  Once beta has reached it, re-evaluating that
-        # same state means the complete offline interval has been consumed;
-        # keeping the event pending would turn a bounded confirmation interval
-        # into an unbounded terminal-state grace period.
+        # same state normally means the complete offline interval has been
+        # consumed.  There is one causal exception: this observation is the
+        # response to the terminal entry action itself.  If it supplies valid
+        # evidence in the expected LINK direction but the persistent posterior
+        # has not crossed the stable-decision threshold yet, allow the ordinary
+        # controller to issue exactly one legal successor.  The successor is
+        # outside ``linked_entry_states``, so this cannot create an unbounded
+        # grace period; it only avoids discarding the terminal action's positive
+        # response before the next motion sample can confirm or reject it.
         events = tuple(
             event
             for event in events
@@ -441,6 +528,11 @@ class FrameRoleRouter:
                 and belief.progress.estimated_state == state_id
                 and self.task_model.link_anchors[event].linked_entry_states[-1]
                 == state_id
+                and not (
+                    estimate.informative
+                    and estimate.informative_evidence_direction
+                    == RelationDecision.LINKED
+                )
             )
         )
         if not events:
