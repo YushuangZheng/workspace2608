@@ -51,7 +51,7 @@ def _plans(protocol: Mapping[str, Any]) -> dict[tuple[str, int], dict[str, Any]]
     return plans
 
 
-def _latest_completed_fault_launch(protocol_sha256: str) -> tuple[Path, dict[str, Any]]:
+def _latest_completed_launch(protocol_sha256: str) -> tuple[Path, dict[str, Any]]:
     candidates = []
     for path in launch.LAUNCH_ROOT.glob("runs/*/launch_summary.json"):
         try:
@@ -67,7 +67,7 @@ def _latest_completed_fault_launch(protocol_sha256: str) -> tuple[Path, dict[str
         ):
             candidates.append((path, payload))
     if not candidates:
-        raise RuntimeError("no completed active-protocol fault launcher record exists")
+        raise RuntimeError("no completed active-protocol launcher record exists")
     return max(candidates, key=lambda value: value[0].parent.name)
 
 
@@ -343,23 +343,44 @@ def audit() -> dict[str, Any]:
                 observed=metadata.get("episodes_fault_triggered"),
             )
 
-    launch_path, launch_payload = _latest_completed_fault_launch(protocol_sha256)
+    launch_path, launch_payload = _latest_completed_launch(protocol_sha256)
     launcher_cells = launch_payload.get("cells", {})
     launcher_states = (
         Counter(launcher_cells.values())
         if isinstance(launcher_cells, dict)
         else Counter()
     )
-    active_fault_cells = launcher_states["COMPLETED_VALIDATED"]
-    retained_fault_cells = launcher_states["COMPLETED_RETAINED"]
-    expected_new_shards = active_fault_cells * 50
+    expected_cell_ids = {cell.cell_id for cell in cells}
+    shard_size = launch_payload.get("scheduler", {}).get("shard_size")
+    expected_new_shards = 0
+    if (
+        isinstance(launcher_cells, dict)
+        and isinstance(shard_size, int)
+        and shard_size > 0
+    ):
+        for cell_id, state in launcher_cells.items():
+            if state != "COMPLETED_VALIDATED":
+                continue
+            experiment = cell_id.split("/", 1)[0]
+            episode_range = protocol["evaluation_set"].get(
+                f"{experiment}_episode_index_range"
+            )
+            if not (
+                isinstance(episode_range, list)
+                and len(episode_range) == 2
+                and all(isinstance(value, int) for value in episode_range)
+            ):
+                expected_new_shards = -1
+                break
+            episode_count = episode_range[1] - episode_range[0] + 1
+            expected_new_shards += (episode_count + shard_size - 1) // shard_size
     launcher_valid = (
         isinstance(launcher_cells, dict)
-        and len(launcher_cells) == 128
+        and set(launcher_cells) == expected_cell_ids
         and set(launcher_cells.values()).issubset(
             {"COMPLETED_VALIDATED", "COMPLETED_RETAINED"}
         )
-        and active_fault_cells + retained_fault_cells == 128
+        and sum(launcher_states.values()) == len(expected_cell_ids)
         and launch_payload.get("parallel_workers") == 48
         and launch_payload.get("scheduler", {}).get("new_shards_completed")
         == expected_new_shards
@@ -368,7 +389,7 @@ def audit() -> dict[str, Any]:
         is True
     )
     if not launcher_valid:
-        _append(violations, "launcher", "completed_fault_launch_identity")
+        _append(violations, "launcher", "completed_launch_identity")
 
     family_summary: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for (_, _, fault), values in fault_counts.items():
