@@ -9,6 +9,7 @@ server A supplies the frozen Native-6 manifest and shared audit contract.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -40,6 +41,24 @@ def _latency_summary(
         "p50_ms": round(float(np.percentile(array, 50)), 3),
         "p95_ms": round(float(np.percentile(array, 95)), 3),
     }
+
+
+def _seed_manifest(
+    seed_directory: Path,
+    *,
+    start_episode: int,
+    eval_episodes: int,
+) -> tuple[dict[int, str], str]:
+    per_episode: dict[int, str] = {}
+    manifest_digest = hashlib.sha256()
+    for episode in range(start_episode, start_episode + eval_episodes):
+        seed_path = seed_directory / f"random_seed{episode}.pkl"
+        if not seed_path.is_file():
+            raise FileNotFoundError(seed_path)
+        digest = _sha256(seed_path)
+        per_episode[episode] = digest
+        manifest_digest.update(f"{digest}  {seed_path.name}\n".encode())
+    return per_episode, manifest_digest.hexdigest()
 
 
 def _run_episode(
@@ -155,6 +174,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(f"RACER checkpoint checksum mismatch: {checkpoint_sha256}")
     if not seed_directory.is_dir():
         raise FileNotFoundError(seed_directory)
+    seed_sha256, seed_manifest_sha256 = _seed_manifest(
+        seed_directory,
+        start_episode=args.start_episode,
+        eval_episodes=args.eval_episodes,
+    )
 
     sys.path.insert(0, str(repository))
     os.chdir(repository)
@@ -225,6 +249,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         or retries >= args.invalid_action_retries
                     ):
                         record["invalid_action_retries"] = retries
+                        record["seed_state_sha256"] = seed_sha256[episode]
                         episode_records.append(record)
                         break
                     retries += 1
@@ -259,6 +284,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "episode_length": args.episode_length,
         "base_seed": args.seed,
         "seed_directory": str(seed_directory),
+        "seed_manifest_sha256": seed_manifest_sha256,
         "language_address": args.language_address,
         "vlm_address": args.vlm_address if args.use_vlm else None,
         "use_vlm": args.use_vlm,

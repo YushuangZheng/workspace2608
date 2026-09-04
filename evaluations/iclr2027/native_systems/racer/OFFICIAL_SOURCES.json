@@ -24,6 +24,12 @@
       "sha256": "73687bb41342b724d6fff8bb8776a0419155aaa6113e455907786e50c69b33f2",
       "server_b_path": "/home/ubuntu/workspace/_models/racer/visuomotor-rich/model_17.pth"
     },
+    "released_seed_bank": {
+      "directory": "racer/gradio_demo/random_seeds",
+      "files": 25,
+      "filename_range": "random_seed0.pkl..random_seed24.pkl",
+      "sha256_of_sorted_sha256sum_manifest": "0e22de8c4b0dc5a30c6268a63f0fa55c480ef5af334e9752f4f7731e3addff1e"
+    },
     "language_service_code": {
       "repository": "https://github.com/rich-language-failure-recovery/Open-LLaVA-NeXT",
       "branch": "racer_llava",

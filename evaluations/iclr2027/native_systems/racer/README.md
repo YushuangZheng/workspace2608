@@ -12,6 +12,9 @@ owned and are not changed here.
   `73687bb41342b724d6fff8bb8776a0419155aaa6113e455907786e50c69b33f2`.
 - The checkpoint loads and completes a CUDA forward through RACER's
   PyTorch3D renderer on an NVIDIA RTX 6000D.
+- All 25 released simulator RNG state files are present.  Their sorted
+  `sha256sum` manifest digest is pinned in `OFFICIAL_SOURCES.json`, and live
+  raw results record the exact seed-file SHA-256 for every episode.
 - The pinned RACER/RLBench fork launches and resets the official `close_jar`
   task under CoppeliaSim.
 - The released LLaVA rich LoRA adapter and non-LoRA weights are downloaded and
