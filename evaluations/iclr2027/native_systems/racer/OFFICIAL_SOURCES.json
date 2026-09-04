@@ -30,6 +30,14 @@
       "commit": "cff008a5cc15d153e89314fe778251a2a8fbd271",
       "external_checkout": "/home/ubuntu/workspace/_external/Open-LLaVA-NeXT"
     },
+    "clip_language_encoder": {
+      "repository": "https://github.com/openai/CLIP",
+      "commit": "d05afc436d78f1c48dc0dbf8e5980a9d471f35f6",
+      "file": "RN50.pt",
+      "bytes": 255827503,
+      "sha256": "afeb0e10f9e5a86da6080e35cf09123aca3b358a0c3e3b6c78a7b63bc04b6762",
+      "server_b_path": "/home/ubuntu/workspace/_models/racer/clip/RN50.pt"
+    },
     "llava_adapter": {
       "repository": "https://huggingface.co/Yinpei/racer-llava-llama3-lora-rich",
       "repository_commit": "fa2f84f609d1c0861e3b7b7a7544c4ae5406f920",
@@ -68,6 +76,14 @@
       "sha256": "5fdc64177b14b0f72437fea171a752c626733f67755842528c75b90cacd1c807",
       "server_b_path": "/home/ubuntu/workspace/_models/racer/t5-11b/pytorch_model.bin"
     },
+    "llava_vision_tower": {
+      "repository": "https://huggingface.co/openai/clip-vit-large-patch14-336",
+      "repository_commit": "ce19dc912ca5cd21c8a653c79e251e808ccabcd1",
+      "file": "pytorch_model.bin",
+      "bytes": 1711974081,
+      "sha256": "c6032c2e0caae3dc2d4fba35535fa6307dbb49df59c7e182b1bc4b3329b81801",
+      "server_b_path": "/home/ubuntu/workspace/_models/racer/clip-vit-large-patch14-336"
+    },
     "server_b_environment": {
       "name": "racer-official",
       "python": "3.9.23",
@@ -76,6 +92,18 @@
       "cuda_compiler": "12.8.61",
       "pytorch3d": "0.7.9 built for sm_120",
       "tensorflow": "2.15.1 compatibility replacement for upstream 2.13.1",
+      "gpu": "NVIDIA RTX 6000D",
+      "compute_capability": "12.0"
+    },
+    "server_b_service_environment": {
+      "name": "racer-services",
+      "python": "3.9.23",
+      "pytorch": "2.7.1+cu128 compatibility replacement for upstream 2.1.2",
+      "transformers": "4.37.2",
+      "tokenizers": "0.15.1",
+      "accelerate": "0.21.0",
+      "peft": "0.10.0",
+      "bitsandbytes": "0.45.5",
       "gpu": "NVIDIA RTX 6000D",
       "compute_capability": "12.0"
     },

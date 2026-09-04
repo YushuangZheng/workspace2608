@@ -1,0 +1,35 @@
+# Server-B RACER language/VLM service environment for compute capability 12.0.
+# Editable CLIP and Open-LLaVA-NeXT checkouts are installed after creation.
+name: racer-services
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9.23
+  - pip=25.2
+  - setuptools=80.9.0
+  - pip:
+      - --find-links=/home/ubuntu/workspace/_external/_wheels/faildetect-cu128
+      - torch==2.7.1+cu128
+      - torchvision==0.22.1+cu128
+      - numpy==1.26.4
+      - transformers==4.37.2
+      - tokenizers==0.15.1
+      - sentencepiece==0.1.99
+      - accelerate==0.21.0
+      - peft==0.10.0
+      - bitsandbytes==0.45.5
+      - scikit-learn==1.2.2
+      - fastapi==0.111.0
+      - uvicorn==0.30.1
+      - httpx==0.24.0
+      - gradio==4.16.0
+      - gradio-client==0.8.1
+      - einops==0.6.1
+      - einops-exts==0.0.4
+      - timm==0.6.13
+      - ftfy==6.3.1
+      - markdown2==2.5.5
+      - prettytable==3.16.0
+      - openpyxl==3.1.5
+      - tensorboardX==2.6.5
+      - shortuuid==1.0.13

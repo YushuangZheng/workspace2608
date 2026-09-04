@@ -1,0 +1,32 @@
+{
+  "status": "pass",
+  "scope": "official_racer_service_component_gpu_smoke",
+  "versions": {
+    "python": "3.9.23",
+    "torch": "2.7.1+cu128",
+    "torch_cuda_build": "12.8",
+    "transformers": "4.37.2",
+    "tokenizers": "0.15.1",
+    "accelerate": "0.21.0",
+    "peft": "0.10.0",
+    "bitsandbytes": "0.45.5"
+  },
+  "device": "cuda:0",
+  "device_name": "NVIDIA RTX 6000D",
+  "compute_capability": "12.0",
+  "component": "llava_vlm",
+  "official_commit": "cff008a5cc15d153e89314fe778251a2a8fbd271",
+  "base_dir": "/home/ubuntu/workspace/_models/racer/llama3-llava-next-8b",
+  "adapter_dir": "/home/ubuntu/workspace/_models/racer/llava-lora-rich",
+  "vision_tower": "/home/ubuntu/workspace/_models/racer/clip-vit-large-patch14-336",
+  "compatibility_override": "resource paths only: local model base and vision tower",
+  "precision": "torch.float16",
+  "context_length": 2048,
+  "generated_token_count": 1,
+  "generated_text_nonempty": true,
+  "parameter_count": 8354760704,
+  "elapsed_seconds": 45.564,
+  "allocated_mib": 16073.58,
+  "peak_memory_mib": 18075.587,
+  "formal_evaluation": "not_run_requires_server_a_native6_manifest"
+}

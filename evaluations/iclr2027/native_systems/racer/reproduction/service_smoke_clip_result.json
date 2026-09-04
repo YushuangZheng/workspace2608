@@ -1,0 +1,31 @@
+{
+  "status": "pass",
+  "scope": "official_racer_service_component_gpu_smoke",
+  "versions": {
+    "python": "3.9.23",
+    "torch": "2.7.1+cu128",
+    "torch_cuda_build": "12.8",
+    "transformers": "4.37.2",
+    "tokenizers": "0.15.1",
+    "accelerate": "0.21.0",
+    "peft": "0.10.0",
+    "bitsandbytes": "0.45.5"
+  },
+  "device": "cuda:0",
+  "device_name": "NVIDIA RTX 6000D",
+  "compute_capability": "12.0",
+  "component": "clip_language_encoder",
+  "checkpoint": "/home/ubuntu/workspace/_models/racer/clip/RN50.pt",
+  "checkpoint_sha256": "afeb0e10f9e5a86da6080e35cf09123aca3b358a0c3e3b6c78a7b63bc04b6762",
+  "output_shape": [
+    1,
+    77,
+    512
+  ],
+  "output_finite": true,
+  "parameter_count": 102007137,
+  "elapsed_seconds": 1.955,
+  "allocated_mib": 253.066,
+  "peak_memory_mib": 254.667,
+  "formal_evaluation": "not_run_requires_server_a_native6_manifest"
+}

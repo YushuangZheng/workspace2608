@@ -77,3 +77,18 @@ The synthetic tensor forward validates the released checkpoint and its GPU
 operators; it is not an RLBench success-rate measurement.  Formal Native-6/E6
 evaluation begins only after server A supplies the frozen Native-6 manifest,
 task mapping, observation schema, and controlled import contract.
+
+## Adapter requirements for Native-6
+
+- Preserve the four official cameras (`front`, `left_shoulder`,
+  `right_shoulder`, `wrist`) at 128 pixels, with RGB, point clouds, camera
+  intrinsics and the checkpoint-defined low-dimensional state.
+- Preserve the native 9-value action: XYZ waypoint, XYZW quaternion, discrete
+  gripper command and ignore-collision flag.  Execution uses
+  `EndEffectorPoseViaPlanning` followed by the discrete gripper action.
+- Preserve the official language-goal token stream; no monitor feature is fed
+  into the native policy.
+- Server A must provide the frozen Native-6 task/variation mapping, physical
+  fault boundary and success/audit contract.  The adapter may observe public
+  RGB/point-cloud/action traffic but must not read simulator-private task
+  state.  These requirements are recorded here without changing A's interface.
