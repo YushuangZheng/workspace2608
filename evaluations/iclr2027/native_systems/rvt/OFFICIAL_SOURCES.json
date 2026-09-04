@@ -13,7 +13,13 @@
     "clip": {
       "repository": "https://github.com/openai/CLIP",
       "commit": "d05afc436d78f1c48dc0dbf8e5980a9d471f35f6",
-      "external_checkout": "/home/ubuntu/workspace/_external/CLIP"
+      "external_checkout": "/home/ubuntu/workspace/_external/CLIP",
+      "checkpoint_url": "https://openaipublic.azureedge.net/clip/models/afeb0e10f9e5a86da6080e35cf09123aca3b358a0c3e3b6c78a7b63bc04b6762/RN50.pt",
+      "checkpoint_sha256": "afeb0e10f9e5a86da6080e35cf09123aca3b358a0c3e3b6c78a7b63bc04b6762",
+      "server_b_path": "/home/ubuntu/workspace/_models/racer/clip/RN50.pt",
+      "runtime_cache_path": "/home/ubuntu/.cache/clip/RN50.pt",
+      "runtime_cache_mode": "symlink_to_shared_immutable_checkpoint",
+      "offline_cpu_load_status": "pass"
     },
     "checkpoint": {
       "repository": "https://huggingface.co/ankgoyal/rvt",

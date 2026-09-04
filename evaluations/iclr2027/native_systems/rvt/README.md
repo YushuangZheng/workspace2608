@@ -15,6 +15,11 @@ recovery code, runners, analysis, or controlled results.
 - RLBench's official `close_jar` task launches in the pinned simulator stack,
   resets successfully, and returns RGB, point-cloud, and low-dimensional
   observations.
+- The real evaluator's additional `clip.load("RN50")` path resolves offline
+  through `/home/ubuntu/.cache/clip/RN50.pt`, a symlink to the already verified
+  immutable OpenAI RN50 checkpoint shared with RACER.  Its SHA-256 is recorded
+  in `OFFICIAL_SOURCES.json`, and an isolated CPU load produced the expected
+  102,007,137-parameter CLIP model.
 
 The upstream Python 3.8 / PyTorch 1.12.1 stack predates compute capability
 12.0.  The validated compatibility environment therefore uses Python 3.9.23,
