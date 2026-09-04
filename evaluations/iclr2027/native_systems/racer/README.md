@@ -149,3 +149,27 @@ validates the released visuomotor checkpoint.  Semantic service correctness is
 covered separately by the actual CLIP, T5-11B, and LLaVA GPU smokes above.
 End-to-end E6 rollouts and formal paper evidence still require server A's
 frozen Native-6 manifest and shared monitor/recovery contract.
+
+## Seeded live nominal gates
+
+`reproduction/live_nominal.py` runs the official checkpoint and RACER RLBench
+environment from deterministic released RNG states.  It supports both the
+task-goal-only path and the complete rich path in which LLaVA emits the current
+instruction and T5-11B encodes the policy input.  The local language server
+retains the released `/encode/` response contract while making the external
+checkpoint path configurable and caching identical text requests.
+
+The resume-safe supervisor in
+`../complete_live_reproduction.py` waits for the 8-GPU FAIL-Detect job to
+release the machine, then runs RVT, starts T5 while RVT is executing, runs the
+RACER task-goal gate while LLaVA loads, and finally runs the rich RACER gate.
+Large logs, videos and model artifacts remain under `_runs`, outside Git.
+
+```bash
+python -m evaluations.iclr2027.native_systems.complete_live_reproduction \
+  --eval-episodes 25
+```
+
+These live gates prove real perception-action execution and service wiring on
+server B.  They are explicitly not labelled as formal E6 evidence until A
+delivers the frozen Native-6 manifest and shared auditor contract.

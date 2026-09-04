@@ -78,6 +78,26 @@ operators; it is not an RLBench success-rate measurement.  Formal Native-6/E6
 evaluation begins only after server A supplies the frozen Native-6 manifest,
 task mapping, observation schema, and controlled import contract.
 
+## Seeded live nominal gate
+
+`reproduction/live_nominal.py` replaces only upstream demo-file loading with a
+live RLBench reset.  It otherwise calls the pinned RVT evaluator, checkpoint,
+observation path and native action executor.  The default 25 resets use the
+immutable simulator RNG states released with RACER so repeated RVT/RACER
+development checks can start from the same scenes.
+
+```bash
+xvfb-run -a -s '-screen 0 1280x1024x24 +extension GLX +render' \
+  conda run -n rvt-official python -m \
+  evaluations.iclr2027.native_systems.rvt.reproduction.live_nominal \
+  --tasks close_jar --eval-episodes 25 \
+  --output /home/ubuntu/workspace/_runs/native_systems/rvt_close_jar_live.json
+```
+
+This is genuine closed-loop simulator execution, but remains development
+evidence rather than an E6 paper result because it does not substitute for A's
+frozen Native-6 task/variation and audit manifest.
+
 ## Adapter requirements for Native-6
 
 - Preserve the four official cameras (`front`, `left_shoulder`,
