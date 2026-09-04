@@ -18,6 +18,9 @@ owned and are not changed here.
   checksum-validated outside the project repository.
 - The official CLIP RN50 language encoder produces finite `[1, 77, 512]`
   token features in the isolated service environment.
+- The official T5-11B FP32 checkpoint loads its 4,864,791,552-parameter encoder
+  on one GPU and produces finite `[1, 6, 1024]` token features.  The measured
+  peak is 18,569.445 MiB and the load-plus-forward time is 361.673 seconds.
 - The released LLaVA rich adapter, Llama-3 LLaVA base, and CLIP vision tower
   complete a single-GPU FP16 image-to-text generation.  The measured peak is
   18,075.587 MiB for 8,354,760,704 parameters.
@@ -141,8 +144,8 @@ xvfb-run -a -s '-screen 0 1280x1024x24 +extension GLX +render' \
   evaluations/iclr2027/native_systems/racer/reproduction/official_smoke_result.json
 ```
 
-The synthetic T5-shaped embedding validates the released visuomotor policy
-without claiming semantic language-service correctness.  End-to-end RACER
-service and E6 rollouts additionally require the T5-11B/LLaVA services and,
-for formal paper evidence, server A's frozen Native-6 manifest and shared
-monitor/recovery contract.
+The synthetic T5-shaped embedding in the policy-only smoke isolates and
+validates the released visuomotor checkpoint.  Semantic service correctness is
+covered separately by the actual CLIP, T5-11B, and LLaVA GPU smokes above.
+End-to-end E6 rollouts and formal paper evidence still require server A's
+frozen Native-6 manifest and shared monitor/recovery contract.

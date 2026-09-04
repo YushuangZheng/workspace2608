@@ -1,0 +1,31 @@
+{
+  "status": "pass",
+  "scope": "official_racer_service_component_gpu_smoke",
+  "versions": {
+    "python": "3.9.23",
+    "torch": "2.7.1+cu128",
+    "torch_cuda_build": "12.8",
+    "transformers": "4.37.2",
+    "tokenizers": "0.15.1",
+    "accelerate": "0.21.0",
+    "peft": "0.10.0",
+    "bitsandbytes": "0.45.5"
+  },
+  "device": "cuda:0",
+  "device_name": "NVIDIA RTX 6000D",
+  "compute_capability": "12.0",
+  "component": "t5_11b_language_encoder",
+  "model_dir": "/home/ubuntu/workspace/_models/racer/t5-11b",
+  "checkpoint_sha256": "5fdc64177b14b0f72437fea171a752c626733f67755842528c75b90cacd1c807",
+  "output_shape": [
+    1,
+    6,
+    1024
+  ],
+  "output_finite": true,
+  "parameter_count": 4864791552,
+  "elapsed_seconds": 361.673,
+  "allocated_mib": 18566.356,
+  "peak_memory_mib": 18569.445,
+  "formal_evaluation": "not_run_requires_server_a_native6_manifest"
+}
