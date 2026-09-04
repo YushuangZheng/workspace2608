@@ -166,6 +166,13 @@ conda run -n faildetect-gpu-b758e55f \
   --run-dir "$RUN"
 ```
 
+The first atomic checkpoint is independently audited on CPU by
+`validate_policy_checkpoint`.  The validator reconstructs the pinned upstream
+workspace from the serialized config and loads the model, EMA model,
+optimizer, scheduler, epoch and global step through the same payload path used
+for resume.  It also checks floating tensors and records the checkpoint hash,
+so a running multi-GPU job need not be interrupted merely to prove recovery.
+
 The targeted rollout driver disables unrelated baselines and unconditional
 PNG diagnostics in the public all-baselines runner.  It retains the pinned
 policy, simulator, modification operation, success condition, and logpZO
