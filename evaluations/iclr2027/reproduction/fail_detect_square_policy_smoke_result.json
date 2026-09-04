@@ -1,0 +1,26 @@
+{
+  "date": "2026-09-04",
+  "status": "pass",
+  "scope": "official_square_real_data_one_optimizer_step",
+  "official_commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed",
+  "official_config": "image_square_ph_visual_flow_policy_cnn.yaml",
+  "dataset": "/home/ubuntu/workspace/_datasets/robomimic-v0.1/square/ph/image_abs.hdf5",
+  "dataset_samples": 28150,
+  "torch_version": "2.7.1+cu128",
+  "torch_cuda_build": "12.8",
+  "device": "cuda:0",
+  "observation_shapes": {
+    "agentview_image": [1, 2, 3, 84, 84],
+    "robot0_eef_pos": [1, 2, 3],
+    "robot0_eef_quat": [1, 2, 4],
+    "robot0_eye_in_hand_image": [1, 2, 3, 84, 84],
+    "robot0_gripper_qpos": [1, 2, 2]
+  },
+  "action_shape": [1, 16, 10],
+  "model_parameters": 278006344,
+  "loss": 1.4892374277114868,
+  "gradient_norm": 26.3872127532959,
+  "max_first_parameter_update": 0.00010000169277191162,
+  "cuda_peak_allocated_bytes": 5601524224,
+  "cuda_peak_reserved_bytes": 5637144576
+}

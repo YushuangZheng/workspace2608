@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-04",
+  "status": "pass",
+  "scope": "algorithm_only_synthetic_data",
+  "official_commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed",
+  "torch_version": "2.7.1+cu128",
+  "torch_cuda_build": "12.8",
+  "device": "cuda:0",
+  "device_name": "NVIDIA RTX 6000D",
+  "compute_capability": "12.0",
+  "compiled_arch": "sm_120",
+  "official_unet_input_shape": [1, 28, 10],
+  "train_loss": 2.1580545902252197,
+  "logpzo_score": 146.1243438720703,
+  "conformal_max_abs_error": 0.0
+}

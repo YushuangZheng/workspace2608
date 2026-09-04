@@ -1,0 +1,58 @@
+# Server-B compatibility environment for RTX 6000D (compute capability 12.0).
+# Recreate with the build variables shown in monitors/README.md.  The local
+# wheel/source paths are immutable external artifacts recorded in
+# monitors/OFFICIAL_SOURCES.json.
+name: faildetect-gpu-b758e55f
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9.23
+  # pip 25 rejects gym 0.21's legacy `opencv-python>=3.` metadata.
+  - pip=22.2.2
+  - setuptools=80.9.0
+  - numpy=1.23.3
+  - scipy=1.9.1
+  - einops=0.4.1
+  - pytest=8.3.5
+  - gym=0.21.0
+  - pip:
+      - --find-links=/home/ubuntu/workspace/_external/_wheels/faildetect-cu128
+      - torch==2.7.1+cu128
+      - torchvision==0.22.1+cu128
+      - h5py==3.7.0
+      - hydra-core==1.2.0
+      - omegaconf==2.2.3
+      - zarr==2.12.0
+      - numcodecs==0.10.2
+      - tqdm==4.64.1
+      - dill==0.3.5.1
+      - scikit-image==0.19.3
+      - threadpoolctl==3.1.0
+      - wandb==0.13.3
+      - diffusers==0.11.1
+      - huggingface_hub==0.25.0
+      - imageio==2.22.0
+      - imageio-ffmpeg==0.4.7
+      - click==8.0.4
+      - termcolor==2.0.1
+      - psutil==5.9.2
+      - imagecodecs==2022.9.26
+      # PyAV 10 has no compatible Python 3.9 wheel on the configured index and
+      # its source build needs an obsolete FFmpeg stack.  12.3 is the earliest
+      # wheel tested with the unchanged VideoRecorder calls used here.
+      - av==12.3.0
+      - matplotlib==3.6.1
+      # Imported by the official JsonLogger but omitted upstream.
+      - pandas==1.5.1
+      - protobuf==3.19.6
+      - tensorboard==2.10.1
+      - tensorboardX==2.5.1
+      - google-auth==2.13.0
+      - cryptography==38.0.4
+      - cffi==1.15.1
+      - free-mujoco-py==2.1.6
+      - numba==0.53.1
+      - llvmlite==0.36.0
+      - robomimic==0.2.0
+      - robosuite @ file:///home/ubuntu/workspace/_external/_sources/robosuite-277ab9588ad7a4f4b55cf75508b44aa67ec171f0.tar.gz
+      - pytorch3d @ file:///home/ubuntu/workspace/_external/pytorch3d

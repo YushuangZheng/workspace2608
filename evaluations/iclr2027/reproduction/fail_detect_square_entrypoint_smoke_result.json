@@ -1,0 +1,27 @@
+{
+  "date": "2026-09-04",
+  "status": "pass",
+  "scope": "official_train_entrypoint_one_train_batch_one_validation_batch_one_short_rollout",
+  "official_commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed",
+  "official_config": "image_square_ph_visual_flow_policy_cnn.yaml",
+  "seed": 1103,
+  "device": "cuda:0",
+  "output_dir": "/home/ubuntu/workspace/_runs/fail_detect/square_flow_seed1103_smoke_20260904",
+  "train_batches": 1,
+  "validation_batches": 1,
+  "rollout_environments": 1,
+  "rollout_steps": 8,
+  "policy_inference_steps": 2,
+  "checkpoint_written": false,
+  "wandb_mode": "offline",
+  "train_loss": 1.4314597845077515,
+  "validation_loss": 1.4610942602157593,
+  "train_action_mse_error": 0.8556619882583618,
+  "test_mean_score": 0.0,
+  "render_backend": "osmesa",
+  "notes": [
+    "The pinned train.py points Hydra at a missing diffusion_policy/config directory, so a temporary symlink to configs_robomimic was used and removed after the run.",
+    "All EGL device probes failed on this host; the short rollout completed with MUJOCO_GL=osmesa.",
+    "This smoke is deliberately too short to measure policy quality."
+  ]
+}

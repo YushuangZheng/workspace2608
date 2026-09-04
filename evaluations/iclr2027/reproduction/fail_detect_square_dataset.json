@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-04",
+  "dataset": "Robomimic v0.1 Square Proficient-Human image",
+  "authoritative_source": "https://downloads.cs.stanford.edu/downloads/rt_benchmark/square/ph/image.hdf5",
+  "server_b_path": "/home/ubuntu/workspace/_datasets/robomimic-v0.1/square/ph/image.hdf5",
+  "bytes": 2603429840,
+  "sha256": "8901b2e4546c59d57436e2dcad4ba643c806ae3db0133b4bd1859236a0f4eae0",
+  "demonstrations": 200,
+  "transitions": 30154,
+  "demo_0_action_shape": [127, 7],
+  "demo_0_state_shape": [127, 45],
+  "absolute_action_conversion": {
+    "tool": "FAIL-Detect/diffusion_policy/scripts/robomimic_dataset_conversion.py",
+    "tool_commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed",
+    "server_b_path": "/home/ubuntu/workspace/_datasets/robomimic-v0.1/square/ph/image_abs.hdf5",
+    "bytes": 2603429840,
+    "sha256": "271395498d89a6bedeab52e8a68649dbbc2121269363a5cfbe3c785a54e6e3ee",
+    "workers": 16,
+    "validation": {
+      "structural_match": true,
+      "root_attributes_equal": true,
+      "demo_attributes_equal": true,
+      "all_actions_finite": true,
+      "action_values_changed": true,
+      "max_abs_action_delta": 3.4482297316460815,
+      "sample_non_action_arrays_equal": true
+    }
+  },
+  "zarr_cache": {
+    "path": "/home/ubuntu/workspace/_datasets/robomimic-v0.1/square/ph/image_abs.hdf5.zarr.zip",
+    "bytes": 183812829,
+    "sha256": "8ee9ec839d4adc44b53ec7fb29afe1c5b41f26d055621866be646ee886c3815d"
+  },
+  "policy_training_step_smoke": "pass",
+  "next_step": "launch the separately recorded full policy-training run after the experiment seed and GPU allocation are frozen"
+}

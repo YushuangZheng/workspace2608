@@ -1,0 +1,95 @@
+{
+  "fail_detect": {
+    "repository": "https://github.com/CXU-TRI/FAIL-Detect",
+    "commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed",
+    "commit_date": "2025-06-18T15:41:52-07:00",
+    "paper": "https://arxiv.org/abs/2503.08558v3",
+    "paper_date": "2025-06-20",
+    "license": "CC-BY-NC-4.0",
+    "external_checkout": "/home/ubuntu/workspace/_external/FAIL-Detect",
+    "official_environment": {
+      "name": "faildetect-official-b758e55f",
+      "source": "conda_environment.yaml",
+      "status": "unsatisfiable_with_current_channel_metadata",
+      "blocker": "av=10.0.0 has no FFmpeg provider compatible with the remaining exact pins"
+    },
+    "algorithm_smoke_environment": {
+      "name": "faildetect-logpzo-b758e55f",
+      "status": "compatible_subset",
+      "python": "3.9",
+      "pytorch": "1.12.1",
+      "cudatoolkit": "11.6",
+      "mkl": "2023.2.0",
+      "robosuite_commit": "277ab9588ad7a4f4b55cf75508b44aa67ec171f0",
+      "robomimic": "0.2.0",
+      "numba": "0.53.1",
+      "purpose": "official logpZO algorithm smoke and Square dataset conversion",
+      "excluded_scope": "GPU policy training and environment rollout",
+      "server_b_device": "cpu because the official PyTorch build predates sm_120",
+      "binary_repair": "cleared executable-stack flag on torch/lib/libtorch_cpu.so",
+      "system_build_requirements": [
+        "gcc-12",
+        "g++-12",
+        "libosmesa6-dev",
+        "libgl1-mesa-dev",
+        "libglfw3"
+      ]
+    },
+    "server_b_gpu_environment": {
+      "name": "faildetect-gpu-b758e55f",
+      "status": "validated",
+      "python": "3.9.23",
+      "pytorch": "2.7.1+cu128",
+      "torchvision": "0.22.1+cu128",
+      "cuda_runtime": "12.8",
+      "pytorch3d": "0.7.9",
+      "pytorch3d_commit": "33824be3cbc87a7dd1db0f6a9a9de9ac81b2d0ba",
+      "pyav": "12.3.0",
+      "wheel_cache": "/home/ubuntu/workspace/_external/_wheels/faildetect-cu128",
+      "reason": "upstream PyTorch 1.12.1 and PyTorch3D 0.7.0 predate compute capability 12.0",
+      "validation": [
+        "sm_120 CUDA matrix multiplication",
+        "official logpZO UNet forward/backward/update",
+        "official Square real-data policy forward/backward/update",
+        "official train entrypoint with train, validation, and short MuJoCo rollout",
+        "pip check"
+      ]
+    },
+    "official_entrypoint_discrepancies": [
+      "train.py declares diffusion_policy/config as Hydra's primary config directory, but that directory is absent at the pinned commit",
+      "the workspace imports pandas although pandas is absent from conda_environment.yaml",
+      "PyAV 10.0.0 has no usable Python 3.9 wheel on server B's package index, so the validated rollout environment uses PyAV 12.3.0"
+    ],
+    "server_b_hardware": {
+      "gpu": "NVIDIA RTX 6000D",
+      "compute_capability": "12.0"
+    },
+    "square_ph_image_dataset": {
+      "source": "https://downloads.cs.stanford.edu/downloads/rt_benchmark/square/ph/image.hdf5",
+      "path": "/home/ubuntu/workspace/_datasets/robomimic-v0.1/square/ph/image.hdf5",
+      "bytes": 2603429840,
+      "sha256": "8901b2e4546c59d57436e2dcad4ba643c806ae3db0133b4bd1859236a0f4eae0",
+      "demonstrations": 200,
+      "transitions": 30154,
+      "absolute_action_path": "/home/ubuntu/workspace/_datasets/robomimic-v0.1/square/ph/image_abs.hdf5",
+      "absolute_action_bytes": 2603429840,
+      "absolute_action_sha256": "271395498d89a6bedeab52e8a68649dbbc2121269363a5cfbe3c785a54e6e3ee",
+      "conversion_status": "validated",
+      "zarr_cache_bytes": 183812829,
+      "zarr_cache_sha256": "8ee9ec839d4adc44b53ec7fb29afe1c5b41f26d055621866be646ee886c3815d",
+      "official_policy_one_step_status": "pass",
+      "official_entrypoint_short_rollout_status": "pass"
+    },
+    "formal_calibration_owner": "server_a",
+    "server_b_inputs": [
+      "official successful demonstrations for reproduction",
+      "A-provided failure-train bundle when frozen",
+      "A-provided development-only adapter examples when frozen"
+    ],
+    "server_b_forbidden_inputs": [
+      "Main-10 normal calibration",
+      "Main-10 sealed test",
+      "Stress-4 sealed test views"
+    ]
+  }
+}

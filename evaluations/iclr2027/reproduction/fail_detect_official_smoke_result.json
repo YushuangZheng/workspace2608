@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-04",
+  "host": "zhengyukun-1",
+  "status": "pass",
+  "scope": "algorithm_only_synthetic_data",
+  "official_commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed",
+  "environment": "faildetect-logpzo-b758e55f",
+  "torch_version": "1.12.1",
+  "torch_cuda_build": "11.6",
+  "device": "cpu",
+  "official_unet_input_shape": [1, 28, 10],
+  "train_loss": 2.057438373565674,
+  "logpzo_score": 140.3525390625,
+  "conformal_max_abs_error": 0.0,
+  "environment_repairs": [
+    "pin mkl=2023.2.0 to preserve the old PyTorch ABI",
+    "clear the executable-stack flag on torch/lib/libtorch_cpu.so"
+  ]
+}

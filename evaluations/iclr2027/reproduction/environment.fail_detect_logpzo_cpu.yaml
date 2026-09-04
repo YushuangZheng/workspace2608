@@ -1,0 +1,33 @@
+name: faildetect-logpzo-b758e55f
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pytorch=1.12.1
+  - cudatoolkit=11.6
+  - numpy=1.23.3
+  - scipy=1.9.1
+  - einops=0.4.1
+  - torchvision=0.13.1
+  - h5py=3.7.0
+  - hydra-core=1.2.0
+  - zarr=2.12.0
+  - numcodecs=0.10.2
+  - tqdm=4.64.1
+  - dill=0.3.5.1
+  - click=8.0.4
+  - imageio=2.22.0
+  - imageio-ffmpeg=0.4.7
+  - scikit-image=0.19.3
+  # Current unconstrained MKL resolves to an ABI-incompatible 2026 build.
+  - mkl=2023.2.0
+  - pip
+  - pip:
+      - free-mujoco-py==2.1.6
+      - llvmlite==0.36.0
+      # robosuite 1.2.0 declares numba<=0.53.1, unlike the upstream
+      # FAIL-Detect environment's incompatible numba=0.56.4 pin.
+      - numba==0.53.1
+      - robomimic==0.2.0
+      - robosuite @ https://github.com/ARISE-Initiative/robosuite/archive/277ab9588ad7a4f4b55cf75508b44aa67ec171f0.tar.gz
