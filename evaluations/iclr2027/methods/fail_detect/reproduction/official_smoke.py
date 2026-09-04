@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from evaluations.iclr2027.monitors import (
+from evaluations.iclr2027.methods.fail_detect import (
     TimeVaryingConformalBand,
     TorchLogpZOScorer,
     prepare_logpzo_input,

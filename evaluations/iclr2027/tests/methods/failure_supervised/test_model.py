@@ -4,7 +4,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from evaluations.iclr2027.training.causal_gru import (  # noqa: E402
+from evaluations.iclr2027.methods.failure_supervised.model import (  # noqa: E402
     CausalGRUClassifier,
     masked_binary_cross_entropy,
 )

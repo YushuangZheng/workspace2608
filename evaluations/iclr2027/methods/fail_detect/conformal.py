@@ -1,4 +1,4 @@
-"""One-sided time-varying functional conformal bands for scalar scores."""
+"""Official-style one-sided functional conformal bands for FAIL-Detect."""
 
 from __future__ import annotations
 

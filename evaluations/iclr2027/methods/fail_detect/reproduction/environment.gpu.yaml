@@ -1,7 +1,7 @@
 # Server-B compatibility environment for RTX 6000D (compute capability 12.0).
-# Recreate with the build variables shown in monitors/README.md.  The local
+# Recreate with the build variables shown in ../README.md.  The local
 # wheel/source paths are immutable external artifacts recorded in
-# monitors/OFFICIAL_SOURCES.json.
+# ../OFFICIAL_SOURCES.json.
 name: faildetect-gpu-b758e55f
 channels:
   - conda-forge

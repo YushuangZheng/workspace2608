@@ -15,7 +15,8 @@
     },
     "algorithm_smoke_environment": {
       "name": "faildetect-logpzo-b758e55f",
-      "status": "compatible_subset",
+      "status": "validated_then_removed_from_server_b",
+      "specification": "evaluations/iclr2027/methods/fail_detect/reproduction/environment.official_cpu.yaml",
       "python": "3.9",
       "pytorch": "1.12.1",
       "cudatoolkit": "11.6",

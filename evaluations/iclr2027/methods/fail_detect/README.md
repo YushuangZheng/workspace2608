@@ -1,8 +1,9 @@
-# ICLR 2027 runtime monitors
+# M3 FAIL-Detect adapter and reproduction
 
-This directory contains the benchmark-neutral online-monitor contract and the
-server-B implementation of M3 (FAIL-Detect).  It does not reuse or modify the
-frozen stage-six evaluator.
+This method-owned directory contains server B's M3 adapter, preprocessing,
+inference code, dependency records, and official reproduction evidence. It
+does not define or modify A-owned interfaces, tasks, faults, recovery, runners,
+manifests, calibration data, sealed tests, or controlled results.
 
 ## Current boundary
 
@@ -11,17 +12,19 @@ frozen stage-six evaluator.
   environment live outside this repository.
 - The exact upstream conda file is currently unsatisfiable because its fixed
   `av=10.0.0` dependency has no FFmpeg build compatible with the remaining
-  pins in current channel metadata.  The isolated
-  `faildetect-logpzo-b758e55f` environment retains Python 3.9, PyTorch 1.12.1,
+  pins in current channel metadata. The reproducible
+  `faildetect-logpzo-b758e55f` specification records Python 3.9, PyTorch 1.12.1,
   CUDA Toolkit 11.6, NumPy 1.23.3, SciPy 1.9.1, and Einops 0.4.1 for an
   algorithm-level smoke.  It runs on CPU because that PyTorch build predates
-  server B's compute capability 12.0 GPU.  MKL is pinned to 2023.2.0 because
-  a current unconstrained solve installs an ABI-incompatible MKL 2026 build.
+  server B's compute capability 12.0 GPU. This old CPU-only environment was
+  removed after validation to keep server B's environment list lean; it can be
+  rebuilt from `reproduction/environment.official_cpu.yaml`. MKL is pinned to
+  2023.2.0 because a current solve installs an incompatible MKL 2026 build.
 - The Square Proficient-Human image dataset was downloaded from Robomimic's
   authoritative v0.1 URL and converted with the pinned repository's official
   conversion script.  The validated `image_abs.hdf5` contains 200 demos and
   30,154 transitions; its provenance and checksums are in
-  `reproduction/fail_detect_square_dataset.json`.
+  `reproduction/square_dataset.json`.
 - The pinned robosuite 1.2.0 setup declares `numba<=0.53.1`, which conflicts
   with the upstream FAIL-Detect conda file's `numba=0.56.4`.  The working
   conversion environment records the dependency-compatible 0.53.1 choice
@@ -61,11 +64,15 @@ public code's `adjust_xshape` padding/reshape and the paper's one-step score
 `||O + f(O, 0)||^2`; it receives the trained velocity model and explicit task
 action dimension from the isolated method environment.
 
-Run the pinned synthetic-data parity smoke from the repository root with:
+Recreate the optional parity environment and run the pinned synthetic-data
+smoke from the repository root with:
 
 ```bash
+conda env create -f \
+  evaluations/iclr2027/methods/fail_detect/reproduction/environment.official_cpu.yaml
+
 conda run -n faildetect-logpzo-b758e55f \
-  python -m evaluations.iclr2027.reproduction.fail_detect_official_smoke
+  python -m evaluations.iclr2027.methods.fail_detect.reproduction.official_smoke
 ```
 
 On server B, the old PyTorch package also needs its obsolete executable-stack
@@ -86,8 +93,8 @@ Server B actually exposes eight NVIDIA RTX 6000D devices with compute
 capability 12.0.  The upstream PyTorch 1.12.1 / PyTorch3D 0.7.0 combination
 cannot execute on them, so `faildetect-gpu-b758e55f` uses the earliest tested
 PyTorch CUDA 12.8 build here (`2.7.1+cu128`) and PyTorch3D v0.7.9 built from
-official source.  This compatibility environment is separate from the CPU
-environment retained for old-version algorithm parity.
+official source. This compatibility environment is independent from the
+optional CPU environment used for old-version algorithm parity.
 
 Recreate it after the external sources and CUDA wheel cache are present:
 
@@ -95,19 +102,19 @@ Recreate it after the external sources and CUDA wheel cache are present:
 CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 CC=/usr/bin/gcc-12 CXX=/usr/bin/g++-12 MUJOCO_GL=osmesa \
 conda env create -f \
-  evaluations/iclr2027/reproduction/environment.fail_detect_gpu.yaml
+  evaluations/iclr2027/methods/fail_detect/reproduction/environment.gpu.yaml
 ```
 
 Run the GPU algorithm check and the real-data Square optimizer-step check:
 
 ```bash
 conda run -n faildetect-gpu-b758e55f \
-  python -m evaluations.iclr2027.reproduction.fail_detect_official_smoke \
+  python -m evaluations.iclr2027.methods.fail_detect.reproduction.official_smoke \
   --device cuda:0
 
 CC=/usr/bin/gcc-12 CXX=/usr/bin/g++-12 MUJOCO_GL=osmesa \
 conda run -n faildetect-gpu-b758e55f \
-  python -m evaluations.iclr2027.reproduction.fail_detect_square_policy_smoke \
+  python -m evaluations.iclr2027.methods.fail_detect.reproduction.square_policy_smoke \
   --device cuda:0
 ```
 
@@ -122,20 +129,6 @@ EGL probes failed on this host, so that smoke intentionally used OSMesa.  The
 run completed offline without a checkpoint; exact overrides and logs are in
 `/home/ubuntu/workspace/_runs/fail_detect/square_flow_seed1103_smoke_20260904`,
 and the concise result is in
-`reproduction/fail_detect_square_entrypoint_smoke_result.json`.  PyAV 12.3.0
+`reproduction/square_entrypoint_smoke_result.json`.  PyAV 12.3.0
 is the recorded compatibility substitute for the unsatisfiable upstream
 PyAV 10 / FFmpeg combination.
-
-## M4 supervised monitor boundary
-
-`FailureSupervisedMonitor` uses the same frozen one-dimensional causal feature
-vector as the FAIL-Detect adapter.  `training/causal_gru.py` provides a small
-unidirectional GRU and a padding-aware cycle loss; the runtime wrapper retains
-only past hidden state and emits the current violation probability.  Fault
-family, severity, trigger time, audit metadata, and future labels are not model
-inputs.
-
-The network is ready for synthetic/API checks, but no formal checkpoint is
-trained until server A freezes and transfers the failure-train bundle.  Server
-B will train weights from that bundle; server A alone will derive the formal
-normal-calibration threshold and persistence rule.

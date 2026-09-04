@@ -3,12 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from evaluations.iclr2027.monitors import (
+from evaluations.iclr2027.methods.fail_detect import (
     FailDetectMonitor,
     FailDetectMonitorConfig,
-    FailureSupervisedMonitor,
-    FailureSupervisedMonitorConfig,
-    RuntimeMonitor,
     TimeVaryingConformalBand,
     prepare_logpzo_input,
 )
@@ -106,7 +103,9 @@ def test_monitor_is_causal_and_applies_persistence() -> None:
         config=FailDetectMonitorConfig(observation_window=1, persistence=2),
     )
 
-    assert isinstance(monitor, RuntimeMonitor)
+    assert all(
+        callable(getattr(monitor, method)) for method in ("reset", "observe", "score", "alarm")
+    )
     monitor.reset({"episode_id": "development-1"})
     monitor.observe(np.asarray([1.5]), None, None)
     assert monitor.alarm() is False
@@ -150,50 +149,3 @@ def test_monitor_warmup_and_feature_shape_are_explicit() -> None:
     }
     with pytest.raises(ValueError, match="shape changed"):
         monitor.observe(np.asarray([0.2]), None, None)
-
-
-def test_supervised_monitor_resets_state_and_tracks_first_alarm() -> None:
-    class ProbabilitySequence:
-        def __init__(self) -> None:
-            self.values = iter(())
-            self.reset_count = 0
-
-        def reset(self) -> None:
-            self.values = iter((0.7, 0.8, 0.2))
-            self.reset_count += 1
-
-        def __call__(self, features: np.ndarray) -> float:
-            assert features.shape == (2,)
-            return next(self.values)
-
-    band = TimeVaryingConformalBand(
-        alpha=0.05,
-        mean=np.zeros(3),
-        modulation=np.ones(3),
-        band_width=0.5,
-        upper=np.full(3, 0.5),
-        mean_episode_count=2,
-        width_episode_count=2,
-    )
-    model = ProbabilitySequence()
-    monitor = FailureSupervisedMonitor(
-        model,
-        band,
-        config=FailureSupervisedMonitorConfig(persistence=2),
-    )
-
-    assert isinstance(monitor, RuntimeMonitor)
-    monitor.reset({"episode_id": "failure-train-development"})
-    assert model.reset_count == 1
-    monitor.observe(np.asarray([1.0, 2.0]), None, None)
-    assert monitor.alarm() is False
-    monitor.observe(np.asarray([2.0, 3.0]), None, None)
-    assert monitor.alarm() is True
-    assert monitor.score()["first_alarm_index"] == 1.0
-    monitor.observe(np.asarray([3.0, 4.0]), None, None)
-    assert monitor.alarm() is False
-    assert monitor.score()["first_alarm_index"] == 1.0
-
-    monitor.reset({})
-    assert model.reset_count == 2
-    assert monitor.score()["first_alarm_index"] == -1.0

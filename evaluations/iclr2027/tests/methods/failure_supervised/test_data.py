@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from evaluations.iclr2027.training.failure_splits import (
+from evaluations.iclr2027.methods.failure_supervised.data import (
     leave_one_family_out_view,
     nested_budget_views,
 )

@@ -1,4 +1,4 @@
-"""Causal runtime adapter for the M4 failure-supervised monitor."""
+"""Causal RuntimeMonitor adapter for the M4 failure-supervised method."""
 
 from __future__ import annotations
 
@@ -8,8 +8,31 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from .conformal import TimeVaryingConformalBand
-from .fail_detect import ArrayObservationEncoder, FeatureEncoder
+
+class ThresholdSchedule(Protocol):
+    """Minimal boundary accepted from A-owned calibration artifacts."""
+
+    def threshold(self, score_index: int) -> float: ...
+
+
+class FeatureEncoder(Protocol):
+    def __call__(self, observation: Any, action: Any, policy_state: Any) -> np.ndarray: ...
+
+
+class ArrayObservationEncoder:
+    """Provisional encoder for already-frozen one-dimensional features.
+
+    It deliberately makes no assumptions about the future A-owned feature
+    schema.  The final integration injects an encoder implementing the same
+    callable shape.
+    """
+
+    def __call__(self, observation: Any, action: Any, policy_state: Any) -> np.ndarray:
+        del action, policy_state
+        vector = np.asarray(observation, dtype=np.float64)
+        if vector.ndim != 1 or not len(vector) or not np.all(np.isfinite(vector)):
+            raise ValueError("supervised observation features must be a finite vector")
+        return vector.copy()
 
 
 class StatefulProbabilityModel(Protocol):
@@ -40,13 +63,13 @@ class FailureSupervisedMonitor:
     def __init__(
         self,
         probability_model: StatefulProbabilityModel,
-        conformal_band: TimeVaryingConformalBand,
+        threshold_schedule: ThresholdSchedule,
         *,
         feature_encoder: FeatureEncoder | None = None,
         config: FailureSupervisedMonitorConfig = FailureSupervisedMonitorConfig(),
     ) -> None:
         self.probability_model = probability_model
-        self.conformal_band = conformal_band
+        self.threshold_schedule = threshold_schedule
         self.feature_encoder = feature_encoder or ArrayObservationEncoder()
         self.config = config
         self._feature_shape: tuple[int, ...] | None = None
@@ -86,7 +109,7 @@ class FailureSupervisedMonitor:
             raise ValueError("supervised-monitor feature shape changed within an episode")
 
         next_score_index = self._score_index + 1
-        threshold = self.conformal_band.threshold(next_score_index)
+        threshold = self.threshold_schedule.threshold(next_score_index)
         probability = float(self.probability_model(features.copy()))
         if not np.isfinite(probability) or not 0.0 <= probability <= 1.0:
             raise ValueError("supervised model must return a probability in [0, 1]")
@@ -156,8 +179,11 @@ class TorchGRUProbabilityScorer:
 
 
 __all__ = [
+    "ArrayObservationEncoder",
+    "FeatureEncoder",
     "FailureSupervisedMonitor",
     "FailureSupervisedMonitorConfig",
     "StatefulProbabilityModel",
+    "ThresholdSchedule",
     "TorchGRUProbabilityScorer",
 ]

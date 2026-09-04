@@ -1,4 +1,4 @@
-"""FAIL-Detect logpZO runtime adapter with no benchmark dependency."""
+"""FAIL-Detect logpZO RuntimeMonitor adapter with no benchmark dependency."""
 
 from __future__ import annotations
 
