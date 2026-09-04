@@ -37,6 +37,7 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--poll-seconds", type=int, default=60)
+    parser.add_argument("--restart-grace-seconds", type=int, default=300)
     parser.add_argument("--rollouts-per-condition", type=int, default=2000)
     parser.add_argument("--rollouts-per-shard", type=int, default=500)
     parser.add_argument("--parallel-envs", type=int, default=25)
@@ -109,15 +110,39 @@ def main() -> None:
 
     policy_metrics = run_dir / "training_metrics.jsonl"
     policy_checkpoint = run_dir / "checkpoints/latest.ckpt"
-    launcher_pid = int((run_dir / "launcher.pid").read_text(encoding="utf-8"))
+    launcher_pid_path = run_dir / "launcher.pid"
+    launcher_pid = int(launcher_pid_path.read_text(encoding="utf-8"))
+    dead_since: float | None = None
     status("policy_training", "waiting", launcher_pid=launcher_pid)
     while True:
         latest = _last_jsonl(policy_metrics)
         if latest is not None and int(latest["epoch"]) == 799:
             break
-        if not _pid_exists(launcher_pid):
+        current_pid = int(launcher_pid_path.read_text(encoding="utf-8"))
+        if current_pid != launcher_pid:
+            launcher_pid = current_pid
+            dead_since = None
+            status(
+                "policy_training",
+                "waiting_after_restart",
+                launcher_pid=launcher_pid,
+                latest=latest,
+            )
+        if _pid_exists(launcher_pid):
+            dead_since = None
+        elif dead_since is None:
+            dead_since = time.monotonic()
+            status(
+                "policy_training",
+                "awaiting_watchdog_restart",
+                launcher_pid=launcher_pid,
+                latest=latest,
+                restart_grace_seconds=args.restart_grace_seconds,
+            )
+        elif time.monotonic() - dead_since > args.restart_grace_seconds:
             raise RuntimeError(
-                f"policy trainer {launcher_pid} exited before epoch 800; latest={latest}"
+                f"policy trainer {launcher_pid} was not restarted within "
+                f"{args.restart_grace_seconds}s; latest={latest}"
             )
         time.sleep(args.poll_seconds)
     if not policy_checkpoint.is_file():

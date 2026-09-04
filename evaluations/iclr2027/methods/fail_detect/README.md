@@ -172,6 +172,11 @@ workspace from the serialized config and loads the model, EMA model,
 optimizer, scheduler, epoch and global step through the same payload path used
 for resume.  It also checks floating tensors and records the checkpoint hash,
 so a running multi-GPU job need not be interrupted merely to prove recovery.
+`watch_policy_training` separately watches the actual torchrun PID and, only
+after that process is absent or a zombie, restarts the identical eight-GPU
+command with the trainer's normal checkpoint-resume path.  The continuation
+driver rereads the atomically updated PID and allows a bounded restart grace
+period instead of mistaking a recovered run for a terminal failure.
 
 The targeted rollout driver disables unrelated baselines and unconditional
 PNG diagnostics in the public all-baselines runner.  It retains the pinned
