@@ -1,0 +1,66 @@
+{
+  "status": "pass",
+  "scope": "official_checkpoint_synthetic_tensor_gpu_forward",
+  "official_commit": "df8cb2beec2e2061392ef0c4be93bda916dfd51e",
+  "checkpoint": "/home/ubuntu/workspace/_models/racer/visuomotor-rich/model_17.pth",
+  "checkpoint_sha256": "73687bb41342b724d6fff8bb8776a0419155aaa6113e455907786e50c69b33f2",
+  "seed": 1103,
+  "synthetic_points": 2048,
+  "torch_version": "2.7.1+cu128",
+  "torch_cuda_build": "12.8",
+  "device": "cuda:0",
+  "device_name": "NVIDIA RTX 6000D",
+  "compute_capability": "12.0",
+  "parameter_count": 36872829,
+  "outputs": {
+    "trans": {
+      "shape": [
+        1,
+        5,
+        220,
+        220
+      ],
+      "finite": true
+    },
+    "feat": {
+      "shape": [
+        1,
+        220
+      ],
+      "finite": true
+    },
+    "raw_feat": {
+      "shape": [
+        1,
+        960
+      ],
+      "finite": true
+    }
+  },
+  "peak_memory_mib": 711.624,
+  "language_service": "not_used_synthetic_t5_embedding_only",
+  "formal_evaluation": "not_run_requires_server_a_native6_manifest",
+  "official_task_reset": {
+    "status": "pass",
+    "task": "close_jar",
+    "descriptions": [
+      "close the red jar",
+      "screw on the red jar lid",
+      "grasping the lid, lift it from the table and use it to seal the red jar",
+      "pick up the lid from the table and put it on the red jar"
+    ],
+    "front_rgb_shape": [
+      128,
+      128,
+      3
+    ],
+    "front_point_cloud_shape": [
+      128,
+      128,
+      3
+    ],
+    "low_dim_shape": [
+      114
+    ]
+  }
+}

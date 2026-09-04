@@ -1,0 +1,85 @@
+{
+  "racer": {
+    "repository": "https://github.com/sled-group/RACER",
+    "commit": "df8cb2beec2e2061392ef0c4be93bda916dfd51e",
+    "external_checkout": "/home/ubuntu/workspace/_external/RACER",
+    "submodules": {
+      "libs/PyRep": "231a1ac6b0a179cff53c1d403d379260b9f05f2f",
+      "libs/RLbench": "84cd2691742001b1ad66ee195c6e95aa42d1248a",
+      "libs/YARR": "d17ed930d2f0768cd89d82aafef81822fd056109",
+      "libs/peract_colab/peract_colab": "3d1e573aa688e5989a82e3c5ac93d83f0f37accb",
+      "racer/peract": "5c2988edb961d67d7a921cbbc638f69947debff8"
+    },
+    "pytorch3d": {
+      "repository": "https://github.com/facebookresearch/pytorch3d",
+      "commit": "33824be3cbc87a7dd1db0f6a9a9de9ac81b2d0ba",
+      "external_checkout": "/home/ubuntu/workspace/_external/pytorch3d",
+      "build": "CUDA 12.8, sm_120"
+    },
+    "visuomotor_checkpoint": {
+      "repository": "https://huggingface.co/Yinpei/racer-visuomotor-policy-rich",
+      "repository_commit": "3d387f2627fac0c3988905cb70850afd873124f0",
+      "file": "model_17.pth",
+      "bytes": 147540672,
+      "sha256": "73687bb41342b724d6fff8bb8776a0419155aaa6113e455907786e50c69b33f2",
+      "server_b_path": "/home/ubuntu/workspace/_models/racer/visuomotor-rich/model_17.pth"
+    },
+    "language_service_code": {
+      "repository": "https://github.com/rich-language-failure-recovery/Open-LLaVA-NeXT",
+      "branch": "racer_llava",
+      "commit": "cff008a5cc15d153e89314fe778251a2a8fbd271",
+      "external_checkout": "/home/ubuntu/workspace/_external/Open-LLaVA-NeXT"
+    },
+    "llava_adapter": {
+      "repository": "https://huggingface.co/Yinpei/racer-llava-llama3-lora-rich",
+      "repository_commit": "fa2f84f609d1c0861e3b7b7a7544c4ae5406f920",
+      "adapter_model_sha256": "30b24a887c78e0c80d84d52953598dde200a73570a851b1f87a85dfb6c324989",
+      "non_lora_trainables_sha256": "f7e55b4c84d5dce58e6c8991d0fb671be72510e6b4b3284b8c475c6ece170ee3",
+      "server_b_path": "/home/ubuntu/workspace/_models/racer/llava-lora-rich"
+    },
+    "llava_base": {
+      "repository": "https://huggingface.co/lmms-lab/llama3-llava-next-8b",
+      "repository_commit": "6d6dcb8d7948364bebef9c11aba6b0e6c8835391",
+      "files": {
+        "model-00001-of-00004.safetensors": {
+          "bytes": 4976706872,
+          "sha256": "eda352b5dd159390824859f8a31fb1c015bdf161ae44678602e88e3b4b631e1b"
+        },
+        "model-00002-of-00004.safetensors": {
+          "bytes": 4999802616,
+          "sha256": "639c39656a3ab2c3982d6ec389318efab7fee75296dc765335a4ff9a1a93101e"
+        },
+        "model-00003-of-00004.safetensors": {
+          "bytes": 4915916080,
+          "sha256": "7db41d8a6f73eb6cbb276cad770889c3e13fac731130127c7a60dbc8b1c82a36"
+        },
+        "model-00004-of-00004.safetensors": {
+          "bytes": 1817174536,
+          "sha256": "026b551b6165ea5cd9867f8b640ee819186fbdc032fb721c1304f261b34d436b"
+        }
+      },
+      "server_b_path": "/home/ubuntu/workspace/_models/racer/llama3-llava-next-8b"
+    },
+    "t5_11b": {
+      "repository": "https://huggingface.co/google-t5/t5-11b",
+      "repository_commit": "90f37703b3334dfe9d2b009bfcbfbf1ac9d28ea3",
+      "file": "pytorch_model.bin",
+      "bytes": 45229452544,
+      "sha256": "5fdc64177b14b0f72437fea171a752c626733f67755842528c75b90cacd1c807",
+      "server_b_path": "/home/ubuntu/workspace/_models/racer/t5-11b/pytorch_model.bin"
+    },
+    "server_b_environment": {
+      "name": "racer-official",
+      "python": "3.9.23",
+      "pytorch": "2.7.1+cu128",
+      "cuda_runtime": "12.8",
+      "cuda_compiler": "12.8.61",
+      "pytorch3d": "0.7.9 built for sm_120",
+      "tensorflow": "2.15.1 compatibility replacement for upstream 2.13.1",
+      "gpu": "NVIDIA RTX 6000D",
+      "compute_capability": "12.0"
+    },
+    "formal_evaluation_owner": "server_a",
+    "formal_evaluation_status": "waiting_for_frozen_native6_manifest_and_shared_contract"
+  }
+}

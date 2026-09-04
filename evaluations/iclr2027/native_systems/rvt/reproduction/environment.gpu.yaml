@@ -1,0 +1,43 @@
+# Server-B RVT compatibility environment for NVIDIA compute capability 12.0.
+# Local editable sources and the custom renderer are installed after creation;
+# see ../README.md and ../OFFICIAL_SOURCES.json.
+name: rvt-official
+channels:
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.9.23
+  - pip=26.0.1
+  - setuptools=80.9.0
+  - cffi=1.15.1
+  - gym=0.21.0
+  - cuda-nvcc=12.8.61
+  - libcurand-dev=10.3.9.90
+  - pip:
+      - --find-links=/home/ubuntu/workspace/_external/_wheels/faildetect-cu128
+      - torch==2.7.1+cu128
+      - torchvision==0.22.1+cu128
+      - numpy==1.26.4
+      - scipy==1.13.1
+      - pandas==1.5.1
+      - matplotlib==3.6.1
+      - imageio==2.22.0
+      - psutil==5.9.2
+      - einops==0.4.1
+      - tensorflow==2.15.1
+      - transformers==4.44.2
+      - bitsandbytes==0.45.5
+      - opencv-python==4.11.0.86
+      - pyrender==0.1.45
+      - hydra-core==1.3.2
+      - omegaconf==2.2.3
+      - yacs==0.1.8
+      - tensorboard==2.15.2
+      - tensorboardX==2.6.4
+      - moviepy==2.2.1
+      - natsort==8.4.0
+      - pyquaternion==0.9.9
+      - transforms3d==0.4.2
+      - trimesh==4.12.2
+      - timeout-decorator==0.5.0
+      - ftfy==6.3.1

@@ -1,0 +1,98 @@
+{
+  "status": "pass",
+  "scope": "official_checkpoint_synthetic_tensor_gpu_forward",
+  "official_commit": "367995a1a2169b6352bf4e8b0ed405890462a3a0",
+  "checkpoint": "/home/ubuntu/workspace/_models/rvt/rvt2/model_99.pth",
+  "checkpoint_sha256": "25b4cdeae72ac98ecf7eac79604d6553f50d4f8bef6cb2610631875b42cf437f",
+  "seed": 1103,
+  "synthetic_points": 2048,
+  "torch_version": "2.7.1+cu128",
+  "torch_cuda_build": "12.8",
+  "device": "cuda:0",
+  "device_name": "NVIDIA RTX 6000D",
+  "compute_capability": "12.0",
+  "parameter_count": 72288678,
+  "outputs": {
+    "trans": {
+      "shape": [
+        1,
+        3,
+        224,
+        224
+      ],
+      "finite": true
+    },
+    "wpt_local1": {
+      "shape": [
+        1,
+        3
+      ],
+      "finite": true
+    },
+    "rev_trans": "function",
+    "mvt2": {
+      "feat_ex_rot": {
+        "shape": [
+          1,
+          4
+        ],
+        "finite": true
+      },
+      "feat_x": {
+        "shape": [
+          1,
+          72
+        ],
+        "finite": true
+      },
+      "feat_y": {
+        "shape": [
+          1,
+          72
+        ],
+        "finite": true
+      },
+      "feat_z": {
+        "shape": [
+          1,
+          72
+        ],
+        "finite": true
+      },
+      "trans": {
+        "shape": [
+          1,
+          3,
+          224,
+          224
+        ],
+        "finite": true
+      }
+    }
+  },
+  "peak_memory_mib": 7540.556,
+  "formal_evaluation": "not_run_requires_server_a_native6_manifest",
+  "official_task_reset": {
+    "status": "pass",
+    "task": "close_jar",
+    "descriptions": [
+      "close the red jar",
+      "screw on the red jar lid",
+      "grasping the lid, lift it from the table and use it to seal the red jar",
+      "pick up the lid from the table and put it on the red jar"
+    ],
+    "front_rgb_shape": [
+      128,
+      128,
+      3
+    ],
+    "front_point_cloud_shape": [
+      128,
+      128,
+      3
+    ],
+    "low_dim_shape": [
+      114
+    ]
+  }
+}

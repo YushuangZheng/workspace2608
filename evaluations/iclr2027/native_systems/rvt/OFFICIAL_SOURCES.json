@@ -1,0 +1,40 @@
+{
+  "rvt": {
+    "repository": "https://github.com/NVlabs/RVT",
+    "commit": "367995a1a2169b6352bf4e8b0ed405890462a3a0",
+    "external_checkout": "/home/ubuntu/workspace/_external/RVT",
+    "submodules": {
+      "rvt/libs/PyRep": "231a1ac6b0a179cff53c1d403d379260b9f05f2f",
+      "rvt/libs/RLBench": "587a6a0e6dc8cd36612a208724eb275fe8cb4470",
+      "rvt/libs/YARR": "f4aaeea183321e6b526166249119071e64252ad2",
+      "rvt/libs/peract": "5c2988edb961d67d7a921cbbc638f69947debff8",
+      "rvt/libs/peract_colab/peract_colab": "3d1e573aa688e5989a82e3c5ac93d83f0f37accb"
+    },
+    "clip": {
+      "repository": "https://github.com/openai/CLIP",
+      "commit": "d05afc436d78f1c48dc0dbf8e5980a9d471f35f6",
+      "external_checkout": "/home/ubuntu/workspace/_external/CLIP"
+    },
+    "checkpoint": {
+      "repository": "https://huggingface.co/ankgoyal/rvt",
+      "repository_commit": "f4c52270ebd3041aba0ebd77f43f4e2c4e660287",
+      "file": "rvt2/model_99.pth",
+      "bytes": 867812309,
+      "sha256": "25b4cdeae72ac98ecf7eac79604d6553f50d4f8bef6cb2610631875b42cf437f",
+      "server_b_path": "/home/ubuntu/workspace/_models/rvt/rvt2/model_99.pth"
+    },
+    "server_b_environment": {
+      "name": "rvt-official",
+      "python": "3.9.23",
+      "pytorch": "2.7.1+cu128",
+      "cuda_runtime": "12.8",
+      "cuda_compiler": "12.8.61",
+      "point_renderer": "0.2.0 built for sm_120",
+      "bitsandbytes": "0.45.5 compatibility replacement for upstream 0.38.1",
+      "gpu": "NVIDIA RTX 6000D",
+      "compute_capability": "12.0"
+    },
+    "formal_evaluation_owner": "server_a",
+    "formal_evaluation_status": "waiting_for_frozen_native6_manifest_and_shared_schema"
+  }
+}
