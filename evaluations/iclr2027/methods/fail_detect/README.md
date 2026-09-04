@@ -132,3 +132,43 @@ and the concise result is in
 `reproduction/square_entrypoint_smoke_result.json`.  PyAV 12.3.0
 is the recorded compatibility substitute for the unsatisfiable upstream
 PyAV 10 / FFmpeg combination.
+
+## Complete Square reproduction pipeline
+
+The pinned policy workspace is single-process.  The method-owned distributed
+launcher preserves its model, flow-matching loss, AdamW optimizer, EMA,
+train/validation split, FP32 precision, scheduler horizon, and official global
+batch size of 64, while dividing each batch over eight GPUs.  Simulator
+rollouts are moved after training so seven ranks are not idle during every
+evaluation interval.  Checkpoints retain the upstream workspace format and
+are written atomically every 50 epochs.
+
+```bash
+cd /home/ubuntu/workspace/essay2608
+RUN=/home/ubuntu/workspace/_runs/fail_detect/square_flow_seed1103_full
+
+conda run -n faildetect-gpu-b758e55f \
+  python -m torch.distributed.run --standalone --nproc_per_node=8 \
+  -m evaluations.iclr2027.methods.fail_detect.reproduction.distributed_policy_train \
+  --output-dir "$RUN" --epochs 800 --seed 1103 --global-batch-size 64
+```
+
+`complete_square_reproduction` is a resume-safe continuation driver.  It
+waits for the 800-epoch checkpoint, exports the official embedded observation
+features and action trajectories, trains logpZO for the public code's 200
+epochs with global batch size 128 across eight GPUs, runs 2,000 official
+Square ID and 2,000 modified-environment rollouts in eight disjoint shards,
+then generates the time-varying functional CP band and per-episode alarms.
+
+```bash
+conda run -n faildetect-gpu-b758e55f \
+  python -m evaluations.iclr2027.methods.fail_detect.reproduction.complete_square_reproduction \
+  --run-dir "$RUN"
+```
+
+The targeted rollout driver disables unrelated baselines and unconditional
+PNG diagnostics in the public all-baselines runner.  It retains the pinned
+policy, simulator, modification operation, success condition, and logpZO
+implementation.  The resulting official-task artifact validates the public
+score/calibration/alarm chain only; it is not server A's formal Main-10
+calibration artifact or a paper result.
