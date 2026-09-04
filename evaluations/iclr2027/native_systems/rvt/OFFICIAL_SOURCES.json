@@ -34,7 +34,7 @@
       "gpu": "NVIDIA RTX 6000D",
       "compute_capability": "12.0"
     },
-    "formal_evaluation_owner": "server_a",
+    "formal_evaluation_owner": "server_b",
     "formal_evaluation_status": "waiting_for_frozen_native6_manifest_and_shared_schema"
   }
 }

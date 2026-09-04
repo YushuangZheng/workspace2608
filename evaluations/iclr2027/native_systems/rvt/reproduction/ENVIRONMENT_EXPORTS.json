@@ -1,0 +1,12 @@
+{
+  "artifact_directory": "/home/ubuntu/workspace/_runs/environment_exports/20260904",
+  "environment": "rvt-official",
+  "exports": {
+    "environment_yaml_sha256": "ef72237c05f6feac20738731ce50c3aad34129d07544d3483561e0a38634b9ee",
+    "explicit_conda_sha256": "b0e59bd8e1d528f9b1a35c34574259bc386cce9facbad016213acd9b89ac1fd8",
+    "pip_freeze_sha256": "250fca5658178c3a79f8d234783b5e903f953c9fd7f26036ad4e5020cfe27002",
+    "pip_check_sha256": "a557ee1c158a343e9c675293810d82c6ed4d51f339897c90aa958e16c5e05c4c"
+  },
+  "pip_check_exit_code": 1,
+  "documented_compatibility_override": "bitsandbytes 0.45.5 replaces upstream 0.38.1 for compute capability 12.0"
+}

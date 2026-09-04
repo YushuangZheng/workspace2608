@@ -1,0 +1,21 @@
+{
+  "artifact_directory": "/home/ubuntu/workspace/_runs/environment_exports/20260904",
+  "environments": {
+    "racer-official": {
+      "environment_yaml_sha256": "687b701bfa6069cbcb49cc289d8f79671daf904a44461237e56922eefb823de0",
+      "explicit_conda_sha256": "9a8a29e7ac8fd1bc065a7f7744a1551d532d71e882ad87772d75e9bb5af7d122",
+      "pip_freeze_sha256": "732a6073759deea13baadb14519a77c9f8252754e671ed89b6713e47e57bb562",
+      "pip_check_sha256": "7db37ec96e45df1c36e50c8f4e917a39f49f168c4a903ef13be3acbda50a2525",
+      "pip_check_exit_code": 1,
+      "documented_compatibility_override": "tensorflow 2.15.1 replaces upstream 2.13.1"
+    },
+    "racer-services": {
+      "environment_yaml_sha256": "409d31950503d7692c190ae01fdc6958aeb6957b1ec0b42019a7c63334ff04c0",
+      "explicit_conda_sha256": "10e59008b9bae5379e5e2875b25866f5dad396aeb951021054d33fa2bd358ce6",
+      "pip_freeze_sha256": "fa8a1a03524ba1c30d8c92024798e9819c28f45370c1fdfe80114695c4364344",
+      "pip_check_sha256": "89ff599da2796a5578ebfa37b8b16e6ce6a30d53fbcf5c70d390b08995ae7aa6",
+      "pip_check_exit_code": 1,
+      "documented_compatibility_override": "PyTorch 2.7.1 and torchvision 0.22.1 replace upstream 2.1.2 and 0.16.2 for compute capability 12.0"
+    }
+  }
+}

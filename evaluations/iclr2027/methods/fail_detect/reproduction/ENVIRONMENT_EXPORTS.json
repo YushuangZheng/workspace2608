@@ -1,0 +1,12 @@
+{
+  "artifact_directory": "/home/ubuntu/workspace/_runs/environment_exports/20260904",
+  "environment": "faildetect-gpu-b758e55f",
+  "exports": {
+    "environment_yaml_sha256": "eb8dc12abc62e84bb6e4b327da080831aca9691328b8734199ba934c0d0eef12",
+    "explicit_conda_sha256": "9ad12a42d3b5adfe99e17175c3832008afc372e1c163c80abd63e3d1cb461e4a",
+    "pip_freeze_sha256": "1a0118b893ccccb6294a9737b12561c57bf8904154f14ddfebc16e235c7edff3",
+    "pip_check_sha256": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09"
+  },
+  "pip_check_exit_code": 0,
+  "pip_check": "No broken requirements found."
+}
