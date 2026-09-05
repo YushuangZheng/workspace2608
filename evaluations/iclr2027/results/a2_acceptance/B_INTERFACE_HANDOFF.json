@@ -1,0 +1,72 @@
+{
+  "contains_normal_calibration": false,
+  "contains_sealed_test": false,
+  "files": [
+    {
+      "bytes": 1139,
+      "path": "evaluations/iclr2027/configs/shared/artifact_contract.json",
+      "sha256": "3990357e8b9c37bdb75fa5162d037bf1239e64a184733069e89c645059160cda"
+    },
+    {
+      "bytes": 2402,
+      "path": "evaluations/iclr2027/configs/shared/b_delivery_contract.json",
+      "sha256": "51522ffee4b1359b7a2e53ce7689f22f262051538be731ea47e9a74e3fd2fab5"
+    },
+    {
+      "bytes": 1210,
+      "path": "evaluations/iclr2027/configs/shared/b_interface_protocol.json",
+      "sha256": "c5d4223fc2627c1138ef434bacacd8e8f229bef54ce8d4b08fe52b2dd85f678a"
+    },
+    {
+      "bytes": 1037,
+      "path": "evaluations/iclr2027/configs/shared/faults.json",
+      "sha256": "7696435a197635bb996cf25e96c4ea49e72404b8610cf5f55b60c760ba18f725"
+    },
+    {
+      "bytes": 1288,
+      "path": "evaluations/iclr2027/configs/shared/feature_schema.json",
+      "sha256": "4bc0273ac7c0af111c531ad115cb21d4ec7464edae289f57795b45cbc799f13f"
+    },
+    {
+      "bytes": 715,
+      "path": "evaluations/iclr2027/configs/shared/monitor_calibration.json",
+      "sha256": "fae708846558f614571c4066a9d19f500e443043b43c1fa89540774ab48dfdc4"
+    },
+    {
+      "bytes": 818,
+      "path": "evaluations/iclr2027/interfaces/__init__.py",
+      "sha256": "c5db8fb800699bd2048f5296ca090e2bfff7f1168293ffabd923355fa5805619"
+    },
+    {
+      "bytes": 6821,
+      "path": "evaluations/iclr2027/interfaces/failure_train.py",
+      "sha256": "4bd1a0bff9f16b03cc9451b0c2e58230f8c285ed0c02e1cafd344b7efbe9624e"
+    },
+    {
+      "bytes": 5469,
+      "path": "evaluations/iclr2027/interfaces/feature_schema.py",
+      "sha256": "1cf926f93a024f54ae26a3c0dbf9238dc0e9d8806e41ca1fc800eb30f5b9d336"
+    },
+    {
+      "bytes": 1959,
+      "path": "evaluations/iclr2027/interfaces/runtime_monitor.py",
+      "sha256": "54a04ef30ec1822fd65041586b6fc298d95833338b62e943a7ab55cd0ecbfcdd"
+    },
+    {
+      "bytes": 1294,
+      "path": "evaluations/iclr2027/tests/fixtures/development_examples/FIXTURE_INDEX.json",
+      "sha256": "7c1a69e143b477b1d202092d557ae92b0eaf61042dea9263c10b870ac6e880e1"
+    },
+    {
+      "bytes": 34443,
+      "path": "evaluations/iclr2027/tests/fixtures/development_examples/causal_records.jsonl",
+      "sha256": "9541e4cfb308153b1aabe5fa2fa0358caf3013fe8ceee03edf933d033625760b"
+    }
+  ],
+  "kind": "interface",
+  "repository_relative_paths": true,
+  "schema": "essay2608.iclr2027.canonical-handoff-index.v1",
+  "total_bytes": 58595,
+  "total_files": 12,
+  "transfer_mode": "canonical_paths_no_persistent_copy"
+}

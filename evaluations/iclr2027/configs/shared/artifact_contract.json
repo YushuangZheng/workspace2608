@@ -1,0 +1,28 @@
+{
+  "schema": "essay2608.iclr2027.method-artifact-contract.v1",
+  "feature_schema": "essay2608.iclr2027.causal-features.v1",
+  "monitor_interface": "evaluations.iclr2027.interfaces.runtime_monitor.RuntimeMonitor",
+  "required_checkpoint_manifest": {
+    "schema": "essay2608.iclr2027.monitor-checkpoint.v1",
+    "method_id": "string",
+    "checkpoint_relative_path": "string",
+    "checkpoint_sha256": "sha256",
+    "config_relative_path": "string",
+    "config_sha256": "sha256",
+    "training_budget": "non-negative integer",
+    "training_seed": "integer",
+    "held_out_family": "string or null",
+    "feature_schema": "essay2608.iclr2027.causal-features.v1"
+  },
+  "required_cycle_output": {
+    "cycle": "non-negative integer",
+    "scores": "mapping from stable score name to finite float",
+    "alarm": "boolean",
+    "threshold": "finite float or null before A-only calibration",
+    "persistence_count": "non-negative integer",
+    "metadata": "JSON mapping without fault identity or evaluator labels"
+  },
+  "calibration_authority": "server_a_only",
+  "development_thresholds_are_formal": false,
+  "sealed_test_access": false
+}

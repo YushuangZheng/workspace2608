@@ -1,0 +1,67 @@
+{
+  "faults_sha256": "7696435a197635bb996cf25e96c4ea49e72404b8610cf5f55b60c760ba18f725",
+  "manifests": {
+    "ablation4.jsonl": {
+      "rows": 800,
+      "sha256": "3f63866dc1e27bb693767ecc4d43dfa94593e43477ddb9ea43e697a11fa3f56a"
+    },
+    "horizon3_per_stage.jsonl": {
+      "rows": 1600,
+      "sha256": "450eae75230ecaeb3c00ac971d064856ce9586bd11d2d3f33fc35731f937d8d9"
+    },
+    "horizon3_single_event.jsonl": {
+      "rows": 1600,
+      "sha256": "b276ebf1b3bbf4376f2c84c8a4586deaf05f9180ed034d929b09f857f2aa87f5"
+    },
+    "main10_development.jsonl": {
+      "rows": 200,
+      "sha256": "af651481772dcc2f962ecf12e6a2facfec4251cb04182f9913c6c2a3d4e00607"
+    },
+    "main10_failure_train.jsonl": {
+      "rows": 2000,
+      "sha256": "938590fc724602357ee578e956c61238b8b31706a77c91f14c04ce42089e1a13"
+    },
+    "main10_nominal.jsonl": {
+      "rows": 2000,
+      "sha256": "171255c8b80880a483f750f7da6750d16d4d6fd4c3fdfd0913a659f7e33348f8"
+    },
+    "main10_normal_calibration.jsonl": {
+      "materialized_from": "main10_normal_calibration_candidates.jsonl",
+      "rows": 500,
+      "sha256": "b2a8d30642d257cfb07281c21f080d92443c42cef543b4cab4bd7084e3a2ac44",
+      "successes_per_task": 50
+    },
+    "main10_normal_calibration_candidates.jsonl": {
+      "rows": 6000,
+      "sha256": "43a6e443b7606fda0b42a82a2ded0c8511c6a8588611149c608da656a3d8c89a"
+    },
+    "main10_perturbed.jsonl": {
+      "rows": 2000,
+      "sha256": "6d59a96e313acbb9ca7eb0fc6bb542337d69d1479c05233c604ebbc7bb4ed7bf"
+    },
+    "native6_nominal.jsonl": {
+      "rows": 1200,
+      "sha256": "514205a02472b204d5c112990f8cafe36271c3358ceed3dc6da533d40cb8b4f1"
+    },
+    "native6_perturbed.jsonl": {
+      "rows": 1200,
+      "sha256": "f898eec0179cf6aad38bf4afe34b74da8a6872bf873d15dc1f494f60598fe670"
+    },
+    "stress4_failure_budget_test.jsonl": {
+      "rows": 800,
+      "sha256": "247217057d1f8acf15cb93f19199fc7b1337ba58d7b91d7732359a9bd545eaab"
+    },
+    "stress4_leave_one_family_out.jsonl": {
+      "rows": 800,
+      "sha256": "0ca4ae1f17d2f4944d16c68128bea1b565ce06303135b61edfe921184eebcf97"
+    },
+    "stress4_severity.jsonl": {
+      "rows": 2400,
+      "sha256": "e89ea8367457c56172e396e3f0a9b80d5f754806badbf05352cc182bc6815b5e"
+    }
+  },
+  "protocol_sha256": "63cef67205773dc810f73a78a9dc83105f19276e8df2cad38651bf7d4b8e228b",
+  "result_based_task_selection": false,
+  "schema": "essay2608.iclr2027.manifest-index.v1",
+  "sealed_executed": false
+}

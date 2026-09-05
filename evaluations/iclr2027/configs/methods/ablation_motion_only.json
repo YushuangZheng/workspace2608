@@ -1,0 +1,15 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "ablation_motion_only",
+  "paper_name": "Motion-only task state",
+  "policy_type": "closed_loop_multistream",
+  "feature_profile": "motion_only",
+  "runtime": {
+    "boundary_config_root": "evaluations/iclr2027/artifacts/calibration/normal_task_boundaries/v1/runtime_configs"
+  },
+  "monitor": null,
+  "recovery": {
+    "kind": "relation_repair_and_legal_reentry",
+    "owned_by_policy": true
+  }
+}

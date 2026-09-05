@@ -21,6 +21,7 @@ from ..control.mismatch import MismatchKind, MismatchUpdate
 from .reentry import ReentryConfig, ReentryDecision, ReentryEvaluation, ReentrySelector
 from ..model.relation_events import RelationEventId
 from ..inference.relation_filter import RelationDecision, RelationEstimate
+from ..inference.state_evaluator import StateEvaluatorConfig
 from .relation_goals import RelationGoal, RelationGoalKind, RelationGoalPlanner
 from .relation_verification import (
     AuxiliaryAction,
@@ -1034,6 +1035,9 @@ class ClosedLoopRecoveryManager:
         self,
         task_model: ClosedLoopTaskModel,
         config: ClosedLoopRecoveryConfig = ClosedLoopRecoveryConfig(),
+        *,
+        evaluator_config: StateEvaluatorConfig = StateEvaluatorConfig(),
+        use_complete_state_evidence: bool = True,
     ) -> None:
         self.task_model = task_model
         self.config = config
@@ -1052,7 +1056,10 @@ class ClosedLoopRecoveryManager:
         self.reentry = ReentrySelector(
             task_model,
             config.reentry,
+            evaluator_config,
             robot_covariance_inflation=config.recovery.covariance_inflation,
+            use_scene_evidence=use_complete_state_evidence,
+            use_relation_evidence=use_complete_state_evidence,
         )
         self.reset()
 

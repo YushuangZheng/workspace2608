@@ -46,6 +46,12 @@ class StateNode:
     selected_frames: tuple[str, ...]
     mode_selected_frames: tuple[tuple[str, ...], ...]
     gripper_commands: Array
+    # Equation (6) defines the candidate expert bank used by task-state
+    # evidence.  Action relevance is a stricter, offline LODO screen used only
+    # for normal PoE execution.  Keeping the two masks separate prevents an
+    # action-routing decision from deleting relation/progress evidence.
+    action_relevant_frames: tuple[str, ...] | None = None
+    mode_action_relevant_frames: tuple[tuple[str, ...], ...] | None = None
     scene_factor_models: dict[FactorId, dict[int, FactorDistribution]] = field(
         default_factory=dict
     )
@@ -80,6 +86,19 @@ class StateNode:
             mode_union.update(selected)
         if set(self.selected_frames) != mode_union:
             raise ValueError("StateNode selected_frames 必须等于逐模态选择结果的并集")
+        if self.action_relevant_frames is None:
+            self.action_relevant_frames = tuple(self.selected_frames)
+        if self.mode_action_relevant_frames is None:
+            self.mode_action_relevant_frames = tuple(self.mode_selected_frames)
+        if len(self.mode_action_relevant_frames) != modes:
+            raise ValueError("StateNode 每个模态必须具有对应的动作相关流结果")
+        action_union: set[str] = set()
+        for mode, relevant in enumerate(self.mode_action_relevant_frames):
+            if not set(relevant).issubset(self.mode_selected_frames[mode]):
+                raise ValueError("动作相关流必须是 Equation (6) 模态候选流的子集")
+            action_union.update(relevant)
+        if set(self.action_relevant_frames) != action_union:
+            raise ValueError("action_relevant_frames 必须等于逐模态结果的并集")
         for name, score in self.demo_relation_scores.items():
             values = np.asarray(score, dtype=np.float64)
             if (
@@ -134,7 +153,7 @@ class ClosedLoopTaskModel:
     relation_frames: tuple[str, ...] = ()
     builder_config: dict[str, Any] = field(default_factory=dict)
     base_policy_fingerprint: str = ""
-    schema_version: int = 4
+    schema_version: int = 5
 
     def __post_init__(self) -> None:
         if not self.base_policy.fitted:
@@ -289,6 +308,7 @@ class ClosedLoopTaskModel:
                 )
                 for node in self.states.values()
             ),
+            "action_relevance": self.builder_config.get("action_stream_relevance", []),
             "builder_config": self.builder_config,
         }
 
@@ -364,6 +384,10 @@ class ClosedLoopTaskModel:
                     "selected_frames": list(node.selected_frames),
                     "mode_selected_frames": [
                         list(selected) for selected in node.mode_selected_frames
+                    ],
+                    "action_relevant_frames": list(node.action_relevant_frames),
+                    "mode_action_relevant_frames": [
+                        list(selected) for selected in node.mode_action_relevant_frames
                     ],
                     "scene_factors": [
                         {
@@ -534,7 +558,7 @@ class ClosedLoopTaskModel:
             )
 
         metadata = {
-            "schema": "essay2608.closed_loop_task_model.v4",
+            "schema": "essay2608.closed_loop_task_model.v5",
             "schema_version": self.schema_version,
             "arm_id": self.arm_id,
             "base_policy_fingerprint": self.base_policy_fingerprint,
@@ -575,6 +599,7 @@ class ClosedLoopTaskModel:
             if schema not in {
                 "essay2608.closed_loop_task_model.v3",
                 "essay2608.closed_loop_task_model.v4",
+                "essay2608.closed_loop_task_model.v5",
             }:
                 raise ValueError("不支持的闭环任务模型 schema")
             if metadata.get("base_policy_fingerprint") != base_policy.fingerprint():
@@ -607,7 +632,10 @@ class ClosedLoopTaskModel:
                     }
                     for item in record["scene_factors"]
                 }
-                if schema == "essay2608.closed_loop_task_model.v4":
+                if schema in {
+                    "essay2608.closed_loop_task_model.v4",
+                    "essay2608.closed_loop_task_model.v5",
+                }:
                     selected_frames = tuple(record["selected_frames"])
                     mode_selected_frames = tuple(
                         tuple(selected) for selected in record["mode_selected_frames"]
@@ -626,6 +654,17 @@ class ClosedLoopTaskModel:
                         )
                         for mode in range(len(skill.mode_priors))
                     )
+                if schema == "essay2608.closed_loop_task_model.v5":
+                    action_relevant_frames = tuple(record["action_relevant_frames"])
+                    mode_action_relevant_frames = tuple(
+                        tuple(selected)
+                        for selected in record["mode_action_relevant_frames"]
+                    )
+                else:
+                    # Older sidecars predate the separate action-value mask;
+                    # reading them preserves their candidate mask verbatim.
+                    action_relevant_frames = selected_frames
+                    mode_action_relevant_frames = mode_selected_frames
                 states[state_id] = StateNode(
                     state_id=state_id,
                     topology=topology[state_id],
@@ -643,6 +682,8 @@ class ClosedLoopTaskModel:
                     selected_frames=selected_frames,
                     mode_selected_frames=mode_selected_frames,
                     gripper_commands=skill.gripper[:, state_id.local_index],
+                    action_relevant_frames=action_relevant_frames,
+                    mode_action_relevant_frames=mode_action_relevant_frames,
                     scene_factor_models=scene_factors,
                 )
                 skill_states[state_id.skill_index].append(state_id)

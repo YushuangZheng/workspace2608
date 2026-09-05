@@ -100,6 +100,7 @@ class TAPASSegmentationConfig:
         if self.boundary_selection not in {
             "all",
             "gripper_preferred_temporal_consensus",
+            "repeated_pick_place_cycles",
             "single_grasp_contact_cycle",
             "temporal_consensus",
             "temporal_consensus_require_gripper",
@@ -1058,6 +1059,63 @@ def _single_grasp_contact_cycle_subset(
     return selected
 
 
+def _repeated_pick_place_cycles_subset(
+    row: Sequence[int],
+    *,
+    gripper_row: Sequence[int],
+    expected: int,
+) -> tuple[int, ...]:
+    """Select relation-changing phase boundaries for repeated pick/place.
+
+    Successful RLBench pick/place demonstrations begin open and alternate
+    acquisition and release.  The terminal release is not necessarily present
+    in the saved trajectory, so ``N`` cycles contain ``2N-1`` measured gripper
+    changes.  Each nonterminal cycle retains its approach stop, acquisition,
+    pre-release stop and release; the terminal cycle retains approach,
+    acquisition and the final pre-release/terminal stop.  This yields
+    ``4N-1`` boundaries without inventing a stop absent from a demonstration.
+    """
+
+    if expected < 3 or (expected + 1) % 4:
+        raise ValueError(
+            "repeated_pick_place_cycles expects 4N-1 boundaries"
+        )
+    cycles = (expected + 1) // 4
+    values = tuple(sorted(set(int(value) for value in row)))
+    contacts = tuple(sorted(set(int(value) for value in gripper_row)))
+    if len(contacts) != 2 * cycles - 1:
+        raise ValueError(
+            "repeated_pick_place_cycles requires alternating acquisition/release "
+            f"changes beginning with acquisition; expected {2 * cycles - 1}, got {contacts}"
+        )
+    selected: list[int] = []
+    previous_release = -1
+    for cycle in range(cycles):
+        acquisition = contacts[2 * cycle]
+        release = contacts[2 * cycle + 1] if cycle < cycles - 1 else None
+        before = tuple(
+            value for value in values if previous_release < value < acquisition
+        )
+        after = tuple(
+            value
+            for value in values
+            if value > acquisition and (release is None or value < release)
+        )
+        if not before or not after:
+            raise ValueError(
+                "repeated pick/place cycle lacks approach or pre-release support: "
+                f"cycle={cycle}, candidates={values}, gripper={contacts}"
+            )
+        selected.extend((before[-1], acquisition, after[-1]))
+        if release is not None:
+            selected.append(release)
+            previous_release = release
+    result = tuple(selected)
+    if len(result) != expected or len(set(result)) != expected:
+        raise ValueError(f"repeated pick/place selector produced invalid boundaries: {result}")
+    return result
+
+
 def _select_consistent_boundaries(
     rows: Sequence[Sequence[int]],
     lengths: Sequence[int],
@@ -1092,6 +1150,20 @@ def _select_consistent_boundaries(
             )
         return tuple(
             _single_grasp_contact_cycle_subset(
+                row,
+                gripper_row=gripper,
+                expected=expected,
+            )
+            for row, gripper in zip(rows, gripper_rows, strict=True)
+        )
+
+    if config.boundary_selection == "repeated_pick_place_cycles":
+        if gripper_rows is None or len(gripper_rows) != len(rows):
+            raise ValueError(
+                "repeated pick/place alignment requires paired gripper candidates"
+            )
+        return tuple(
+            _repeated_pick_place_cycles_subset(
                 row,
                 gripper_row=gripper,
                 expected=expected,

@@ -343,6 +343,45 @@ def test_dynamic_roles_execute_monitor_recover_and_defer(phase3_model) -> None:
     assert recover.recovery_intents[0].expected_relation == RelationDecision.LINKED
 
 
+def test_action_relevance_only_changes_normal_poe_participation(phase3_model) -> None:
+    model, demos = phase3_model
+    state = StateId(0, 1)
+    force_relation_prior(model, state, linked=False)
+    node = model.state(state)
+    assert "object" in node.selected_frames
+    node.action_relevant_frames = tuple(
+        frame for frame in node.action_relevant_frames if frame != "object"
+    )
+    node.mode_action_relevant_frames = tuple(
+        tuple(frame for frame in frames if frame != "object")
+        for frames in node.mode_action_relevant_frames
+    )
+    external = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=state,
+        estimated=state,
+        relation=relation_estimate("object", (0.95, 0.05), RelationDecision.EXTERNAL),
+    )
+
+    dynamic = FrameRoleRouter(model).route(state, external, mode_by_skill={0: 0})
+    assert dynamic.decisions["object"].role == FrameRole.DEFER
+    assert dynamic.decisions["object"].execution_weight == 0.0
+    assert "object" not in dynamic.execution_weights
+
+    # The progress-only ablation keeps the frozen Eq. (6) candidate mask.
+    fixed = FrameRoleRouter(model).route_fixed(state, external, mode_by_skill={0: 0})
+    assert fixed.decisions["object"].role == FrameRole.EXECUTE
+    assert fixed.execution_weights["object"] == 1.0
+
+    # Action exclusion does not erase relation semantics or recovery.
+    force_relation_prior(model, state, linked=True)
+    mismatch = FrameRoleRouter(model).route(state, external, mode_by_skill={0: 0})
+    assert mismatch.decisions["object"].role == FrameRole.RECOVER
+    assert mismatch.decisions["object"].blocks_advance is True
+
+
 def test_fresh_external_unknown_bootstraps_below_unreachable_soft_prior_peak(
     phase3_model,
 ) -> None:
@@ -372,6 +411,45 @@ def test_fresh_external_unknown_bootstraps_below_unreachable_soft_prior_peak(
     assert decision.actual_relation == RelationDecision.UNKNOWN
     assert decision.execution_weight == pytest.approx(0.692)
     assert decision.blocks_advance is False
+
+
+def test_unselected_external_unknown_is_soft_evidence_not_a_progress_lock(
+    phase3_model,
+) -> None:
+    model, demos = phase3_model
+    state = StateId(0, 1)
+    force_relation_prior(model, state, linked=False)
+    node = model.state(state)
+    node.action_relevant_frames = tuple(
+        frame for frame in node.action_relevant_frames if frame != "object"
+    )
+    node.mode_action_relevant_frames = tuple(
+        tuple(frame for frame in frames if frame != "object")
+        for frames in node.mode_action_relevant_frames
+    )
+    belief = belief_for(
+        model,
+        demos,
+        tick=1,
+        nominal=state,
+        estimated=state,
+        relation=relation_estimate(
+            "object",
+            (0.692, 0.308),
+            RelationDecision.UNKNOWN,
+            information_weight=0.0,
+        ),
+        static=True,
+    )
+
+    routed = FrameRoleRouter(model).route(state, belief, mode_by_skill={0: 0})
+
+    decision = routed.decisions["object"]
+    assert decision.selected_offline is False
+    assert decision.role == FrameRole.DEFER
+    assert decision.execution_weight == 0.0
+    assert decision.blocks_advance is False
+    assert routed.blocks_advance is False
 
 
 def test_confirmed_unselected_link_is_monitored_without_reenabling_poe(
@@ -674,7 +752,7 @@ def test_off_selected_formal_link_entry_is_monitored_before_posterior_catches_up
     state_id = anchor.linked_entry_states[0]
     predecessor = model.state(state_id).topology.predecessors[0]
     router = FrameRoleRouter(model)
-    monkeypatch.setattr(router, "_selected_frames", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(router, "_candidate_frames", lambda *_args, **_kwargs: ())
     router.route(
         predecessor,
         belief_for(
@@ -1232,9 +1310,7 @@ def test_terminal_link_response_gets_one_bounded_successor_for_confirmation(
         ),
         mode_by_skill={successor.skill_index: event_id.mode},
     )
-    assert (
-        follow_through.decisions["object"].formal_link_confirmation_pending is True
-    )
+    assert follow_through.decisions["object"].formal_link_confirmation_pending is True
     assert follow_through.blocks_advance is False
 
     # Once that successor is committed, the allowance is consumed even if the

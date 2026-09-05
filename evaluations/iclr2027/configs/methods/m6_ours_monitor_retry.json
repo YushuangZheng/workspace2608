@@ -1,0 +1,19 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "m6_ours_monitor_retry",
+  "paper_name": "Ours-Monitor + Retry",
+  "policy_type": "closed_loop_multistream",
+  "feature_profile": "generic_retry",
+  "runtime": {
+    "boundary_config_root": "evaluations/iclr2027/artifacts/calibration/normal_task_boundaries/v1/runtime_configs"
+  },
+  "monitor": {
+    "kind": "ours_task_state",
+    "source": "same_persisted_alarm_as_m5"
+  },
+  "recovery": {
+    "kind": "skill_retry",
+    "maximum_retries": 1,
+    "budget_cycles": 400
+  }
+}

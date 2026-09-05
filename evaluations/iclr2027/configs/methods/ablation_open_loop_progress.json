@@ -1,0 +1,15 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "ablation_open_loop_progress",
+  "paper_name": "Open-loop task progress",
+  "policy_type": "closed_loop_multistream",
+  "feature_profile": "open_loop_progress",
+  "runtime": {
+    "boundary_config_root": "evaluations/iclr2027/artifacts/calibration/normal_task_boundaries/v1/runtime_configs"
+  },
+  "monitor": null,
+  "recovery": {
+    "kind": "relation_repair_and_legal_reentry",
+    "owned_by_policy": true
+  }
+}

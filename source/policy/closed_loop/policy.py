@@ -78,8 +78,18 @@ class ClosedLoopMultiStreamPolicy:
         )
         if not isinstance(self.feature_profile, ClosedLoopFeatureProfile):
             raise TypeError("feature_profile 必须是名称或 ClosedLoopFeatureProfile")
+        belief_config = config.belief
+        if not self.feature_profile.complete_state_progress_evidence:
+            belief_config = replace(
+                belief_config,
+                state_evaluator=replace(
+                    belief_config.state_evaluator,
+                    scene_weight=0.0,
+                    relation_weight=0.0,
+                ),
+            )
         self.belief_updaters = {
-            arm: BeliefUpdater(model, config.belief)
+            arm: BeliefUpdater(model, belief_config)
             for arm, model in self.task_models.items()
         }
         self.execution_controllers = {
@@ -88,11 +98,19 @@ class ClosedLoopMultiStreamPolicy:
                 config.execution,
                 config.belief.progress_filter,
                 dynamic_frame_roles=self.feature_profile.dynamic_frame_roles,
+                belief_driven_progress=self.feature_profile.belief_driven_progress,
             )
             for arm, model in self.task_models.items()
         }
         self.recovery_managers = {
-            arm: ClosedLoopRecoveryManager(model, config.recovery)
+            arm: ClosedLoopRecoveryManager(
+                model,
+                config.recovery,
+                evaluator_config=belief_config.state_evaluator,
+                use_complete_state_evidence=(
+                    self.feature_profile.complete_state_progress_evidence
+                ),
+            )
             for arm, model in self.task_models.items()
         }
         self.boundary_controller = MultiArmBoundaryController(
@@ -101,6 +119,9 @@ class ClosedLoopMultiStreamPolicy:
             config.boundary,
             belief_updaters=self.belief_updaters,
             relation_scene_guards=(self.feature_profile.relation_scene_boundary_guards),
+            boundary_gated_advancement=(
+                self.feature_profile.boundary_gated_advancement
+            ),
         )
         self.recovery_trigger = RecoveryTriggerTracker(
             self.task_models,
@@ -279,6 +300,37 @@ class ClosedLoopMultiStreamPolicy:
         snapshot = self._pending_snapshot
         self._pending_snapshot = None
         self._restore(snapshot)
+
+    def restart_current_skill_reference(self) -> dict[str, StateId]:
+        """Apply the shared generic Skill-Retry cursor reset.
+
+        This operation is deliberately weaker than phase-five re-entry: it
+        keeps observations, relation posteriors, scene state and simulator
+        state untouched and supplies no repair target or fault identity.
+        """
+
+        if not self._initialized:
+            raise RuntimeError("闭环顶层策略尚未 reset")
+        if self._pending_snapshot is not None:
+            raise RuntimeError("待提交周期存在时不能重置技能引用")
+        if any(
+            manager.mode != ExecutionMode.TASK
+            for manager in self.recovery_managers.values()
+        ):
+            raise RuntimeError("内置验证或恢复执行期间不能请求通用 Skill-Retry")
+        entries = {
+            arm: controller.restart_current_skill_reference()
+            for arm, controller in self.execution_controllers.items()
+        }
+        self.boundary_controller.reset()
+        self.recovery_trigger = RecoveryTriggerTracker(
+            self.task_models,
+            self.config.recovery.recovery,
+        )
+        self._last_executed_reference = {arm: None for arm in self.arms}
+        self._permitted_boundaries = {arm: frozenset() for arm in self.arms}
+        self._terminal_actions_committed.difference_update(self.arms)
+        return entries
 
     def commit(
         self,
@@ -952,15 +1004,14 @@ class ClosedLoopMultiStreamPolicy:
                         else self._task_command(action)
                     )
 
-        trigger = (
-            self.recovery_trigger.update(
-                {arm: result.mismatch for arm, result in executions.items()},
-                transition_requests=None if boundary is None else boundary.requests,
-                beliefs=beliefs,
-                mode_by_arm_skill=self._mode_by_arm_skill,
-            )
-            if self.feature_profile.auxiliary_verification_recovery
-            else RecoveryTriggerDecision(False, (), ())
+        # The alarm is part of task-state inference and is therefore computed
+        # for both M5 and M6.  The feature profile only decides whether the
+        # in-policy verification/repair/re-entry actuator may consume it.
+        trigger = self.recovery_trigger.update(
+            {arm: result.mismatch for arm, result in executions.items()},
+            transition_requests=None if boundary is None else boundary.requests,
+            beliefs=beliefs,
+            mode_by_arm_skill=self._mode_by_arm_skill,
         )
         recovery_results: dict[str, RecoveryManagerResult] = {}
         failures: dict[str, str] = {}
@@ -1408,11 +1459,14 @@ class ClosedLoopMultiStreamPolicy:
         *,
         base_policies: Mapping[str, DynaMAC],
         feature_profile: ClosedLoopFeatureProfile | str = "full",
+        boundary_config: BoundaryRuntimeConfig | None = None,
     ) -> ClosedLoopMultiStreamPolicy:
         models, config, _ = load_policy_bundle(
             directory,
             base_policies=base_policies,
         )
+        if boundary_config is not None:
+            config = replace(config, boundary=boundary_config)
         return cls(models, config, feature_profile=feature_profile)
 
 

@@ -1,0 +1,42 @@
+{
+  "schema": "rlbench-dynamac-author-clarified-segmentation-v2",
+  "implementation": "tapas_velocity_gripper_union_author_clarified",
+  "reference_commit": "52e35214b9baa7b190b87196c36b9e98f4006149",
+  "min_len": 1,
+  "distance_based": false,
+  "gripper_based": true,
+  "velocity_based": true,
+  "distance_threshold": 0.06,
+  "repeat_first_step": 0,
+  "repeat_final_step": 0,
+  "fix_frames": true,
+  "min_end_distance": 10,
+  "velocity_threshold": 0.005,
+  "gripper_threshold": 0.2,
+  "max_idx_distance": 4,
+  "gripper_min_end_distance": null,
+  "candidate_merge_fraction": 0.0,
+  "boundary_selection": "all",
+  "expected_boundary_count": null,
+  "task_profiles": {
+    "insert_onto_square_peg": {"candidate_merge_fraction": 0.0, "boundary_selection": "repeated_pick_place_cycles", "expected_boundary_count": 3, "source_status": "GENERIC_PICK_PLACE_CYCLE", "note": "Approach, acquisition and terminal insertion support."},
+    "place_cups_1": {"candidate_merge_fraction": 0.0, "boundary_selection": "repeated_pick_place_cycles", "expected_boundary_count": 3, "source_status": "GENERIC_PICK_PLACE_CYCLES", "note": "One native place-cup interaction."},
+    "place_cups_2": {"candidate_merge_fraction": 0.0, "boundary_selection": "repeated_pick_place_cycles", "expected_boundary_count": 7, "source_status": "GENERIC_PICK_PLACE_CYCLES", "note": "Two native place-cup interactions; no absent post-grasp stop is fabricated."},
+    "place_cups_3": {"candidate_merge_fraction": 0.0, "boundary_selection": "repeated_pick_place_cycles", "expected_boundary_count": 11, "source_status": "GENERIC_PICK_PLACE_CYCLES", "note": "Three native place-cup interactions; no absent post-grasp stop is fabricated."},
+    "stack_cups": {"candidate_merge_fraction": 0.0, "boundary_selection": "repeated_pick_place_cycles", "expected_boundary_count": 7, "source_status": "GENERIC_PICK_PLACE_CYCLES", "note": "Two cup acquisitions and placements."},
+    "sweep_to_dustpan": {"candidate_merge_fraction": 0.0, "boundary_selection": "repeated_pick_place_cycles", "expected_boundary_count": 3, "source_status": "GENERIC_PICK_PLACE_CYCLE", "note": "Approach, broom acquisition and terminal sweep support."},
+    "remove_cups_1": {"candidate_merge_fraction": 0.0, "boundary_selection": "repeated_pick_place_cycles", "expected_boundary_count": 3, "source_status": "GENERIC_PICK_PLACE_CYCLES", "note": "One native remove-cup interaction."},
+    "remove_cups_2": {"candidate_merge_fraction": 0.0, "boundary_selection": "repeated_pick_place_cycles", "expected_boundary_count": 7, "source_status": "GENERIC_PICK_PLACE_CYCLES", "note": "Two native remove-cup interactions."},
+    "push_buttons_1": {"candidate_merge_fraction": 0.02, "boundary_selection": "temporal_consensus", "expected_boundary_count": 1, "source_status": "GENERIC_REPEATED_CONTACT_STOPS", "note": "Merge the coincident first contact stop and gripper preparation."},
+    "push_buttons_2": {"candidate_merge_fraction": 0.02, "boundary_selection": "temporal_consensus", "expected_boundary_count": 3, "source_status": "GENERIC_REPEATED_CONTACT_STOPS", "note": "One preparation boundary and one entry/exit pair for the additional contact."},
+    "push_buttons_3": {"candidate_merge_fraction": 0.02, "boundary_selection": "temporal_consensus", "expected_boundary_count": 5, "source_status": "GENERIC_REPEATED_CONTACT_STOPS", "note": "One preparation boundary and two entry/exit pairs for additional contacts."},
+    "open_drawer": {"candidate_merge_fraction": 0.05, "boundary_selection": "temporal_consensus", "expected_boundary_count": 2, "source_status": "COHORT_SIGNAL_AUDIT_REQUIRED", "note": "Expected approach/contact and terminal support; validated from the five-demo cohort."}
+  },
+  "evidence": {
+    "parameters": "PINNED_TAPAS_SIGNALS_WITH_A1_COHORT_AUDIT",
+    "numpy_port": "INDEPENDENT_CODE_ALIGNED_PORT",
+    "boundary_signals": "EE_VELOCITY_UNION_GRIPPER_CHANGE",
+    "cross_demo_alignment": "FAIL_CLOSED_NO_PREFIX_OR_MIN_COUNT_TRUNCATION",
+    "repeat_padding": "RECORDED_BUT_NOT_APPLIED_TO_DYNAMAC_RAW_LABELS"
+  }
+}

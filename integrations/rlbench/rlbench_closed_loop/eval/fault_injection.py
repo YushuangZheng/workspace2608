@@ -128,6 +128,7 @@ class FaultInjectingTaskEnvironment:
         self._close_occurrences = 0
         self._previous_close_request = False
         self._current_close_counted = False
+        self._current_close_eligible = False
         self._failed_close_active = False
         self._failed_grasp_target_poses: dict[str, tuple[Any, np.ndarray]] = {}
         self._stable_interaction_signature: tuple[str, tuple[str, ...]] | None = None
@@ -404,9 +405,16 @@ class FaultInjectingTaskEnvironment:
         close_requested = bool(action[gripper_index] <= 0.5)
         if close_requested and not self._previous_close_request:
             self._current_close_counted = False
+            self._current_close_eligible = (
+                self._policy_step >= self.spec.earliest_step
+            )
         self._previous_close_request = close_requested
         detected_targets: tuple[Any, ...] = ()
-        if close_requested and not self._current_close_counted:
+        if (
+            close_requested
+            and not self._current_close_counted
+            and self._current_close_eligible
+        ):
             detected_targets = self._detected_grasp_targets(
                 arm=selected[0],
                 bimanual=bimanual,
@@ -447,10 +455,12 @@ class FaultInjectingTaskEnvironment:
         if not self._failed_close_active:
             if not close_requested:
                 self._current_close_counted = False
+                self._current_close_eligible = False
             return action
         if not close_requested:
             self._failed_close_active = False
             self._current_close_counted = False
+            self._current_close_eligible = False
             self._fault_end_policy_step = self._policy_step
             self.events.append(
                 {
@@ -461,7 +471,11 @@ class FaultInjectingTaskEnvironment:
                 }
             )
             return action
-        self._capture_failed_grasp_targets(bimanual=bimanual)
+        # The physically detected targets were frozen on the trigger cycle.
+        # Re-scanning the whole task tree on every continued close command is
+        # both unnecessary and can dominate simulator runtime.
+        if not self._released_objects:
+            self._capture_failed_grasp_targets(bimanual=bimanual)
         # Preserve the commanded gripper motion while suppressing only the
         # attachment it is meant to establish.  Replacing the close command
         # with an open command conflates a missed interaction with gripper
@@ -983,6 +997,18 @@ class FaultInjectingTaskEnvironment:
         self._audit_physical_effect(bimanual=bimanual)
         self._policy_step += 1
         return result
+
+    def record_committed_fallback(self) -> None:
+        """Advance the public policy-cycle clock after a raw joint-hold commit.
+
+        The shared executor resolves an invalid Cartesian target through a raw
+        physics hold that intentionally bypasses ``TaskEnvironment.step``.
+        That transaction still consumes one policy cycle; without this hook a
+        later physical fault would be scheduled against an artificially slow
+        injector clock.
+        """
+
+        self._policy_step += 1
 
 
 __all__ = [

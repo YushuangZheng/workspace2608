@@ -1,0 +1,18 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "m1_restart",
+  "paper_name": "DynaMAC + Restart",
+  "policy_type": "dynamac",
+  "feature_profile": null,
+  "monitor": {
+    "kind": "no_progress",
+    "consecutive_stopped_cycles": 10,
+    "minimum_command_distance_m": 0.005,
+    "maximum_realized_motion_m": 0.001
+  },
+  "recovery": {
+    "kind": "skill_retry",
+    "maximum_retries": 1,
+    "budget_cycles": 400
+  }
+}

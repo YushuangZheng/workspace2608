@@ -64,6 +64,8 @@ class ReentrySelector:
         evaluator_config: StateEvaluatorConfig = StateEvaluatorConfig(),
         *,
         robot_covariance_inflation: float = 0.0,
+        use_scene_evidence: bool = True,
+        use_relation_evidence: bool = True,
     ) -> None:
         inflation = float(robot_covariance_inflation)
         if not math.isfinite(inflation) or inflation < 0.0:
@@ -72,6 +74,8 @@ class ReentrySelector:
         self.config = config
         self.evaluator = StateEvaluator(task_model, evaluator_config)
         self.robot_covariance_inflation = inflation
+        self.use_scene_evidence = bool(use_scene_evidence)
+        self.use_relation_evidence = bool(use_relation_evidence)
         self._global_index = {
             state: index for index, state in enumerate(sorted(task_model.states))
         }
@@ -140,7 +144,7 @@ class ReentrySelector:
                 < self.config.minimum_robot_peak_normalized_compatibility
             ):
                 reasons.append("robot_incompatible")
-            if score.scene_evidence_expected:
+            if self.use_scene_evidence and score.scene_evidence_expected:
                 if not score.scene_evidence_available:
                     reasons.append("scene_evidence_unavailable")
                 elif (
@@ -148,22 +152,24 @@ class ReentrySelector:
                 ):
                     reasons.append("scene_incompatible")
             if (
-                self.config.require_relation_evidence_when_available
+                self.use_relation_evidence
+                and self.config.require_relation_evidence_when_available
                 and self.task_model.relation_frames
                 and relation_observable
                 and not score.relation_frame_weights
             ):
                 reasons.append("relation_evidence_unavailable")
-            elif (
+            elif self.use_relation_evidence and (
                 score.relation_state_compatibility
                 < self.config.minimum_relation_compatibility
             ):
                 reasons.append("relation_incompatible")
-            for frame, expected in required.items():
-                estimate = belief.relation_estimates.get(frame)
-                if estimate is None or estimate.decision_state != expected:
-                    reasons.append("recovered_relation_not_preserved")
-                    break
+            if self.use_relation_evidence:
+                for frame, expected in required.items():
+                    estimate = belief.relation_estimates.get(frame)
+                    if estimate is None or estimate.decision_state != expected:
+                        reasons.append("recovered_relation_not_preserved")
+                        break
             if (
                 score.normalized_explanation_score
                 < self.config.minimum_explanation_score
@@ -239,13 +245,21 @@ class ReentrySelector:
             for frame, estimate in belief.relation_estimates.items()
             if estimate.decision_state != RelationDecision.UNKNOWN
         }
+        confirmed = {
+            frame: decision
+            for frame, decision in (
+                belief_updater.informative_evidence_decisions.items()
+            )
+            if stable.get(frame) == decision
+        }
         belief_updater.reset(
             initial_progress=decision.reset_progress,
             initial_relations=belief.relation_posteriors,
             initial_relation_decisions=stable,
+            initial_relation_evidence_decisions=confirmed,
             previous_observation=observation,
         )
-        execution_controller.reset(decision.state_id)
+        execution_controller.commit_reentry(decision.state_id)
 
 
 __all__ = [

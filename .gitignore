@@ -100,6 +100,26 @@ lightning_logs/
 !/integrations/rlbench/results/v4/reports/
 !/integrations/rlbench/results/v4/reports/full_22_cell.md
 
+# ICLR 2027 rollout datasets and model/training artifacts are immutable local
+# data. Keep schemas, manifests, fixtures, and compact acceptance/handoff
+# records in Git; transfer canonical data paths listed by the handoff indexes.
+/evaluations/iclr2027/datasets/
+/evaluations/iclr2027/artifacts/
+/evaluations/iclr2027/results/**
+!/evaluations/iclr2027/results/a2_acceptance/
+!/evaluations/iclr2027/results/a2_acceptance/A2_ACCEPTANCE.json
+!/evaluations/iclr2027/results/a2_acceptance/B_FAILURE_TRAIN_HANDOFF.json
+!/evaluations/iclr2027/results/a2_acceptance/B_INTERFACE_HANDOFF.json
+!/evaluations/iclr2027/results/a2_acceptance/RESULTS.md
+!/evaluations/iclr2027/results/a3_acceptance/
+!/evaluations/iclr2027/results/a3_acceptance/A3_ACCEPTANCE.json
+!/evaluations/iclr2027/results/a3_acceptance/RESULTS.md
+!/evaluations/iclr2027/results/a4_integration/
+!/evaluations/iclr2027/results/a4_integration/A4_PARTIAL_STATUS.json
+!/evaluations/iclr2027/results/a4_integration/RESULTS.md
+!/evaluations/iclr2027/results/b_delivery/
+!/evaluations/iclr2027/results/b_delivery/*.json
+
 # Only pinned notices and lock files belong under third_party. Source trees,
 # archives, conda prefixes, compiled extensions, and overlays remain local.
 /integrations/rlbench/third_party/**

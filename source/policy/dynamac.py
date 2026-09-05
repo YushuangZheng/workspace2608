@@ -3688,6 +3688,23 @@ class DynaMAC:
             self._restore_runtime_state(state)
             raise
 
+    def restart_current_skill_reference(self) -> tuple[int, int]:
+        """Reset only the fixed-clock action reference to this skill's entry.
+
+        This is an evaluation recovery interface used by generic Skill-Retry;
+        it does not reset the simulator, resample a mode, recapture an object
+        frame, or alter any learned distribution.  The ordinary DynaMAC path
+        never calls it.
+        """
+
+        if not self._episode_initialized:
+            raise RuntimeError("DynaMAC 尚未 reset，不能重启技能引用")
+        self._time_index = 0
+        self._complete = False
+        self._pending_virtual_capture = False
+        self._active_mode = self._mode_path[self._skill_index]
+        return self._skill_index, self._time_index
+
     def _reset_impl(
         self,
         observation: DynaMACObservation,
@@ -4546,6 +4563,17 @@ class BimanualDynaMAC:
             raise
         self._last_left_action = None
         self._last_right_action = None
+
+    def restart_current_skill_reference(self) -> dict[str, tuple[int, int]]:
+        """Apply the same generic reference reset independently to both arms."""
+
+        result = {
+            "left": self.left.restart_current_skill_reference(),
+            "right": self.right.restart_current_skill_reference(),
+        }
+        self._last_left_action = None
+        self._last_right_action = None
+        return result
 
     @staticmethod
     def _synchronous_observations(

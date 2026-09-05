@@ -44,6 +44,9 @@ from essay2608.policy.tapas_segmentation import (
     TAPASSegmentationConfig as CoreTAPASSegmentationConfig,
 )
 from essay2608.policy.tapas_segmentation import (
+    _repeated_pick_place_cycles_subset as _repeated_pick_place_cycles_subset,
+)
+from essay2608.policy.tapas_segmentation import (
     _single_grasp_contact_cycle_subset as _single_grasp_contact_cycle_subset,
 )
 

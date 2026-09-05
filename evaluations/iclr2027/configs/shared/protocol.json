@@ -1,0 +1,26 @@
+{
+  "schema": "essay2608.iclr2027.public-evaluation-protocol.v1",
+  "horizon": 1000,
+  "recovery_budget_cycles": 400,
+  "control_period_seconds": 0.05,
+  "normal_calibration_successes_per_task": 50,
+  "normal_calibration_candidate_limit_per_task": 600,
+  "failure_train_episodes_per_task": 200,
+  "development_nominal_per_task": 10,
+  "development_perturbed_per_task": 10,
+  "sealed_nominal_per_task": 200,
+  "sealed_perturbed_per_task": 200,
+  "minimum_eligible_trigger_rate": 0.8,
+  "seed_namespaces": {
+    "normal_calibration_candidates": 2710000000,
+    "failure_train": 2720000000,
+    "development": 2730000000,
+    "sealed_nominal": 2740000000,
+    "sealed_perturbed": 2750000000,
+    "extension": 2760000000
+  },
+  "one_episode_per_job": true,
+  "intention_to_treat": true,
+  "sealed_results_visible_during_method_development": false
+}
+

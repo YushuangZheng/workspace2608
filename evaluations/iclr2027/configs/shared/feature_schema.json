@@ -1,0 +1,36 @@
+{
+  "schema": "essay2608.iclr2027.feature-schema-definition.v1",
+  "record_schema": "essay2608.iclr2027.causal-features.v1",
+  "time_alignment": "observation_t_and_command_a_t_before_physical_step_t",
+  "causal_inputs": {
+    "arms": ["ee_pose_xyzw", "gripper_open"],
+    "task": ["task_state"],
+    "command": ["action"],
+    "policy": [
+      "policy_step",
+      "reference_state_if_available",
+      "active_streams_if_available",
+      "stream_metadata_if_available"
+    ],
+    "previous_physical_response": ["action_resolution"]
+  },
+  "variable_width": {
+    "task_state": "defined_by_frozen_task_spec",
+    "action": "9_unimanual_or_18_bimanual",
+    "history": "monitor_owned_causal_prefix",
+    "stream_metadata_if_available": "per-arm selected/active stream ids, emitted world-frame Gaussian means and covariances, and normalized PoE weights for the current command"
+  },
+  "forbidden_monitor_inputs": [
+    "fault_family",
+    "fault_severity",
+    "trigger_stage",
+    "injector_event",
+    "eligible",
+    "physically_triggered",
+    "violation_onset",
+    "audit_label",
+    "future_observation"
+  ],
+  "audit_join": "after_monitor_inference_by_episode_id_and_cycle",
+  "training_target_alignment": "feature_t_uses_active_violation_from_audit_t_minus_1; label_0_is_zero"
+}

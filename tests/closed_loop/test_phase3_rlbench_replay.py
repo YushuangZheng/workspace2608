@@ -121,6 +121,11 @@ def test_stack_wine_normal_replay_routes_roles_and_keeps_actions_available() -> 
     tick = 0
     carried_relations = None
     carried_decisions = None
+    carried_evidence_decisions = None
+    controller = ClosedLoopExecutionController(model)
+    controller.reset(first[0])
+    previous_roles = None
+    previous_belief = None
     for sequence in skill_sequences:
         initial = sequence[0]
         skill_index = initial[0].skill_index
@@ -136,10 +141,23 @@ def test_stack_wine_normal_replay_routes_roles_and_keeps_actions_available() -> 
                 initial_relations if carried_relations is None else carried_relations
             ),
             initial_relation_decisions=carried_decisions,
+            initial_relation_evidence_decisions=carried_evidence_decisions,
             previous_observation=runtime_observation(tick, initial),
         )
-        controller = ClosedLoopExecutionController(model)
-        controller.reset(initial[0])
+        if previous_roles is not None:
+            assert previous_belief is not None
+            # The replay resets its per-skill belief window, but the real
+            # executor crosses this boundary transactionally. Preserve that
+            # causal entry so a demonstrated LINK receives its ordinary
+            # post-entry confirmation interval instead of being mistaken for
+            # an arbitrary reset directly into a linked state.
+            controller.role_router.commit_boundary_entry(
+                previous_roles,
+                previous_belief,
+                initial[0],
+                mode_by_skill=mode_by_skill,
+            )
+            controller.commit_reentry(initial[0])
         previous = initial
         for current in sequence[1:]:
             tick += 1
@@ -184,6 +202,9 @@ def test_stack_wine_normal_replay_routes_roles_and_keeps_actions_available() -> 
             for frame, estimate in belief.relation_estimates.items()
             if estimate.decision_state != RelationDecision.UNKNOWN
         }
+        carried_evidence_decisions = updater.informative_evidence_decisions
+        previous_roles = roles
+        previous_belief = belief
 
     assert unavailable == []
     assert recoveries == []

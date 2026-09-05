@@ -121,11 +121,13 @@ class ClosedLoopExecutionController:
         progress_filter_config: ProgressFilterConfig = ProgressFilterConfig(),
         *,
         dynamic_frame_roles: bool = True,
+        belief_driven_progress: bool = True,
     ) -> None:
         self.task_model = task_model
         self.config = config
         self.progress_filter_config = progress_filter_config
         self.dynamic_frame_roles = bool(dynamic_frame_roles)
+        self.belief_driven_progress = bool(belief_driven_progress)
         self.role_router = FrameRoleRouter(task_model, config.frame_roles)
         self.weighted_poe = WeightedPoEExecutor(task_model)
         self.mismatch_tracker = MismatchTracker(config.mismatch)
@@ -167,6 +169,45 @@ class ClosedLoopExecutionController:
         self.mismatch_tracker.reset()
         self._last_tick: int | None = None
         self._last_boundary_transition_tick: int | None = None
+
+    def restart_current_skill_reference(self) -> StateId:
+        """Move only the action cursor to the current skill entry.
+
+        Generic Skill-Retry must not rewrite the physical-state posterior or
+        recover objects by fiat.  Clearing the local mismatch counters prevents
+        the same persisted alarm from being re-emitted on the reset itself.
+        """
+
+        current = self._cursor.reference_state
+        entry = self.task_model.skill_states[current.skill_index][0]
+        self._cursor = ClosedLoopCursor(
+            nominal_state=self._cursor.nominal_state,
+            estimated_state=self._cursor.estimated_state,
+            reference_state=entry,
+        )
+        self.mismatch_tracker.reset()
+        self._last_boundary_transition_tick = None
+        return entry
+
+    def commit_reentry(self, state_id: StateId) -> None:
+        """Realign the task cursor while preserving physical relation history.
+
+        Recovery re-entry is not an episode reset.  Confirmed LINK/UNLINK
+        evidence and relation-event lifecycle therefore remain valid unless a
+        later observation-quality gap or informative opposite response
+        invalidates them through the ordinary relation filter.
+        """
+
+        if state_id not in self.task_model.states:
+            raise KeyError(f"闭环执行器重入状态不存在：{state_id}")
+        self._cursor = ClosedLoopCursor(
+            nominal_state=state_id,
+            estimated_state=state_id,
+            reference_state=state_id,
+        )
+        self.role_router.reenter(state_id)
+        self.mismatch_tracker.reset()
+        self._last_boundary_transition_tick = None
 
     @staticmethod
     def _action_compatibility(left: DynaMACAction, right: DynaMACAction) -> float:
@@ -565,6 +606,44 @@ class ClosedLoopExecutionController:
         nominal = belief.progress.nominal_state
         estimated = belief.progress.estimated_state
         reasons = []
+        if not self.belief_driven_progress:
+            if roles.blocks_advance:
+                return (
+                    ExecutionDecision.HOLD,
+                    current,
+                    (
+                        (
+                            "reliable_relation_mismatch"
+                            if roles.recovery_intents
+                            else "critical_relation_unknown"
+                        ),
+                    ),
+                )
+            if not current_discrete_action_complete:
+                return (
+                    ExecutionDecision.HOLD,
+                    current,
+                    ("current_discrete_action_pending",),
+                )
+            if not action_executed:
+                return ExecutionDecision.HOLD, current, ("clock_initial_hold",)
+            successors = self.task_model.state(current).topology.successors
+            same_skill = tuple(
+                state
+                for state in successors
+                if state.skill_index == current.skill_index
+            )
+            if same_skill:
+                return (
+                    ExecutionDecision.ADVANCE,
+                    same_skill[0],
+                    ("demonstration_clock_advance",),
+                )
+            return (
+                ExecutionDecision.HOLD,
+                current,
+                ("demonstration_clock_boundary",),
+            )
         if belief.progress.status == ProgressStatus.NO_PLAUSIBLE_STATE:
             reasons.append("no_plausible_state")
         elif (

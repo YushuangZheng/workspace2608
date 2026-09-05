@@ -1,0 +1,65 @@
+{
+  "schema": "essay2608.iclr2027.b-delivery-contract.v1",
+  "transfer_mode": "manifest_scoped_file_copy_preserving_repository_relative_paths",
+  "git_commit_or_patch_transfer_allowed": false,
+  "a4_main10_delivery_manifest_path": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY.json",
+  "later_delivery_manifest_paths": {
+    "e3_m4": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e3_m4.json",
+    "e6_rvt": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_rvt.json",
+    "e6_racer": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_racer.json"
+  },
+  "delivery_manifest_schema": "essay2608.iclr2027.b-to-a-delivery.v1",
+  "repository_relative_paths": true,
+  "required_manifest_fields": [
+    "delivery_id",
+    "created_utc",
+    "producer",
+    "base_commit",
+    "files",
+    "checkpoint_manifests"
+  ],
+  "required_file_fields": [
+    "path",
+    "bytes",
+    "sha256"
+  ],
+  "allowed_code_prefixes": [
+    "evaluations/iclr2027/methods/fail_detect/",
+    "evaluations/iclr2027/methods/failure_supervised/",
+    "evaluations/iclr2027/native_systems/rvt/",
+    "evaluations/iclr2027/native_systems/racer/"
+  ],
+  "allowed_method_configs": [
+    "evaluations/iclr2027/configs/methods/m3_fail_detect.json",
+    "evaluations/iclr2027/configs/methods/m4_failure_supervised.json"
+  ],
+  "allowed_artifact_prefixes": [
+    "evaluations/iclr2027/artifacts/checkpoints/m4/",
+    "evaluations/iclr2027/artifacts/training/m4/",
+    "evaluations/iclr2027/artifacts/development_golden/m3/",
+    "evaluations/iclr2027/artifacts/development_golden/m4/",
+    "evaluations/iclr2027/results/native/rvt/",
+    "evaluations/iclr2027/results/native/racer/"
+  ],
+  "forbidden_prefixes": [
+    "source/policy/closed_loop/",
+    "evaluations/iclr2027/interfaces/",
+    "evaluations/iclr2027/configs/shared/",
+    "evaluations/iclr2027/runners/",
+    "evaluations/iclr2027/audit/",
+    "evaluations/iclr2027/recovery/",
+    "evaluations/iclr2027/manifests/",
+    "evaluations/iclr2027/datasets/normal_calibration",
+    "evaluations/iclr2027/datasets/sealed",
+    "iclr2027/"
+  ],
+  "forbidden_path_tokens": [
+    "normal_calibration",
+    "sealed_test",
+    "main10_nominal",
+    "main10_perturbed"
+  ],
+  "checkpoint_contract": "evaluations/iclr2027/configs/shared/artifact_contract.json",
+  "copy_entire_repository_allowed": false,
+  "overwrite_a_owned_paths_allowed": false
+}

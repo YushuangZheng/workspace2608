@@ -1,0 +1,115 @@
+{
+  "schema": "essay2608.iclr2027.task-registry.v1",
+  "status": "DEVELOPMENT_ONLY_UNTIL_A1_FREEZE",
+  "main10_place_cups_level": 3,
+  "task_sets": {
+    "main10": ["close_jar", "open_drawer", "insert_onto_square_peg", "place_cups_3", "stack_cups", "sweep_to_dustpan", "bimanual_handover_item", "bimanual_lift_tray", "bimanual_sweep_to_dustpan", "bimanual_put_bottle_in_fridge"],
+    "stress4": ["open_drawer", "place_cups_3", "bimanual_handover_item", "bimanual_lift_tray"],
+    "horizon3": ["place_cups_1", "place_cups_2", "place_cups_3", "remove_cups_1", "remove_cups_2", "push_buttons_1", "push_buttons_2", "push_buttons_3"],
+    "native6": ["close_jar", "open_drawer", "insert_onto_square_peg", "place_cups_3", "stack_cups", "sweep_to_dustpan"]
+  },
+  "tasks": {
+    "close_jar": {
+      "base_task": "close_jar", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10", "native6"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change"],
+      "semantic_entities": {"lid": "operated lid", "target_jar": "variation-selected jar body"}
+    },
+    "open_drawer": {
+      "base_task": "open_drawer", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10", "stress4", "native6"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change"],
+      "semantic_entities": {"drawer": "variation-selected articulated drawer"}
+    },
+    "insert_onto_square_peg": {
+      "base_task": "insert_onto_square_peg", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10", "native6"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change"],
+      "semantic_entities": {"square_ring": "operated ring", "target_peg": "variation-selected peg centre"}
+    },
+    "place_cups_1": {
+      "base_task": "place_cups", "task_level": 1, "fixed_base_variation": 0,
+      "task_sets": ["horizon3"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "composed_event"],
+      "semantic_entities": {"cup0": "first operated cup", "spoke0": "first placement spoke"}
+    },
+    "place_cups_2": {
+      "base_task": "place_cups", "task_level": 2, "fixed_base_variation": 1,
+      "task_sets": ["horizon3"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "composed_event"],
+      "semantic_entities": {"cup0": "first operated cup", "cup1": "second operated cup", "spoke0": "first placement spoke", "spoke1": "second placement spoke"}
+    },
+    "place_cups_3": {
+      "base_task": "place_cups", "task_level": 3, "fixed_base_variation": 2,
+      "task_sets": ["main10", "stress4", "horizon3", "native6"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "composed_event"],
+      "semantic_entities": {"cup0": "first operated cup", "cup1": "second operated cup", "cup2": "third operated cup", "spoke0": "first placement spoke", "spoke1": "second placement spoke", "spoke2": "third placement spoke"}
+    },
+    "stack_cups": {
+      "base_task": "stack_cups", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10", "native6"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change"],
+      "semantic_entities": {"cup1": "first moving cup", "cup2": "stack base cup", "cup3": "second moving cup"}
+    },
+    "sweep_to_dustpan": {
+      "base_task": "sweep_to_dustpan", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10", "native6"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change"],
+      "semantic_entities": {"broom": "operated broom", "dustpan": "success-region reference", "dirt0": "first dirt particle", "dirt1": "second dirt particle", "dirt2": "third dirt particle", "dirt3": "fourth dirt particle", "dirt4": "fifth dirt particle"}
+    },
+    "bimanual_handover_item": {
+      "base_task": "bimanual_handover_item", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10", "stress4"], "success_source": "rlbench_task.success", "demonstration_source": "phase6_exact_reuse",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "coordination_delay"],
+      "semantic_entities": {"item0": "variation-zero target item", "item1": "candidate item", "item2": "candidate item", "item3": "candidate item", "item4": "candidate item"}
+    },
+    "bimanual_lift_tray": {
+      "base_task": "bimanual_lift_tray", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10", "stress4"], "success_source": "rlbench_task.success", "demonstration_source": "phase6_exact_reuse",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "coordination_delay"],
+      "semantic_entities": {"item": "task payload item", "tray": "cooperatively operated tray"}
+    },
+    "bimanual_sweep_to_dustpan": {
+      "base_task": "bimanual_sweep_to_dustpan", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10"], "success_source": "rlbench_task.success", "demonstration_source": "phase6_exact_reuse",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "coordination_delay"],
+      "semantic_entities": {"broom": "left-arm operated broom", "dustpan": "right-arm operated dustpan"}
+    },
+    "bimanual_put_bottle_in_fridge": {
+      "base_task": "bimanual_put_bottle_in_fridge", "task_level": null, "fixed_base_variation": null,
+      "task_sets": ["main10"], "success_source": "rlbench_task.success", "demonstration_source": "phase6_exact_reuse",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "coordination_delay"],
+      "semantic_entities": {"bottle": "operated bottle", "fridge": "articulated refrigerator reference"}
+    },
+    "remove_cups_1": {
+      "base_task": "remove_cups", "task_level": 1, "fixed_base_variation": 0,
+      "task_sets": ["horizon3"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "composed_event"],
+      "semantic_entities": {"cup0": "first operated cup", "spoke0": "first source spoke", "target0": "first placement target"}
+    },
+    "remove_cups_2": {
+      "base_task": "remove_cups", "task_level": 2, "fixed_base_variation": 1,
+      "task_sets": ["horizon3"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "composed_event"],
+      "semantic_entities": {"cup0": "first operated cup", "spoke0": "first source spoke", "target0": "first placement target", "cup1": "second operated cup", "spoke1": "second source spoke", "target1": "second placement target"}
+    },
+    "push_buttons_1": {
+      "base_task": "push_buttons", "task_level": 1, "fixed_base_variation": 0,
+      "task_sets": ["horizon3"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "environment_change", "composed_event"],
+      "semantic_entities": {"button0": "first articulated target button"}
+    },
+    "push_buttons_2": {
+      "base_task": "push_buttons", "task_level": 2, "fixed_base_variation": 1,
+      "task_sets": ["horizon3"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "environment_change", "composed_event"],
+      "semantic_entities": {"button0": "first articulated target button", "button1": "second articulated target button"}
+    },
+    "push_buttons_3": {
+      "base_task": "push_buttons", "task_level": 3, "fixed_base_variation": 2,
+      "task_sets": ["horizon3"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
+      "compatible_faults": ["actuation_delay", "environment_change", "composed_event"],
+      "semantic_entities": {"button0": "first articulated target button", "button1": "second articulated target button", "button2": "third articulated target button"}
+    }
+  }
+}

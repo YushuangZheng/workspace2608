@@ -1,0 +1,9 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "m0_dynamac",
+  "paper_name": "DynaMAC",
+  "policy_type": "dynamac",
+  "feature_profile": null,
+  "monitor": null,
+  "recovery": null
+}

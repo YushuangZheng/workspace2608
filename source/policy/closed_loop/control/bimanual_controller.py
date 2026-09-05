@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Mapping
 
 from ..inference.belief_updater import BeliefUpdater, ClosedLoopBelief
@@ -42,6 +42,7 @@ class MultiArmBoundaryController:
         *,
         belief_updaters: Mapping[str, BeliefUpdater],
         relation_scene_guards: bool = True,
+        boundary_gated_advancement: bool = True,
     ) -> None:
         if not task_models:
             raise ValueError("阶段四至少需要一只机械臂")
@@ -49,6 +50,7 @@ class MultiArmBoundaryController:
         self.execution_controllers = dict(execution_controllers)
         self.belief_updaters = dict(belief_updaters)
         self.config = config
+        self.boundary_gated_advancement = bool(boundary_gated_advancement)
         self.guards = {
             arm: EntryGuard(
                 self.task_models,
@@ -123,6 +125,30 @@ class MultiArmBoundaryController:
                 source_state,
                 mode_by_arm_skill=mode_by_arm_skill,
             )
+            if not self.boundary_gated_advancement:
+                terminal = model.skill_states[source_state.skill_index][-1]
+                ready = source_state == terminal
+                local = LocalCompletionResult(
+                    boundary_id=boundary.boundary_id,
+                    end_probability=float(ready),
+                    goal_compatibility=1.0,
+                    own_relation_compatibility=1.0,
+                    score=float(ready),
+                    threshold=0.0,
+                    raw_satisfied=ready,
+                    consecutive_cycles=1 if ready else 0,
+                    required_cycles=1,
+                    done=ready,
+                    evidence_available=True,
+                )
+                request = replace(
+                    request,
+                    permitted=ready,
+                    local_done=ready,
+                    condition_results={},
+                    verification_requests=(),
+                    preparation=None,
+                )
             requests[arm] = request
             local_results[arm] = local
 

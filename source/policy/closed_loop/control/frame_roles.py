@@ -196,6 +196,13 @@ class FrameRoleRouter:
         self._unresolved_formal_link_events.clear()
         self._last_committed_state = None
 
+    def reenter(self, state_id: StateId) -> None:
+        """Realign task causality without erasing observed relation history."""
+
+        if state_id not in self.task_model.states:
+            raise KeyError(f"流角色重入未知状态 {state_id}")
+        self._last_committed_state = state_id
+
     def commit(
         self,
         snapshot: FrameRoleSnapshot,
@@ -303,7 +310,7 @@ class FrameRoleRouter:
             None if mode_by_skill is None else mode_by_skill.get(state_id.skill_index)
         )
 
-    def _selected_frames(
+    def _candidate_frames(
         self,
         state_id: StateId,
         mode_by_skill: Mapping[int, int] | None,
@@ -315,6 +322,26 @@ class FrameRoleRouter:
         if mode < 0 or mode >= len(node.mode_selected_frames):
             raise IndexError("mode_index 超出流角色模型的模态范围")
         return node.mode_selected_frames[mode]
+
+    def _action_frames(
+        self,
+        state_id: StateId,
+        mode_by_skill: Mapping[int, int] | None,
+    ) -> tuple[str, ...]:
+        node = self.task_model.state(state_id)
+        mode = self._mode_for_state(state_id, mode_by_skill)
+        candidates = set(self._candidate_frames(state_id, mode_by_skill))
+        if mode is None:
+            return tuple(
+                frame for frame in node.action_relevant_frames if frame in candidates
+            )
+        if mode < 0 or mode >= len(node.mode_action_relevant_frames):
+            raise IndexError("mode_index 超出动作相关流模型的模态范围")
+        return tuple(
+            frame
+            for frame in node.mode_action_relevant_frames[mode]
+            if frame in candidates
+        )
 
     def _expected_distribution(
         self,
@@ -836,8 +863,9 @@ class FrameRoleRouter:
     ) -> FrameRoleSnapshot:
         if state_id not in self.task_model.states:
             raise KeyError(f"流角色引用未知状态 {state_id}")
-        selected_frames = self._selected_frames(state_id, mode_by_skill)
-        selected = frozenset(selected_frames)
+        candidate_frames = self._candidate_frames(state_id, mode_by_skill)
+        action_frames = self._action_frames(state_id, mode_by_skill)
+        selected = frozenset(action_frames)
         monitor_frames = set(
             self._confirmed_monitor_frames(
                 belief.progress.posterior,
@@ -858,7 +886,7 @@ class FrameRoleRouter:
                 mode_by_skill,
             )
         )
-        confirmed_monitors = tuple(sorted(monitor_frames.difference(selected)))
+        confirmed_monitors = tuple(sorted(monitor_frames.difference(candidate_frames)))
         decisions: dict[str, FrameRoleDecision] = {}
         recovery_intents = []
         confirmed_link_events: set[RelationEventId] = set()
@@ -867,7 +895,7 @@ class FrameRoleRouter:
         naturally_confirming_events: set[RelationEventId] = set()
         features = belief.runtime_features
 
-        for frame in (*selected_frames, *confirmed_monitors):
+        for frame in (*candidate_frames, *confirmed_monitors):
             selected_offline = frame in selected
             reliability = (
                 features.tracking_reliability.get(frame, 0.0)
@@ -891,13 +919,13 @@ class FrameRoleRouter:
                 )
                 decisions[frame] = FrameRoleDecision(
                     frame_id=frame,
-                    role=FrameRole.EXECUTE,
+                    role=(FrameRole.EXECUTE if selected_offline else FrameRole.DEFER),
                     selected_offline=selected_offline,
                     expected_distribution=None,
                     expected_relation=None,
                     actual_relation=None,
                     relation_compatibility=1.0,
-                    execution_weight=weight,
+                    execution_weight=weight if selected_offline else 0.0,
                     monitor=False,
                     blocks_advance=False,
                 )
@@ -953,18 +981,6 @@ class FrameRoleRouter:
                 state_id,
                 mode_by_skill,
             )
-            if (
-                not selected_offline
-                and not confirmation_events
-                and expected != RelationDecision.LINKED
-                and not (
-                    expected == RelationDecision.UNKNOWN
-                    and actual == RelationDecision.LINKED
-                )
-            ):
-                # Event-confirmed monitoring never re-enables an inactive
-                # external expert and never broadens PoE participation.
-                continue
             compatibility = (
                 0.5
                 if estimate is None
@@ -1046,7 +1062,18 @@ class FrameRoleRouter:
                     and reliability >= self.config.minimum_tracking_reliability
                     and weight > 0.0
                 )
-                blocks = not safe_external_bootstrap
+                # A candidate retained only for state explanation has no
+                # action authority.  Its unexcited EXTERNAL relation remains
+                # soft progress evidence, but cannot freeze the driving
+                # streams that are needed to create relation evidence.  A
+                # later reliable LINK decision still enters the ordinary
+                # mismatch/recovery branch below.  Event-supported LINK
+                # monitors are deliberately unaffected by this rule.
+                non_driving_external = bool(
+                    not selected_offline
+                    and expected == RelationDecision.EXTERNAL
+                )
+                blocks = not (safe_external_bootstrap or non_driving_external)
                 intent = None
             elif expected == RelationDecision.UNKNOWN:
                 # The online relation is stable, but beta-weighted normal
@@ -1066,9 +1093,9 @@ class FrameRoleRouter:
                 blocks = False
                 intent = None
             elif expected == actual == RelationDecision.EXTERNAL:
-                role = FrameRole.EXECUTE
+                role = FrameRole.EXECUTE if selected_offline else FrameRole.DEFER
                 external = 0.0 if estimate is None else estimate.external
-                weight = reliability * external
+                weight = reliability * external if selected_offline else 0.0
                 monitor = False
                 blocks = False
                 intent = None
@@ -1153,7 +1180,10 @@ class FrameRoleRouter:
 
         if state_id not in self.task_model.states:
             raise KeyError(f"流角色引用未知状态 {state_id}")
-        selected_frames = self._selected_frames(state_id, mode_by_skill)
+        # The progress-only ablation intentionally preserves the frozen
+        # Equation (6) candidate mask; offline relevance is part of the
+        # proposed dynamic stream router, not a hidden baseline change.
+        selected_frames = self._candidate_frames(state_id, mode_by_skill)
         decisions = {}
         for frame in selected_frames:
             virtual = frame.startswith("virtual_skill_")

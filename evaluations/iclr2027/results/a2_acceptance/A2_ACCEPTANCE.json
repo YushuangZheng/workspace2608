@@ -1,0 +1,143 @@
+{
+  "concurrency": {
+    "calibration_candidates": {
+      "finished_by_task": {
+        "bimanual_handover_item": 53,
+        "bimanual_lift_tray": 97,
+        "bimanual_put_bottle_in_fridge": 58,
+        "bimanual_sweep_to_dustpan": 51,
+        "close_jar": 63,
+        "insert_onto_square_peg": 71,
+        "open_drawer": 516,
+        "place_cups_3": 352,
+        "stack_cups": 57,
+        "sweep_to_dustpan": 50
+      },
+      "infrastructure_errors": 0,
+      "manifest_sha256": "43a6e443b7606fda0b42a82a2ded0c8511c6a8588611149c608da656a3d8c89a",
+      "peak_active": 48,
+      "renderer": "headless_xvfb",
+      "successes_by_task": {
+        "bimanual_handover_item": 51,
+        "bimanual_lift_tray": 51,
+        "bimanual_put_bottle_in_fridge": 52,
+        "bimanual_sweep_to_dustpan": 50,
+        "close_jar": 52,
+        "insert_onto_square_peg": 51,
+        "open_drawer": 51,
+        "place_cups_3": 55,
+        "stack_cups": 52,
+        "sweep_to_dustpan": 50
+      },
+      "workers": 48
+    },
+    "failure_train": {
+      "finished_by_task": {
+        "bimanual_handover_item": 200,
+        "bimanual_lift_tray": 200,
+        "bimanual_put_bottle_in_fridge": 200,
+        "bimanual_sweep_to_dustpan": 200,
+        "close_jar": 200,
+        "insert_onto_square_peg": 200,
+        "open_drawer": 200,
+        "place_cups_3": 200,
+        "stack_cups": 200,
+        "sweep_to_dustpan": 200
+      },
+      "infrastructure_errors": 0,
+      "manifest_sha256": "938590fc724602357ee578e956c61238b8b31706a77c91f14c04ce42089e1a13",
+      "peak_active": 48,
+      "renderer": "headless_xvfb",
+      "successes_by_task": {
+        "bimanual_handover_item": 121,
+        "bimanual_lift_tray": 43,
+        "bimanual_put_bottle_in_fridge": 77,
+        "bimanual_sweep_to_dustpan": 114,
+        "close_jar": 102,
+        "insert_onto_square_peg": 49,
+        "open_drawer": 14,
+        "place_cups_3": 6,
+        "stack_cups": 70,
+        "sweep_to_dustpan": 116
+      },
+      "workers": 48
+    }
+  },
+  "development": {
+    "eligible": 94,
+    "episodes": 200,
+    "infrastructure_errors": 0,
+    "physically_triggered": 94,
+    "trigger_rate_by_family": {
+      "actuation_delay": 1.0,
+      "coordination_delay": 1.0,
+      "environment_change": 1.0,
+      "missed_interaction": 1.0,
+      "relation_loss": 1.0
+    }
+  },
+  "failure_train": {
+    "eligible": 1637,
+    "episodes": 2000,
+    "per_task": {
+      "bimanual_handover_item": 200,
+      "bimanual_lift_tray": 200,
+      "bimanual_put_bottle_in_fridge": 200,
+      "bimanual_sweep_to_dustpan": 200,
+      "close_jar": 200,
+      "insert_onto_square_peg": 200,
+      "open_drawer": 200,
+      "place_cups_3": 200,
+      "stack_cups": 200,
+      "sweep_to_dustpan": 200
+    },
+    "physically_triggered": 1629,
+    "trigger_rate_given_eligible": 0.9951130116065975
+  },
+  "handoff_to_server_b": {
+    "delivered": false,
+    "delivery_status": "NOT_YET_SENT_BY_USER_DECISION",
+    "frozen_indexes": [
+      "evaluations/iclr2027/results/a2_acceptance/B_INTERFACE_HANDOFF.json",
+      "evaluations/iclr2027/results/a2_acceptance/B_FAILURE_TRAIN_HANDOFF.json"
+    ],
+    "policy": "A may correct a verified pre-delivery data or protocol defect, then must regenerate and re-audit both handoff indexes before the first delivery."
+  },
+  "manifests": {
+    "ablation4.jsonl": 800,
+    "horizon3_per_stage.jsonl": 1600,
+    "horizon3_single_event.jsonl": 1600,
+    "main10_development.jsonl": 200,
+    "main10_failure_train.jsonl": 2000,
+    "main10_nominal.jsonl": 2000,
+    "main10_normal_calibration.jsonl": 500,
+    "main10_normal_calibration_candidates.jsonl": 6000,
+    "main10_perturbed.jsonl": 2000,
+    "native6_nominal.jsonl": 1200,
+    "native6_perturbed.jsonl": 1200,
+    "stress4_failure_budget_test.jsonl": 800,
+    "stress4_leave_one_family_out.jsonl": 800,
+    "stress4_severity.jsonl": 2400
+  },
+  "normal_calibration": {
+    "per_task": {
+      "bimanual_handover_item": 50,
+      "bimanual_lift_tray": 50,
+      "bimanual_put_bottle_in_fridge": 50,
+      "bimanual_sweep_to_dustpan": 50,
+      "close_jar": 50,
+      "insert_onto_square_peg": 50,
+      "open_drawer": 50,
+      "place_cups_3": 50,
+      "stack_cups": 50,
+      "sweep_to_dustpan": 50
+    },
+    "retained_successful_nominal_rollouts": 500,
+    "server_visibility": "A_only"
+  },
+  "purpose": "A2_INFRASTRUCTURE_AND_TRAINING_DATA_NOT_PAPER_RESULTS",
+  "schema": "essay2608.iclr2027.a2-acceptance.v1",
+  "sealed_test_executed": false,
+  "status": "PASS",
+  "validated_cycle_artifacts": 2700
+}

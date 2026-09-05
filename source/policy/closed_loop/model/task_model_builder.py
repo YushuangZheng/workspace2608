@@ -14,6 +14,7 @@ from ...dynamac import (
     BimanualDynaMAC,
     DynaMAC,
     DynaMACDemonstration,
+    GaussianMarginal,
     _fit_pose_sequence,
     _resample_poses,
     _resample_rows,
@@ -22,8 +23,10 @@ from ...dynamac import (
     _validate_demonstrations,
     geometric_mean_standard_deviation,
     pose_log_world,
+    product_of_experts,
     relative_pose,
     synchronized_bimanual_demonstrations,
+    transform_marginal,
 )
 from .boundary_model import (
     BoundaryId,
@@ -74,6 +77,8 @@ class ClosedLoopTaskModelConfig:
     scene_support_confidence: float = 0.99
     scene_min_loo_gain: float = 1.0e-6
     scene_min_loo_accuracy: float = 0.8
+    action_relevance_min_loo_gain: float = 1.0e-4
+    action_relevance_min_positive_fraction: float = 0.8
     progress_scene_weight: float = 1.0
     boundary_terminal_window: int = 3
     # Boundary support is evaluated on the soft relation distribution.  Keep
@@ -90,6 +95,7 @@ class ClosedLoopTaskModelConfig:
             self.relation_unlink_threshold,
             self.relation_event_support,
             self.scene_min_loo_accuracy,
+            self.action_relevance_min_positive_fraction,
             self.scene_min_support,
             self.scene_min_stable_fraction,
             self.scene_support_confidence,
@@ -113,6 +119,7 @@ class ClosedLoopTaskModelConfig:
             self.relation_minimum_excitation < 0.0
             or self.relation_comotion_residual_threshold < 0.0
             or self.progress_scene_weight < 0.0
+            or self.action_relevance_min_loo_gain < 0.0
             or self.boundary_compatibility_margin < 0.0
         ):
             raise ValueError("评分权重和边界兼容度容差必须非负")
@@ -845,6 +852,270 @@ class ClosedLoopTaskModelBuilder:
         return states, {
             index: tuple(sorted(values)) for index, values in skill_states.items()
         }
+
+    def _held_out_action_marginals(
+        self,
+        policy: DynaMAC,
+        data: _AlignedSkillData,
+        *,
+        held_out: int,
+        training: Array,
+        frame: str,
+    ) -> tuple[GaussianMarginal, ...]:
+        policy_pose = (
+            data.ee_pose
+            if policy.config.policy_model == "time_state"
+            else data.action_pose
+        )
+        local_training = np.stack(
+            [
+                relative_pose(data.frames[frame][index], policy_pose[index])
+                for index in training
+            ]
+        )
+        means, covariances = _fit_pose_sequence(
+            local_training,
+            policy.config.position_variance_floor,
+            policy.config.rotation_variance_floor,
+            covariance_estimation_method=policy.config.covariance_estimation_method,
+        )
+        return tuple(
+            transform_marginal(
+                frame,
+                data.frames[frame][held_out, local_index],
+                means[local_index],
+                covariances[local_index],
+                diagonalize=policy.config.diagonalize_transformed_covariance,
+            )
+            for local_index in range(means.shape[0])
+        )
+
+    @staticmethod
+    def _position_prediction_error(mean: Array, value: Array) -> float:
+        """Translation error of one object-conditioned action target."""
+
+        return float(np.linalg.norm(mean[:3] - value[:3]))
+
+    def _add_action_stream_relevance(
+        self,
+        policy: DynaMAC,
+        states: dict[StateId, StateNode],
+        aligned: dict[int, _AlignedSkillData],
+    ) -> list[dict[str, Any]]:
+        """Screen Eq. (6) candidates by skill-level LODO action value.
+
+        Each fold fits local experts from the other demonstrations.  The
+        current skill's virtual entry frame supplies the same nominal-motion
+        baseline to every candidate; adding a candidate must reduce held-out
+        Cartesian target error on a stable fraction of demonstrations.  This
+        prevents a merely correlated entity from surviving only as a
+        compensating term inside a multi-expert average.  The original
+        candidate mask remains untouched for progress, relation, scene,
+        boundary and recovery evidence.
+        """
+
+        audit: list[dict[str, Any]] = []
+        retained_by_skill_mode: dict[tuple[int, int], tuple[str, ...]] = {}
+        for skill_index, skill in enumerate(policy.skills):
+            data = aligned[skill_index]
+            for mode in range(len(skill.mode_priors)):
+                members = _mode_members(skill, mode)
+                candidates = tuple(
+                    frame
+                    for frame in skill.selected_frames
+                    if skill.streams[frame].is_selected(mode)
+                )
+                fold_gains: dict[str, list[float]] = {frame: [] for frame in candidates}
+                baseline_frame = f"virtual_skill_{skill.label}"
+                if baseline_frame not in data.frames:
+                    raise RuntimeError(
+                        f"技能 {skill.label} 缺少动作相关性留一验证的入口锚点"
+                    )
+                for held_out in members:
+                    training = members[members != held_out]
+                    if len(training) == 0:
+                        continue
+                    baseline = self._held_out_action_marginals(
+                        policy,
+                        data,
+                        held_out=int(held_out),
+                        training=training,
+                        frame=baseline_frame,
+                    )
+                    target = (
+                        data.ee_pose[int(held_out)]
+                        if policy.config.policy_model == "time_state"
+                        else data.action_pose[int(held_out)]
+                    )
+                    for frame in candidates:
+                        if frame == baseline_frame:
+                            continue
+                        candidate_marginals = self._held_out_action_marginals(
+                            policy,
+                            data,
+                            held_out=int(held_out),
+                            training=training,
+                            frame=frame,
+                        )
+                        gains = []
+                        for local_index in range(skill.duration):
+                            if not skill.streams[frame].is_active(mode, local_index):
+                                continue
+                            baseline_error = self._position_prediction_error(
+                                baseline[local_index].mean,
+                                target[local_index],
+                            )
+                            combined, _, _ = product_of_experts(
+                                (
+                                    baseline[local_index],
+                                    candidate_marginals[local_index],
+                                )
+                            )
+                            combined_error = self._position_prediction_error(
+                                combined,
+                                target[local_index],
+                            )
+                            gains.append(baseline_error - combined_error)
+                        if gains:
+                            fold_gains[frame].append(float(np.mean(gains)))
+
+                required_positive = int(
+                    math.ceil(
+                        self.config.action_relevance_min_positive_fraction
+                        * len(members)
+                    )
+                )
+                records: dict[str, dict[str, Any]] = {}
+                retained = set()
+                maximum_eq6_score = max(
+                    (
+                        float(skill.selection_scores.get(frame, 0.0))
+                        for frame in candidates
+                    ),
+                    default=0.0,
+                )
+                for frame in candidates:
+                    gains = fold_gains[frame]
+                    is_baseline = frame == baseline_frame
+                    primary_by_eq6 = math.isclose(
+                        float(skill.selection_scores.get(frame, 0.0)),
+                        maximum_eq6_score,
+                        rel_tol=1.0e-12,
+                        abs_tol=1.0e-15,
+                    )
+                    positive = sum(
+                        gain > self.config.action_relevance_min_loo_gain
+                        for gain in gains
+                    )
+                    mean_gain = float(np.mean(gains)) if gains else 0.0
+                    sufficiently_observed = len(gains) == len(members)
+                    keep = bool(
+                        is_baseline
+                        or primary_by_eq6
+                        or not sufficiently_observed
+                        or (
+                            positive >= required_positive
+                            and mean_gain > self.config.action_relevance_min_loo_gain
+                        )
+                    )
+                    if keep:
+                        retained.add(frame)
+                    records[frame] = {
+                        "fold_gains": gains,
+                        "positive_folds": positive,
+                        "required_positive_folds": required_positive,
+                        "mean_gain": mean_gain,
+                        "fully_observed": sufficiently_observed,
+                        "eq6_score": float(skill.selection_scores.get(frame, 0.0)),
+                        "primary_by_eq6": primary_by_eq6,
+                        "retained": keep,
+                        "reason": (
+                            "skill_local_motion_baseline"
+                            if is_baseline
+                            else (
+                                "primary_eq6_candidate"
+                                if primary_by_eq6
+                                else (
+                                    "insufficient_ablation_evidence_keep"
+                                    if not sufficiently_observed
+                                    else (
+                                        "stable_positive_marginal_gain"
+                                        if keep
+                                        else "no_stable_positive_marginal_gain"
+                                    )
+                                )
+                            )
+                        ),
+                    }
+
+                # PoE must remain defined wherever the frozen candidate bank
+                # had an active expert.  This is a mathematical coverage
+                # invariant, not a task-specific exception.
+                coverage_fallbacks: dict[str, list[int]] = {}
+                for local_index in range(skill.duration):
+                    active = tuple(
+                        frame
+                        for frame in candidates
+                        if skill.streams[frame].is_active(mode, local_index)
+                    )
+                    if not active or retained.intersection(active):
+                        continue
+                    fallback = max(
+                        active,
+                        key=lambda frame: (
+                            records[frame]["mean_gain"],
+                            -candidates.index(frame),
+                        ),
+                    )
+                    retained.add(fallback)
+                    records[fallback]["retained"] = True
+                    records[fallback]["reason"] = "required_for_poe_coverage"
+                    coverage_fallbacks.setdefault(fallback, []).append(local_index)
+
+                ordered_retained = tuple(
+                    frame for frame in candidates if frame in retained
+                )
+                retained_by_skill_mode[(skill_index, mode)] = ordered_retained
+                audit.append(
+                    {
+                        "skill_index": skill_index,
+                        "skill_label": int(skill.label),
+                        "mode": mode,
+                        "baseline_frame": baseline_frame,
+                        "demonstration_indices": [int(value) for value in members],
+                        "candidate_frames": list(candidates),
+                        "retained_frames": list(ordered_retained),
+                        "frame_metrics": records,
+                        "coverage_fallbacks": coverage_fallbacks,
+                    }
+                )
+
+        for skill_index in range(len(policy.skills)):
+            state_ids = tuple(
+                sorted(
+                    state_id
+                    for state_id in states
+                    if state_id.skill_index == skill_index
+                )
+            )
+            for state_id in state_ids:
+                node = states[state_id]
+                relevant_modes = tuple(
+                    tuple(
+                        frame
+                        for frame in node.mode_selected_frames[mode]
+                        if frame in retained_by_skill_mode[(skill_index, mode)]
+                    )
+                    for mode in range(len(node.mode_priors))
+                )
+                relevant_union = {
+                    frame for selected in relevant_modes for frame in selected
+                }
+                node.mode_action_relevant_frames = relevant_modes
+                node.action_relevant_frames = tuple(
+                    frame for frame in node.selected_frames if frame in relevant_union
+                )
+        return audit
 
     def _stable_relation_sequence(self, probabilities: Array) -> list[str]:
         states = []
@@ -2481,6 +2752,11 @@ class ClosedLoopTaskModelBuilder:
             )
         aligned = self._align_demonstrations(policy, demonstrations)
         states, skill_states = self._build_states(policy, aligned)
+        action_relevance = self._add_action_stream_relevance(
+            policy,
+            states,
+            aligned,
+        )
         factor_values = self._add_scene_factors(
             policy,
             states,
@@ -2518,7 +2794,21 @@ class ClosedLoopTaskModelBuilder:
             link_origins=link_origins,
             arm_id=arm_id,
             relation_frames=tuple(policy.frame_names),
-            builder_config=asdict(self.config),
+            builder_config={
+                **asdict(self.config),
+                "lodo_fold_partition": [
+                    {
+                        "held_out": held_out,
+                        "training": [
+                            index
+                            for index in range(len(demonstrations))
+                            if index != held_out
+                        ],
+                    }
+                    for held_out in range(len(demonstrations))
+                ],
+                "action_stream_relevance": action_relevance,
+            },
         )
 
     @staticmethod
@@ -3253,6 +3543,19 @@ class ClosedLoopTaskModelBuilder:
                 node.mode_selected_frames = tuple(filtered_modes)
                 node.selected_frames = tuple(
                     frame for frame in skill.streams if frame in selected_union
+                )
+                filtered_action_modes = []
+                for mode, relevant in enumerate(node.mode_action_relevant_frames):
+                    allowed = set(node.mode_selected_frames[mode])
+                    filtered_action_modes.append(
+                        tuple(frame for frame in relevant if frame in allowed)
+                    )
+                action_union = {
+                    frame for relevant in filtered_action_modes for frame in relevant
+                }
+                node.mode_action_relevant_frames = tuple(filtered_action_modes)
+                node.action_relevant_frames = tuple(
+                    frame for frame in skill.streams if frame in action_union
                 )
 
         for boundary_id, boundary in tuple(model.boundaries.items()):

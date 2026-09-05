@@ -1,0 +1,26 @@
+{
+  "schema": "essay2608-phase4-boundary-calibration-config-v2",
+  "claim_boundary": "A3为E1/E2 Main-10冻结的M5及其闭环变体theta_local与H，只由A1每任务5条成功示范的控制周期及正常末端保持标定；不读取failure-train、A-only监控器校准数据、故障标签或sealed test。Horizon-3的E4运行参数不在A3提前冻结。",
+  "tasks": [
+    "close_jar",
+    "open_drawer",
+    "insert_onto_square_peg",
+    "place_cups_3",
+    "stack_cups",
+    "sweep_to_dustpan",
+    "bimanual_handover_item",
+    "bimanual_lift_tray",
+    "bimanual_sweep_to_dustpan",
+    "bimanual_put_bottle_in_fridge"
+  ],
+  "demonstration_indices": [0, 1, 2, 3, 4],
+  "control_period_seconds": 0.05,
+  "control_period_source": "RLBench/rlbench/task_environment.py::_DT",
+  "terminal_hold_seconds": 2.0,
+  "terminal_settling_seconds": 0.25,
+  "positive_floor_fraction": 0.8,
+  "default_relation_probability": 0.7,
+  "minimum_tracking_reliability": 0.25,
+  "minimum_scene_reliability": 0.25,
+  "minimum_information_weight": 0.1
+}

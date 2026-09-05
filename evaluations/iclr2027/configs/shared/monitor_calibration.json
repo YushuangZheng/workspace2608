@@ -1,0 +1,18 @@
+{
+  "schema": "essay2608.iclr2027.monitor-calibration-config.v1",
+  "calibration_manifest": "evaluations/iclr2027/manifests/main10_normal_calibration.jsonl",
+  "calibration_authority": "server_a_normal_only",
+  "threshold_scope": "per_task",
+  "minimum_episodes_per_task": 50,
+  "normal_episode_false_alarm_budget": 0.05,
+  "threshold_rule": {
+    "name": "split_conformal_upper_quantile",
+    "episode_nonconformity": "maximum_of_rolling_persistence_window_minimum",
+    "strict_exceedance": true,
+    "availability_breaks_persistence": true
+  },
+  "persistence_source": "frozen_method_config",
+  "model_weight_updates_allowed": false,
+  "development_fault_labels_allowed": false,
+  "sealed_test_allowed": false
+}

@@ -54,7 +54,10 @@ from essay2608.policy.dynamac import (
     transform_marginal,
 )
 from essay2608.policy.closed_loop.control.entry_guard import _factor_observation
-from essay2608.policy.closed_loop.inference.state_evaluator import joint_poe_pose_support
+from essay2608.policy.closed_loop.inference.state_evaluator import (
+    joint_peak_normalized_pose_support,
+    joint_poe_pose_support,
+)
 from evaluations.development.phase4_boundary_calibration.run import (
     _acceptance_rows,
     _calibrate,
@@ -87,6 +90,41 @@ def test_local_goal_support_uses_the_joint_poe_target_distribution() -> None:
     assert compatibility == pytest.approx(1.0)
     assert normalized_log_support == pytest.approx(0.0, abs=1.0e-12)
     assert mahalanobis == pytest.approx(0.0, abs=1.0e-12)
+
+
+def test_boundary_goal_support_is_normalized_by_jointly_attainable_peak() -> None:
+    """A normal local endpoint must not be rejected by a displaced PoE mean."""
+
+    frame = pose(0.0)
+    first_mean = pose(0.0)
+    second_mean = pose(0.04)
+    covariance = np.eye(6) * 0.01
+    compatibility, current_log_support, attainable_peak = (
+        joint_peak_normalized_pose_support(
+            [
+                (
+                    "first",
+                    frame,
+                    first_mean,
+                    covariance,
+                    first_mean,
+                    1.0,
+                ),
+                (
+                    "second",
+                    frame,
+                    second_mean,
+                    covariance,
+                    second_mean,
+                    1.0,
+                ),
+            ],
+            diagonalize=False,
+        )
+    )
+    assert compatibility == pytest.approx(1.0)
+    assert current_log_support == pytest.approx(0.0, abs=1.0e-12)
+    assert attainable_peak < 0.0
 
 
 def test_cross_arm_scene_factor_resolves_each_arm_dedicated_ee_pose() -> None:
@@ -196,6 +234,45 @@ def test_local_calibration_is_independent_of_directional_guard_wait() -> None:
         ]
     )
     assert acceptance[0]["expected_directional_wait"] == 1
+    assert acceptance[0]["accepted"] == 1
+
+
+def test_acceptance_stops_at_first_runtime_commit() -> None:
+    common = {
+        "task": "synthetic",
+        "arm": "single",
+        "boundary": "single:0->1",
+        "transaction_group": "",
+        "demonstration": 0,
+        "phase": "terminal_hold",
+        "truth_in_terminal_window": 1,
+        "local_done": 1,
+        "guard_evidence_available": 1,
+        "directional_guard_wait": 0,
+        "guard_condition_audit": "{}",
+    }
+    acceptance = _acceptance_rows(
+        [
+            {
+                **common,
+                "tick": 1,
+                "hold_cycle": 0,
+                "guard_raw_satisfied": 1,
+                "transition_permitted": 1,
+            },
+            {
+                **common,
+                "tick": 2,
+                "hold_cycle": 1,
+                # This cycle cannot occur for the source boundary after its
+                # previous-cycle commit and is calibration-only evidence.
+                "guard_raw_satisfied": 0,
+                "transition_permitted": 0,
+            },
+        ]
+    )
+    assert acceptance[0]["first_terminal_hold_permit_cycle"] == 0
+    assert acceptance[0]["final_terminal_hold_permitted"] == 1
     assert acceptance[0]["accepted"] == 1
 
 

@@ -1342,6 +1342,61 @@ def test_reentry_uses_full_state_and_requires_cross_skill_guard(phase5_case) -> 
     assert frozen.progress.posterior == {candidate: 1.0}
 
 
+def test_reentry_preserves_informative_relation_and_role_lifecycle(
+    phase5_case,
+) -> None:
+    model, demonstrations, _ = phase5_case
+    anchor = next(iter(model.link_anchors.values()))
+    state = anchor.linked_entry_states[-1]
+    belief = belief_for(
+        model,
+        demonstrations,
+        state,
+        relation(RelationDecision.LINKED, posterior=(0.05, 0.95)),
+    )
+    updater = BeliefUpdater(model)
+    updater.commit_relation_confirmation(
+        "object",
+        np.asarray([0.05, 0.95]),
+        RelationDecision.LINKED,
+    )
+    execution = ClosedLoopExecutionController(model)
+    execution.role_router._confirmed_link_events.add(anchor.event_id)
+    current_observation = observation_for(model, demonstrations, state, 9)
+
+    selector = ReentrySelector(
+        model,
+        ReentryConfig(
+            minimum_explanation_score=0.0,
+            minimum_robot_peak_normalized_compatibility=0.0,
+            minimum_scene_compatibility=0.0,
+            minimum_relation_compatibility=0.0,
+            require_relation_evidence_when_available=False,
+        ),
+    )
+    evaluation = selector.select(
+        (state,),
+        belief,
+        current_reference=state,
+        mode_by_skill={state.skill_index: 0},
+    )
+    assert evaluation.decision is not None
+
+    selector.apply(
+        evaluation.decision,
+        belief=belief,
+        observation=current_observation,
+        belief_updater=updater,
+        execution_controller=execution,
+    )
+
+    assert updater.informative_evidence_decisions == {
+        "object": RelationDecision.LINKED
+    }
+    assert anchor.event_id in execution.role_router._confirmed_link_events
+    assert execution.cursor.reference_state == state
+
+
 def test_reentry_threshold_uses_jointly_attainable_robot_peak(
     phase5_case, monkeypatch
 ) -> None:

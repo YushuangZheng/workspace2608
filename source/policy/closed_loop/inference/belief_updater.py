@@ -244,6 +244,9 @@ class BeliefUpdater:
         initial_progress: Mapping[StateId, float] | None = None,
         initial_relations: Mapping[str, np.ndarray] | None = None,
         initial_relation_decisions: Mapping[str, RelationDecision] | None = None,
+        initial_relation_evidence_decisions: Mapping[
+            str, RelationDecision
+        ] | None = None,
         previous_observation: RuntimeObservation | None = None,
     ) -> None:
         if initial_progress is None:
@@ -296,7 +299,32 @@ class BeliefUpdater:
         if any(decision == RelationDecision.UNKNOWN for decision in decisions.values()):
             raise ValueError("初始稳定关系判定不能为 Unknown")
         self._stable_decisions = decisions
-        self._informative_evidence_decisions: dict[str, RelationDecision] = {}
+        evidence_decisions = dict(initial_relation_evidence_decisions or {})
+        unknown_evidence_frames = set(evidence_decisions).difference(
+            self.task_model.relation_frames
+        )
+        if unknown_evidence_frames:
+            raise KeyError(
+                "初始关系证据判定包含未知参考系："
+                f"{sorted(unknown_evidence_frames)}"
+            )
+        if any(
+            decision == RelationDecision.UNKNOWN
+            for decision in evidence_decisions.values()
+        ):
+            raise ValueError("初始关系证据判定不能为 Unknown")
+        if any(
+            decisions.get(frame) != decision
+            for frame, decision in evidence_decisions.items()
+        ):
+            raise ValueError("初始关系证据判定必须与稳定关系判定一致")
+        self._informative_evidence_decisions = evidence_decisions
+
+    @property
+    def informative_evidence_decisions(self) -> dict[str, RelationDecision]:
+        """Return a copy of relations confirmed by informative physical motion."""
+
+        return dict(self._informative_evidence_decisions)
 
     def _commit_informative_evidence(
         self,

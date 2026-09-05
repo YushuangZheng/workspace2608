@@ -1,0 +1,21 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "m2_trajectory_likelihood",
+  "paper_name": "Trajectory-Likelihood + Retry",
+  "policy_type": "dynamac",
+  "feature_profile": null,
+  "monitor": {
+    "kind": "trajectory_likelihood",
+    "calibration_score_name": "standardized_nll",
+    "alarm_when": "greater",
+    "threshold": null,
+    "persistence_cycles": 5,
+    "covariance_regularization": 1e-12,
+    "calibration_authority": "server_a_normal_only"
+  },
+  "recovery": {
+    "kind": "skill_retry",
+    "maximum_retries": 1,
+    "budget_cycles": 400
+  }
+}

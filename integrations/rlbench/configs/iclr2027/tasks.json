@@ -1,0 +1,149 @@
+{
+  "schema": "rlbench-dynamac-task-specs-v3",
+  "source": {
+    "repository": "https://github.com/vonHartz/RLBench",
+    "branch": "tapas",
+    "commit": "a51b4e609dc5c3e1a8c06046bd87a9da24723da4",
+    "status": "PROJECT_AUDITED_COMPACT_TASK_STATE"
+  },
+  "tasks": {
+    "close_jar": {
+      "paper_task_name": "Close Jar", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRCloseJar", "bimanual": false,
+      "paper_evaluation_group": "Main-10/Native-6", "paper_scenarios": ["static"],
+      "source_expression": "ICLRCloseJar.get_low_dim_state: [lid, variation-selected target jar]", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "lid", "role": "operated_object"}, {"name": "target_jar", "role": "placement_reference"}]
+    },
+    "open_drawer": {
+      "paper_task_name": "Open Drawer", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLROpenDrawer", "bimanual": false,
+      "paper_evaluation_group": "Main-10/Stress-4/Native-6", "paper_scenarios": ["static"],
+      "source_expression": "ICLROpenDrawer.get_low_dim_state: [selected drawer joint pose, joint position]", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "drawer", "role": "articulated_object"}],
+      "configuration_chunks": [{"entity": "drawer", "name": "joint_position", "size": 1}]
+    },
+    "insert_onto_square_peg": {
+      "paper_task_name": "Insert Onto Square Peg", "module": "rlbench.tasks.insert_onto_square_peg", "class_name": "InsertOntoSquarePeg", "bimanual": false,
+      "paper_evaluation_group": "Main-10/Native-6", "paper_scenarios": ["static"],
+      "source_expression": "InsertOntoSquarePeg.get_low_dim_state: [square ring, variation-selected success centre]", "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "square_ring", "role": "operated_object"}, {"name": "target_peg", "role": "placement_reference"}]
+    },
+    "place_cups_1": {
+      "paper_task_name": "Place Cups / 1", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRPlaceCups1", "bimanual": false,
+      "paper_evaluation_group": "Horizon-3", "paper_scenarios": ["static"],
+      "source_expression": "ICLRPlaceCups1.get_low_dim_state: first cup and first spoke", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "cup0", "role": "operated_object"}, {"name": "spoke0", "role": "placement_reference"}]
+    },
+    "place_cups_2": {
+      "paper_task_name": "Place Cups / 2", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRPlaceCups2", "bimanual": false,
+      "paper_evaluation_group": "Horizon-3", "paper_scenarios": ["static"],
+      "source_expression": "ICLRPlaceCups2.get_low_dim_state: first two cups and spokes", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "cup0", "role": "operated_object"}, {"name": "cup1", "role": "operated_object"}, {"name": "spoke0", "role": "placement_reference"}, {"name": "spoke1", "role": "placement_reference"}]
+    },
+    "place_cups_3": {
+      "paper_task_name": "Place Cups", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRPlaceCups3", "bimanual": false,
+      "paper_evaluation_group": "Main-10/Stress-4/Horizon-3/Native-6", "paper_scenarios": ["static"],
+      "source_expression": "ICLRPlaceCups3.get_low_dim_state: all three cups and spokes", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "cup0", "role": "operated_object"}, {"name": "cup1", "role": "operated_object"}, {"name": "cup2", "role": "operated_object"}, {"name": "spoke0", "role": "placement_reference"}, {"name": "spoke1", "role": "placement_reference"}, {"name": "spoke2", "role": "placement_reference"}]
+    },
+    "stack_cups": {
+      "paper_task_name": "Stack Cups", "module": "rlbench.tasks.stack_cups", "class_name": "StackCups", "bimanual": false,
+      "paper_evaluation_group": "Main-10/Native-6", "paper_scenarios": ["static"],
+      "source_expression": "StackCups.get_low_dim_state: [cup1, cup2, cup3]", "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "cup1", "role": "operated_object"}, {"name": "cup2", "role": "placement_reference"}, {"name": "cup3", "role": "operated_object"}]
+    },
+    "sweep_to_dustpan": {
+      "paper_task_name": "Sweep to Dustpan", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRSweepToDustpan", "bimanual": false,
+      "paper_evaluation_group": "Main-10/Native-6", "paper_scenarios": ["static"],
+      "source_expression": "ICLRSweepToDustpan.get_low_dim_state: [broom, dustpan success region, dirt0..4]", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "broom", "role": "operated_tool"}, {"name": "dustpan", "role": "placement_reference"}, {"name": "dirt0", "role": "scene_entity", "action_reference": false}, {"name": "dirt1", "role": "scene_entity", "action_reference": false}, {"name": "dirt2", "role": "scene_entity", "action_reference": false}, {"name": "dirt3", "role": "scene_entity", "action_reference": false}, {"name": "dirt4", "role": "scene_entity", "action_reference": false}],
+      "structural_bindings": {"dirt0": "dustpan", "dirt1": "dustpan", "dirt2": "dustpan", "dirt3": "dustpan", "dirt4": "dustpan"}
+    },
+    "bimanual_handover_item": {
+      "paper_task_name": "Handover Item", "module": "rlbench.bimanual_tasks.bimanual_handover_item", "class_name": "BimanualHandoverItem", "bimanual": true,
+      "paper_evaluation_group": "Main-10/Stress-4", "paper_scenarios": ["static"],
+      "source_expression": "BimanualHandoverItem.get_low_dim_state: [item0..item4]", "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "shared_union", "segmentation_coordination_source_status": "AUTHOR_EMAIL_EXPLICIT_HANDOVER_SHARED_UNION_20260814", "segmentation_debug_plots_required": false,
+      "pose_chunks": [{"name": "item0", "role": "variation_target"}, {"name": "item1", "role": "distractor"}, {"name": "item2", "role": "distractor"}, {"name": "item3", "role": "distractor"}, {"name": "item4", "role": "distractor"}]
+    },
+    "bimanual_lift_tray": {
+      "paper_task_name": "Lift Tray", "module": "rlbench.bimanual_tasks.bimanual_lift_tray", "class_name": "BimanualLiftTray", "bimanual": true,
+      "paper_evaluation_group": "Main-10/Stress-4", "paper_scenarios": ["static"],
+      "source_expression": "BimanualLiftTray.get_low_dim_state: [item, tray]", "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "shared_union", "segmentation_coordination_source_status": "LOCAL_INTERACTION_INFERENCE_REQUIRES_DEBUG_PLOTS", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "item", "role": "carried_object"}, {"name": "tray", "role": "cooperatively_operated_object"}]
+    },
+    "bimanual_sweep_to_dustpan": {
+      "paper_task_name": "Bimanual Sweep to Dustpan", "module": "rlbench.bimanual_tasks.bimanual_sweep_to_dustpan", "class_name": "BimanualSweepToDustpan", "bimanual": true,
+      "paper_evaluation_group": "Main-10", "paper_scenarios": ["static"],
+      "source_expression": "BimanualSweepToDustpan.get_low_dim_state: [broom, Dustpan_4]", "source_status": "EXACT_FROM_PUBLIC_RLBENCH_GET_LOW_DIM_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "shared_union", "segmentation_coordination_source_status": "LOCAL_INTERACTION_INFERENCE_REQUIRES_DEBUG_PLOTS", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "broom", "role": "operated_tool"}, {"name": "dustpan", "role": "cooperatively_operated_tool"}]
+    },
+    "bimanual_put_bottle_in_fridge": {
+      "paper_task_name": "Put Bottle in Fridge", "module": "integrations.rlbench.rlbench_dynamac.store_bottle_live_v4", "class_name": "BimanualPutBottleInFridgeSemanticV4", "bimanual": true,
+      "paper_evaluation_group": "Main-10", "paper_scenarios": ["static"],
+      "source_expression": "BimanualPutBottleInFridgeSemanticV4.get_low_dim_state: [bottle, fridge_base as fridge]", "source_status": "STORE_BOTTLE_SEMANTIC_V4_LIVE_TASK_EXACT",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "independent", "segmentation_coordination_source_status": "AUTHOR_EMAIL_EXPLICIT_STOREBOTTLE_INDEPENDENT_20260814", "segmentation_debug_plots_required": false,
+      "pose_chunks": [{"name": "bottle", "role": "operated_object"}, {"name": "fridge", "role": "environment_reference"}]
+    },
+    "remove_cups_1": {
+      "paper_task_name": "Remove Cups / 1", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRRemoveCups1", "bimanual": false,
+      "paper_evaluation_group": "Horizon-3", "paper_scenarios": ["static"],
+      "source_expression": "ICLRRemoveCups1.get_low_dim_state: first cup, spoke and placement target", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "cup0", "role": "operated_object"}, {"name": "spoke0", "role": "placement_reference"}, {"name": "target0", "role": "placement_reference"}]
+    },
+    "remove_cups_2": {
+      "paper_task_name": "Remove Cups / 2", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRRemoveCups2", "bimanual": false,
+      "paper_evaluation_group": "Horizon-3", "paper_scenarios": ["static"],
+      "source_expression": "ICLRRemoveCups2.get_low_dim_state: first two cups, spokes and placement targets", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "cup0", "role": "operated_object"}, {"name": "spoke0", "role": "placement_reference"}, {"name": "target0", "role": "placement_reference"}, {"name": "cup1", "role": "operated_object"}, {"name": "spoke1", "role": "placement_reference"}, {"name": "target1", "role": "placement_reference"}]
+    },
+    "push_buttons_1": {
+      "paper_task_name": "Push Buttons / 1", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRPushButtons1", "bimanual": false,
+      "paper_evaluation_group": "Horizon-3", "paper_scenarios": ["static"],
+      "source_expression": "ICLRPushButtons1.get_low_dim_state: first button pose and joint position", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "button0", "role": "articulated_object"}], "configuration_chunks": [{"entity": "button0", "name": "joint_position", "size": 1}]
+    },
+    "push_buttons_2": {
+      "paper_task_name": "Push Buttons / 2", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRPushButtons2", "bimanual": false,
+      "paper_evaluation_group": "Horizon-3", "paper_scenarios": ["static"],
+      "source_expression": "ICLRPushButtons2.get_low_dim_state: first two button poses and joint positions", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "button0", "role": "articulated_object"}, {"name": "button1", "role": "articulated_object"}], "configuration_chunks": [{"entity": "button0", "name": "joint_position", "size": 1}, {"entity": "button1", "name": "joint_position", "size": 1}]
+    },
+    "push_buttons_3": {
+      "paper_task_name": "Push Buttons / 3", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLRPushButtons3", "bimanual": false,
+      "paper_evaluation_group": "Horizon-3", "paper_scenarios": ["static"],
+      "source_expression": "ICLRPushButtons3.get_low_dim_state: all three button poses and joint positions", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
+      "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
+      "pose_chunks": [{"name": "button0", "role": "articulated_object"}, {"name": "button1", "role": "articulated_object"}, {"name": "button2", "role": "articulated_object"}], "configuration_chunks": [{"entity": "button0", "name": "joint_position", "size": 1}, {"entity": "button1", "name": "joint_position", "size": 1}, {"entity": "button2", "name": "joint_position", "size": 1}]
+    }
+  }
+}

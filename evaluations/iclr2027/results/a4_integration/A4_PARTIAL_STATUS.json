@@ -1,0 +1,80 @@
+{
+  "schema": "essay2608.iclr2027.a4-partial-status.v1",
+  "status": "A_SIDE_PASS_WAITING_FOR_B_DELIVERY",
+  "created_utc": "2026-09-05T06:37:00Z",
+  "purpose": "A4_A_OWNED_INTEGRATION_AND_M2_NORMAL_ONLY_CALIBRATION_NOT_PAPER_RESULTS",
+  "authorization": {
+    "current_stage": "A4",
+    "a5_authorized": false,
+    "sealed_test_executed": false
+  },
+  "protocol_completion": {
+    "normal_episode_false_alarm_budget": 0.05,
+    "scope": "per_task",
+    "threshold_rule": "split_conformal_upper_quantile_of_episode_persisted_nonconformity",
+    "persistence_cycles": 5,
+    "fault_data_used_for_calibration": false,
+    "model_weights_updated": false
+  },
+  "m2_calibration": {
+    "status": "PASS_FROZEN",
+    "tasks": 10,
+    "episodes": 500,
+    "cycles": 106579,
+    "available_cycles": 106579,
+    "calibration_episode_false_alarms_per_task": 1,
+    "calibration_episode_false_alarm_rate_per_task": 0.02,
+    "artifact": "evaluations/iclr2027/artifacts/calibration/monitors/m2/v1/calibration.json",
+    "artifact_sha256": "92e7f7e5ea7296dc3acb2b368575ab88ef5036e1ea9e6f45c8eb49316f73b857",
+    "sha256s_sha256": "3c82fef05e8197f1d351db5fc0012893ddcbbecc0ec2d7dd63dc37b6edcd08be"
+  },
+  "stream_reconstruction": {
+    "reason": "The frozen A-only successful rollout records predate persistence of M2 world-frame stream marginals.",
+    "source_physical_rollouts_replaced": false,
+    "source_rows_modified": false,
+    "frozen_policy_and_recorded_state_used": true,
+    "tasks_cross_validated_against_current_logs": 10,
+    "maximum_poe_weight_absolute_error": 9.159339953157541e-15
+  },
+  "development_integration": {
+    "m2_live_nominal_episodes": 10,
+    "m2_live_nominal_completed": 10,
+    "m2_live_nominal_successes": 8,
+    "m2_live_nominal_infrastructure_errors": 0,
+    "m2_live_nominal_alarm_episodes": 2,
+    "m2_live_nominal_retry_episodes": 2,
+    "shadow_replay_episodes": 10,
+    "shadow_replay_cycles": 2223,
+    "shadow_action_passthrough_verified": true,
+    "live_shadow_semantic_mismatches": 0,
+    "maximum_live_shadow_score_absolute_difference": 2.3283064365386963e-10,
+    "shadow_score_index_sha256": "51398b0bafe900c6e88d8d34514df0f79fd90df2c8aee25cb8a7e8b751e118ba"
+  },
+  "b_delivery_readiness": {
+    "delivery_received": false,
+    "handoff_sent_by_a": false,
+    "transfer_mode": "manifest_scoped_file_copy_preserving_repository_relative_paths",
+    "git_commit_or_patch_transfer_allowed": false,
+    "scoped_delivery_verifier_implemented": true,
+    "checkpoint_config_binding_implemented": true,
+    "a_owned_overwrite_rejected": true,
+    "interface_handoff_files": 12,
+    "interface_handoff_index_sha256": "d905fb94d38a3890998955f466bb40f79802ed61f5a9577ba53a0c693f633a96",
+    "failure_train_handoff_files": 4001,
+    "failure_train_handoff_index_sha256": "296edc1681e7de3a8a4c663f74a4b8a83f7deb428a2c7a6b568888e6410b8b94"
+  },
+  "verification": {
+    "focused_tests_passed": 29,
+    "compileall": "PASS",
+    "artifact_hash_errors": 0,
+    "handoff_hash_errors": 0
+  },
+  "pending_before_a4_acceptance": [
+    "Receive M3 adapter, M4 adapter/model/checkpoints, configs, logs, and development golden outputs from B.",
+    "Verify the B delivery manifest, scoped diff, checkpoint/config identities, and forward compatibility on A.",
+    "Run the required 10 nominal plus 10 perturbed development dry runs for M3/M4 and reproduce B golden scores.",
+    "Generate A-only formal normal calibration artifacts for M3 and every delivered M4-200 checkpoint.",
+    "Run the representative final 48-worker admission with M3/M4, PhysicalEventAuditor, and formal logging enabled.",
+    "Issue A4_ACCEPTANCE.json and request user authorization before entering A5."
+  ]
+}

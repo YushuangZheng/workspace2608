@@ -976,6 +976,7 @@ class PolicyProcess:
         closed_loop_models_dir=CLOSED_LOOP_MODELS_DIR,
         diagnostics_dir=None,
         closed_loop_feature_profile="full",
+        closed_loop_boundary_config_root=None,
     ):
         self.timeout = float(timeout)
         if self.timeout <= 0.0:
@@ -1012,6 +1013,17 @@ class PolicyProcess:
             if diagnostics_dir is not None:
                 command.extend(
                     ["--diagnostics-dir", str(Path(diagnostics_dir).resolve())]
+                )
+            if closed_loop_boundary_config_root is not None:
+                command.extend(
+                    [
+                        "--boundary-config",
+                        str(
+                            (
+                                Path(closed_loop_boundary_config_root) / f"{task}.json"
+                            ).resolve()
+                        ),
+                    ]
                 )
         self.process = subprocess.Popen(
             command,

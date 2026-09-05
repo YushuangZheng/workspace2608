@@ -18,6 +18,8 @@
   "scene_support_confidence": 0.99,
   "scene_min_loo_gain": 1e-06,
   "scene_min_loo_accuracy": 0.8,
+  "action_relevance_min_loo_gain": 0.0001,
+  "action_relevance_min_positive_fraction": 0.8,
   "progress_scene_weight": 1.0,
   "boundary_terminal_window": 3,
   "boundary_relation_support": 0.7,

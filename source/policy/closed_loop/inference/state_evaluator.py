@@ -82,11 +82,10 @@ def joint_poe_pose_support(
     """Score one world EE pose against the joint PoE target distribution.
 
     Each entry is ``(frame, frame_pose, local_mean, local_covariance, weight)``.
-    Unlike :func:`joint_peak_normalized_pose_support`, which removes the
-    attainable-peak offset from a sum of per-stream local scores for progress
-    inference, this function first constructs the actual joint world target
-    used by DynaMAC's PoE and then evaluates the observed end effector against
-    that single Gaussian.  This is the phase-four ``L_goal`` quantity.
+    Unlike :func:`joint_peak_normalized_pose_support`, this diagnostic helper
+    first constructs the actual joint world command distribution used by the
+    action PoE and then evaluates the observed end effector against that
+    single Gaussian.  It is not a task-progress or boundary-completion gate.
     """
 
     if not entries:

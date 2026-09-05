@@ -1,0 +1,37 @@
+{
+  "schema": "essay2608.iclr2027.fault-protocol.v1",
+  "medium": {
+    "actuation_delay_cycles": 12,
+    "coordination_delay_cycles": 12,
+    "translation_m": 0.04,
+    "articulation_rad": 0.17453292519943295,
+    "missed_interaction_occurrences": 1
+  },
+  "severity_grid": {
+    "delay_cycles": [4, 8, 12, 20],
+    "translation_m": [0.02, 0.04, 0.08],
+    "articulation_rad": [0.08726646259971647, 0.17453292519943295, 0.3490658503988659],
+    "composed_events": [1, 2]
+  },
+  "trigger_stages": {
+    "early": 0.15,
+    "middle": 0.4,
+    "late": 0.65
+  },
+  "eligibility": {
+    "motion_trigger_distance_m": 0.005,
+    "minimum_stable_relation_cycles": 3,
+    "physical_displacement_tolerance_m": 0.005,
+    "relation_observation": "simulator_attachment_or_reliable_proximity_contact"
+  },
+  "fault_order": [
+    "actuation_delay",
+    "missed_interaction",
+    "relation_loss",
+    "environment_change",
+    "coordination_delay"
+  ],
+  "injector_policy_state_access": false,
+  "fault_identity_visible_to_policy_or_monitor": false
+}
+

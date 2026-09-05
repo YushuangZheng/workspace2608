@@ -1,0 +1,85 @@
+{
+  "schema": "essay2608.iclr2027.a3-acceptance.v1",
+  "status": "PASS",
+  "purpose": "A3_A_OWNED_METHODS_AND_HORIZON3_DEVELOPMENT_ACCEPTANCE_NOT_PAPER_RESULTS",
+  "sealed_test_executed": false,
+  "methods": {
+    "implemented": [
+      "m1_restart",
+      "m2_trajectory_likelihood",
+      "m5_full",
+      "m6_ours_monitor_retry",
+      "ablation_motion_only",
+      "ablation_open_loop_progress",
+      "ablation_generic_retry"
+    ],
+    "shared_skill_retry": {
+      "maximum_retries": 1,
+      "budget_cycles": 400,
+      "users": [
+        "m1_restart",
+        "m2_trajectory_likelihood",
+        "m6_ours_monitor_retry",
+        "ablation_generic_retry"
+      ]
+    },
+    "m2_threshold_status": "UNSET_UNTIL_A_ONLY_NORMAL_CALIBRATION"
+  },
+  "normal_boundary_calibration": {
+    "tasks": 10,
+    "boundaries": 60,
+    "calibrated_boundaries": 60,
+    "normal_boundary_demo_checks": 300,
+    "accepted_boundary_demo_checks": 300,
+    "joint_transaction_groups": 1,
+    "joint_transaction_demo_checks": 5,
+    "accepted_joint_transaction_demo_checks": 5,
+    "fault_data_used": 0,
+    "control_period_seconds": 0.05,
+    "artifact_sha256s_sha256": "ecefaaf49f05026447f593fb97f2af3369c79b2572c25bdd617eaebb822c1871"
+  },
+  "horizon3": {
+    "task_levels": 8,
+    "episodes_per_manifest": 1600,
+    "per_stage_manifest_sha256": "450eae75230ecaeb3c00ac971d064856ce9586bd11d2d3f33fc35731f937d8d9",
+    "single_event_manifest_sha256": "b276ebf1b3bbf4376f2c84c8a4586deaf05f9180ed034d929b09f857f2aa87f5"
+  },
+  "development_smoke": {
+    "m1_nominal_close_jar": {"success": true, "cycles": 162},
+    "m1_delayed_close_jar": {
+      "success": true,
+      "cycles": 196,
+      "audited_violation_onset_cycle": 24,
+      "first_alarm_cycle": 34,
+      "retry_interventions": 1
+    },
+    "m2_uncalibrated_nominal_close_jar": {
+      "success": true,
+      "cycles": 162,
+      "interventions": 0
+    },
+    "m5_nominal_stack_cups": {"success": true, "cycles": 222},
+    "m6_nominal_stack_cups": {"success": true, "cycles": 222}
+  },
+  "corrected_general_gaps": [
+    "reentry_preserves_confirmed_relation_evidence_and_relation_event_lifecycle",
+    "non_action_external_unknown_remains_soft_state_evidence_and_does_not_freeze_driving_streams"
+  ],
+  "tests": {
+    "focused_regression_passed": 141,
+    "method_configs_loaded": 8,
+    "compileall": "PASS"
+  },
+  "server_b_handoff": {
+    "delivered": false,
+    "delivery_status": "NOT_YET_SENT_BY_USER_DECISION",
+    "interface_index_sha256": "4ffb358957aebac0552ce71275fb64fe8fe8f53afabbae2609e7273ebdec1564",
+    "failure_train_index_sha256": "296edc1681e7de3a8a4c663f74a4b8a83f7deb428a2c7a6b568888e6410b8b94",
+    "pre_delivery_policy": "Verified data or protocol defects may be corrected before first delivery, followed by rebuilding and auditing both handoff indexes."
+  },
+  "known_development_observation": {
+    "close_jar_episode": "development_nominal/close_jar/0000",
+    "finding": "A normal contact pose can fall outside the five-demo motion support even when open-loop DynaMAC completes; this is a method conservatism observation, not an A3 interface or infrastructure failure.",
+    "action": "Do not tune on this single development outcome; retain it for the later prespecified development dry-run/performance audit."
+  }
+}

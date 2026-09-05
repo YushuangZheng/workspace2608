@@ -850,6 +850,8 @@ class PolicyProcess:
         closed_loop_models_dir=CLOSED_LOOP_MODELS_DIR,
         diagnostics_dir=None,
         closed_loop_feature_profile="full",
+        task_specs_path=None,
+        closed_loop_boundary_config_root=None,
     ):
         self.timeout = float(timeout)
         if policy_type not in {"dynamac", "closed_loop_multistream"}:
@@ -866,6 +868,8 @@ class PolicyProcess:
                 "--models-dir",
                 str(Path(models_dir).resolve()),
             ]
+            if task_specs_path is not None:
+                command.extend(["--task-specs", str(Path(task_specs_path).resolve())])
         else:
             command = [
                 str(python),
@@ -881,9 +885,22 @@ class PolicyProcess:
                 "--feature-profile",
                 str(closed_loop_feature_profile),
             ]
+            if task_specs_path is not None:
+                command.extend(["--task-specs", str(Path(task_specs_path).resolve())])
             if diagnostics_dir is not None:
                 command.extend(
                     ["--diagnostics-dir", str(Path(diagnostics_dir).resolve())]
+                )
+            if closed_loop_boundary_config_root is not None:
+                command.extend(
+                    [
+                        "--boundary-config",
+                        str(
+                            (
+                                Path(closed_loop_boundary_config_root) / f"{task}.json"
+                            ).resolve()
+                        ),
+                    ]
                 )
         self.process = subprocess.Popen(
             command,

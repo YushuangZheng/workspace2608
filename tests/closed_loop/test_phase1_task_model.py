@@ -261,6 +261,14 @@ def test_builder_creates_one_unified_sparse_model() -> None:
         for node in model.states.values()
     )
     assert any(node.scene_factor_models for node in model.states.values())
+    assert len(model.builder_config["lodo_fold_partition"]) == len(demos)
+    assert model.builder_config["action_stream_relevance"]
+    for node in model.states.values():
+        assert set(node.action_relevant_frames).issubset(node.selected_frames)
+        assert all(
+            set(relevant).issubset(node.mode_selected_frames[mode])
+            for mode, relevant in enumerate(node.mode_action_relevant_frames)
+        )
     assert all(
         factor.kind == "edge"
         for node in model.states.values()
@@ -1371,7 +1379,7 @@ def test_bimanual_peer_execution_dependency_filters_only_redundant_modes(
         path = tmp_path / f"{model.arm_id}.npz"
         model.save(path)
         restored = ClosedLoopTaskModel.load(path, model.base_policy)
-        assert restored.schema_version == 4
+        assert restored.schema_version == 5
         assert (
             restored.state(restored.skill_states[0][0]).selected_frames
             == model.state(model.skill_states[0][0]).selected_frames
@@ -1379,6 +1387,10 @@ def test_bimanual_peer_execution_dependency_filters_only_redundant_modes(
         assert (
             restored.state(restored.skill_states[1][0]).selected_frames
             == model.state(model.skill_states[1][0]).selected_frames
+        )
+        assert (
+            restored.state(restored.skill_states[1][0]).action_relevant_frames
+            == model.state(model.skill_states[1][0]).action_relevant_frames
         )
 
 

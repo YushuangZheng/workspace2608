@@ -1,0 +1,56 @@
+{
+  "causal_records_sha256": "9541e4cfb308153b1aabe5fa2fa0358caf3013fe8ceee03edf933d033625760b",
+  "contains_calibration_or_sealed_records": false,
+  "contains_evaluator_labels": false,
+  "feature_schema": "essay2608.iclr2027.causal-features.v1",
+  "records": 18,
+  "schema": "essay2608.iclr2027.development-fixtures.v1",
+  "sources": [
+    {
+      "condition": "nominal",
+      "episode_id": "development_nominal/close_jar/0000",
+      "selected_feature_cycles": [
+        0,
+        1,
+        161
+      ],
+      "task": "close_jar"
+    },
+    {
+      "condition": "perturbed",
+      "episode_id": "development_perturbed/close_jar/0000",
+      "selected_feature_cycles": [
+        0,
+        1,
+        23,
+        24,
+        25,
+        161
+      ],
+      "task": "close_jar"
+    },
+    {
+      "condition": "nominal",
+      "episode_id": "development_nominal/bimanual_handover_item/0000",
+      "selected_feature_cycles": [
+        0,
+        1,
+        250
+      ],
+      "task": "bimanual_handover_item"
+    },
+    {
+      "condition": "perturbed",
+      "episode_id": "development_perturbed/bimanual_handover_item/0000",
+      "selected_feature_cycles": [
+        0,
+        1,
+        38,
+        39,
+        40,
+        250
+      ],
+      "task": "bimanual_handover_item"
+    }
+  ]
+}

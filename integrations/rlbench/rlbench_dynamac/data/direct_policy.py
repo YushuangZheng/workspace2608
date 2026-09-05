@@ -218,6 +218,7 @@ def train_task(
     task_data_dir: Path | None = None,
     manifest_schema: str = TRAINING_MANIFEST_SCHEMA_V3,
     training_identity: Mapping[str, Any] | None = None,
+    segmentation_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fit, validate, and atomically publish one complete task model."""
 
@@ -249,12 +250,14 @@ def train_task(
                 task_data_dir=task_data_dir,
                 manifest_schema=manifest_schema,
                 training_identity=training_identity,
+                segmentation_config=segmentation_config,
             )
             _validate_published_model(
                 task,
                 staging,
                 summary,
                 expected_training_identity=training_identity,
+                expected_task_spec=_resolve_task_spec(task, task_spec),
             )
             os.rename(staging, output)
         finally:
@@ -274,6 +277,7 @@ def _train_task_into(
     task_data_dir: Path | None = None,
     manifest_schema: str = TRAINING_MANIFEST_SCHEMA_V3,
     training_identity: Mapping[str, Any] | None = None,
+    segmentation_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fit all artifacts inside an unpublished staging directory."""
 
@@ -292,7 +296,9 @@ def _train_task_into(
         raise RuntimeError(f"staging directory is not empty: {output}")
     names = [path.parent.name for path in paths]
     if spec.bimanual:
-        converted = make_bimanual_demonstrations(episodes, spec, names=names)
+        converted = make_bimanual_demonstrations(
+            episodes, spec, names=names, config=segmentation_config
+        )
         policy = BimanualDynaMAC(config=config)
         policy.fit(converted.left_demonstrations, converted.right_demonstrations)
         policy.left.save(output / "left.npz")
@@ -318,7 +324,9 @@ def _train_task_into(
         }
         checkpoint_audit = bimanual_checkpoint_trigger_audit(policy)
     else:
-        converted = make_unimanual_demonstrations(episodes, spec, names=names)
+        converted = make_unimanual_demonstrations(
+            episodes, spec, names=names, config=segmentation_config
+        )
         policy = DynaMAC(config=config).fit(converted.demonstrations)
         policy.save(output / "model.npz")
         summary = {
@@ -384,6 +392,7 @@ def _validate_published_model(
     summary: dict[str, Any],
     *,
     expected_training_identity: Mapping[str, Any] | None = None,
+    expected_task_spec: TaskSpec | None = None,
 ) -> None:
     """Reload staged checkpoints and bind them to their manifest fingerprints."""
 
@@ -401,7 +410,9 @@ def _validate_published_model(
     }:
         _validate_v3_adapter_protocol(summary)
     if manifest_schema == TRAINING_MANIFEST_SCHEMA_STATIC_V1:
-        expected_spec = task_spec_identity(get_task_spec(task))
+        expected_spec = task_spec_identity(
+            get_task_spec(task) if expected_task_spec is None else expected_task_spec
+        )
         if summary.get("task_spec_identity") != expected_spec:
             raise RuntimeError("static training task-spec identity mismatch")
     if manifest_schema == TRAINING_MANIFEST_SCHEMA_V4:
@@ -545,6 +556,7 @@ class PolicyServer:
                 task_dir,
                 manifest,
                 expected_training_identity=expected_training_identity,
+                expected_task_spec=spec,
             )
         self.policy = (
             BimanualDynaMAC(
@@ -559,11 +571,19 @@ class PolicyServer:
             TRAINING_MANIFEST_SCHEMA_V3,
             TRAINING_MANIFEST_SCHEMA_STATIC_V1,
         }:
-            phase6_dynamic_trigger_evidence = build_phase6_dynamic_trigger_evidence(
-                task,
-                manifest["checkpoint_trigger_audit"],
-                manifest,
-            )
+            try:
+                phase6_dynamic_trigger_evidence = build_phase6_dynamic_trigger_evidence(
+                    task,
+                    manifest["checkpoint_trigger_audit"],
+                    manifest,
+                )
+            except KeyError:
+                if manifest.get("manifest_schema") != TRAINING_MANIFEST_SCHEMA_STATIC_V1:
+                    raise
+                # Static-training authentication is a general model identity.
+                # Stage-six smooth-background evidence is optional and exists
+                # only for tasks registered in that separate protocol.
+                phase6_dynamic_trigger_evidence = None
         self.model_identity = (
             {
                 "model_schema_version": self.policy.left.summary()[
@@ -765,13 +785,29 @@ class PolicyServer:
                 self._restore_runtime(self._pending_transaction["runtime"])
                 self._pending_transaction = None
             return {"ok": True, "closed": True}
+        if command == "retry_current_skill":
+            if self._pending_transaction is not None:
+                raise RuntimeError("a pending action must be aborted before Skill-Retry")
+            if self.bimanual:
+                entries = self.policy.restart_current_skill_reference()
+            else:
+                entries = {"single": self.policy.restart_current_skill_reference()}
+            return {
+                "ok": True,
+                "retried": True,
+                "reference_entries": {
+                    arm: {"skill": int(value[0]), "progress": int(value[1])}
+                    for arm, value in entries.items()
+                },
+            }
         if command == "commit":
             return self._resolve_transaction(request, commit=True)
         if command == "abort":
             return self._resolve_transaction(request, commit=False)
         if command not in {"reset", "act"}:
             raise ValueError(
-                "command must be ping, reset, act, commit, abort, or close"
+                "command must be ping, reset, act, commit, abort, "
+                "retry_current_skill, or close"
             )
         observation = _WireObservation(request["observation"])
         if self.bimanual:
@@ -802,7 +838,9 @@ class PolicyServer:
                 self._restore_runtime(runtime)
                 raise
         else:
-            current = unimanual_observation_from_rlbench(observation, self.task)
+            current = unimanual_observation_from_rlbench(
+                observation, getattr(self, "task_spec", self.task)
+            )
             if command == "reset":
                 if self._pending_transaction is not None:
                     self._restore_runtime(self._pending_transaction["runtime"])
@@ -838,6 +876,17 @@ class PolicyServer:
             "action": wire_action.tolist(),
             "transaction_id": transaction_id,
             "gripper_timing": gripper_timing,
+            # Read-only metadata for causal monitoring and audit adapters.  It
+            # describes the action just emitted and does not alter the frozen
+            # DynaMAC cursor, stream mask, or command.
+            "policy_state": (
+                {
+                    "left": deepcopy(action.left.diagnostics),
+                    "right": deepcopy(action.right.diagnostics),
+                }
+                if self.bimanual
+                else deepcopy(action.diagnostics)
+            ),
             # Frozen DynaMAC already decides the gripper value on its own
             # fixed policy clock.  Apply that command with the corresponding
             # primary action; do not gate it on the
@@ -908,13 +957,24 @@ def build_parser() -> argparse.ArgumentParser:
     worker = subparsers.add_parser("serve", help="run JSON-lines policy worker")
     worker.add_argument("--task", required=True)
     worker.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
+    worker.add_argument(
+        "--task-specs",
+        type=Path,
+        default=None,
+        help="Optional frozen task-spec registry for project evaluation suites.",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "serve":
-        return serve(args.task, args.models_dir)
+        task_spec = (
+            None
+            if args.task_specs is None
+            else load_task_specs(args.task_specs)[args.task]
+        )
+        return serve(args.task, args.models_dir, task_spec=task_spec)
     for task in _tasks(args.task):
         summary = train_task(
             task,

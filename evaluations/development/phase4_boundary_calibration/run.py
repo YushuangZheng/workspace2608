@@ -16,7 +16,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -133,7 +133,15 @@ def _raw_samples(case: Any, demonstration_index: int) -> tuple[Sample, ...]:
         if not len(indices):
             raise RuntimeError(f"{case.key} 示范缺少技能 {skill_index}")
         if len(indices) == 1:
-            local_indices = np.zeros(1, dtype=np.int64)
+            # A one-snapshot occurrence represents both entry and completion
+            # of this demonstrated skill.  For an aligned model whose shared
+            # duration is longer because other demonstrations contain more
+            # samples, assigning that sole snapshot to local index zero makes
+            # the outgoing boundary permanently unobservable.  The aligned
+            # trajectory itself repeats/interpolates the same occurrence up to
+            # the terminal state, so boundary replay must identify it with the
+            # terminal index.
+            local_indices = np.asarray([skill.duration - 1], dtype=np.int64)
         else:
             local_indices = np.rint(
                 np.linspace(0, skill.duration - 1, len(indices))
@@ -252,6 +260,23 @@ def _trace_row(
         "local_done": int(local.done),
         "guard_raw_satisfied": int(_raw_guard_satisfied(request)),
         "guard_evidence_available": int(_guard_evidence_available(request)),
+        "guard_condition_audit": json.dumps(
+            {
+                condition_id.token: {
+                    "compatibility": result.compatibility,
+                    "threshold": result.threshold,
+                    "observed": result.observed,
+                    "stable": result.stable,
+                    "raw_satisfied": result.raw_satisfied,
+                    "reason": result.reason,
+                }
+                for condition_id, result in request.condition_results.items()
+                if condition_id.kind
+                in {ConditionKind.GUARD_RELATION, ConditionKind.GUARD_SCENE}
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
         "directional_guard_wait": int(
             not boundary.transaction_group and len(boundary.affected_arms) > 1
         ),
@@ -356,11 +381,13 @@ def _replay_task_demo(
     belief_config: BeliefUpdaterConfig,
     runtime_config: BoundaryRuntimeConfig,
     hold_cycles: int,
+    include_skill_entry_cycles: bool = False,
 ) -> list[dict[str, Any]]:
     cases_by_arm = {case.arm: case for case in cases}
     models = cases_by_arm_to_models(cases_by_arm)
     samples_by_arm = {
-        arm: _raw_samples(case, demonstration) for arm, case in cases_by_arm.items()
+        arm: _raw_samples(case, demonstration)
+        for arm, case in cases_by_arm.items()
     }
     lengths = {len(samples) for samples in samples_by_arm.values()}
     if len(lengths) != 1:
@@ -398,12 +425,18 @@ def _replay_task_demo(
                     case,
                     updaters[arm],
                     current,
-                    tick,
+                    tick - 1 if include_skill_entry_cycles else tick,
                     mode_by_arm_skill[arm],
                     previous_beliefs[arm],
                 )
-                reset_arm = True
-                continue
+                if not include_skill_entry_cycles:
+                    reset_arm = True
+                    continue
+                # A one-state skill still consumes one command and then reaches
+                # its outgoing boundary.  Replaying one quiet response cycle at
+                # the entry state makes that boundary observable without
+                # inventing a second demonstrated state or a default threshold.
+                previous = current
             belief = updaters[arm].update(
                 _runtime_observation(tick, current, previous),
                 executed_reference_state=current.state_id,
@@ -734,15 +767,37 @@ def _acceptance_rows(
             (row for row in members if row["phase"] == "terminal_hold"),
             key=lambda row: int(row["hold_cycle"]),
         )
-        permitted_cycles = [
-            int(row["hold_cycle"]) for row in held if int(row["transition_permitted"])
-        ]
+        permitted_rows = [row for row in held if int(row["transition_permitted"])]
+        permitted_cycles = [int(row["hold_cycle"]) for row in permitted_rows]
         first_permit = permitted_cycles[0] if permitted_cycles else -1
-        final_permitted = bool(held and int(held[-1]["transition_permitted"]))
-        final_local_done = bool(held and int(held[-1]["local_done"]))
-        final_guard_ready = bool(held and int(held[-1]["guard_raw_satisfied"]))
-        final_guard_observed = bool(held and int(held[-1]["guard_evidence_available"]))
-        directional_wait = bool(held and int(held[-1]["directional_guard_wait"]))
+        # Runtime commits and stops evaluating this source boundary on the
+        # first permitted cycle.  The remaining synthetic hold rows are useful
+        # for calibrating local-score persistence, but are counterfactual after
+        # a commit and must not invalidate a valid transition merely because a
+        # soft relation posterior diffuses during prolonged zero excitation.
+        decision_row = (
+            permitted_rows[0] if permitted_rows else (held[-1] if held else None)
+        )
+        final_permitted = bool(
+            decision_row is not None and int(decision_row["transition_permitted"])
+        )
+        final_local_done = bool(
+            decision_row is not None and int(decision_row["local_done"])
+        )
+        final_guard_ready = bool(
+            decision_row is not None and int(decision_row["guard_raw_satisfied"])
+        )
+        final_guard_observed = bool(
+            decision_row is not None and int(decision_row["guard_evidence_available"])
+        )
+        final_guard_audit = (
+            str(decision_row.get("guard_condition_audit", "{}"))
+            if decision_row is not None
+            else "{}"
+        )
+        directional_wait = bool(
+            decision_row is not None and int(decision_row["directional_guard_wait"])
+        )
         expected_decision = final_guard_ready or directional_wait
         decision_correct = (
             final_permitted
@@ -768,6 +823,7 @@ def _acceptance_rows(
                 "final_terminal_hold_local_done": int(final_local_done),
                 "final_guard_evidence_available": int(final_guard_observed),
                 "final_guard_raw_satisfied": int(final_guard_ready),
+                "final_guard_audit": final_guard_audit,
                 "expected_directional_wait": int(
                     directional_wait and not final_guard_ready
                 ),
@@ -825,6 +881,8 @@ def run(
     *,
     data_root: Path | None = None,
     model_root: Path | None = None,
+    case_loader: Callable[[str, int], Sequence[Any]] | None = None,
+    include_skill_entry_cycles: bool = False,
 ) -> None:
     config = _read_config(config_path)
     if output.exists():
@@ -838,13 +896,18 @@ def run(
     )
     maximum_demo = max(int(value) for value in config["demonstration_indices"])
     all_rows: list[dict[str, Any]] = []
+    load_cases = case_loader
     for task in config["tasks"]:
         print(f"[phase4-calibration] loading {task}", flush=True)
-        cases = _load_cases(
-            task,
-            maximum_demo + 1,
-            **({} if data_root is None else {"data_root": data_root}),
-            **({} if model_root is None else {"model_root": model_root}),
+        cases = (
+            list(load_cases(task, maximum_demo + 1))
+            if load_cases is not None
+            else _load_cases(
+                task,
+                maximum_demo + 1,
+                **({} if data_root is None else {"data_root": data_root}),
+                **({} if model_root is None else {"model_root": model_root}),
+            )
         )
         runtime_config = _base_runtime_config(cases, config)
         for demonstration in config["demonstration_indices"]:
@@ -860,6 +923,7 @@ def run(
                     belief_config,
                     runtime_config,
                     hold_cycles,
+                    include_skill_entry_cycles=include_skill_entry_cycles,
                 )
             )
     summaries, trials, runtime_configs = _calibrate(all_rows, config)
@@ -875,11 +939,15 @@ def run(
     acceptance_trace: list[dict[str, Any]] = []
     for task in config["tasks"]:
         print(f"[phase4-calibration] validating {task}", flush=True)
-        cases = _load_cases(
-            task,
-            maximum_demo + 1,
-            **({} if data_root is None else {"data_root": data_root}),
-            **({} if model_root is None else {"model_root": model_root}),
+        cases = (
+            list(load_cases(task, maximum_demo + 1))
+            if load_cases is not None
+            else _load_cases(
+                task,
+                maximum_demo + 1,
+                **({} if data_root is None else {"data_root": data_root}),
+                **({} if model_root is None else {"model_root": model_root}),
+            )
         )
         final_runtime = BoundaryRuntimeConfig.from_mapping(runtime_configs[task])
         for demonstration in config["demonstration_indices"]:
@@ -891,13 +959,18 @@ def run(
                     belief_config,
                     final_runtime,
                     hold_cycles,
+                    include_skill_entry_cycles=include_skill_entry_cycles,
                 )
             )
     acceptance = _acceptance_rows(acceptance_trace)
     if len(acceptance) != len(summaries) * len(config["demonstration_indices"]):
         raise RuntimeError("正式运行配置复核没有覆盖每个边界×示范")
     if any(not row["accepted"] for row in acceptance):
-        raise RuntimeError("正式运行配置在正常回放中提前放行或无法最终放行")
+        failures = [row for row in acceptance if not row["accepted"]]
+        raise RuntimeError(
+            "正式运行配置在正常回放中提前放行或无法最终放行："
+            + json.dumps(failures[:10], ensure_ascii=False)
+        )
     joint_acceptance = _joint_acceptance_rows(summaries, acceptance)
     expected_joint_trials = len(
         {

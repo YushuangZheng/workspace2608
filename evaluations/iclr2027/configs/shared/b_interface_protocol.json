@@ -1,0 +1,26 @@
+{
+  "schema": "essay2608.iclr2027.b-interface-protocol.v1",
+  "horizon": 1000,
+  "recovery_budget_cycles": 400,
+  "control_period_seconds": 0.05,
+  "failure_train_episodes_per_task": 200,
+  "failure_train": {
+    "canonical_loader": "evaluations.iclr2027.interfaces.failure_train",
+    "sequence_unit": "one_episode",
+    "model_input": "cycle.feature_only",
+    "prediction_target": "current_physical_violation_probability",
+    "causal_target_alignment": "label_0=0; label_t=active(audit_(t-1)) for t>0",
+    "active_definition": "violation_onset_cycle_is_not_null_and_violation_end_cycle_is_null",
+    "same_row_audit_is_model_input": false,
+    "fault_metadata_is_model_input": false,
+    "nested_budgets_per_task": [20, 50, 100, 200],
+    "nested_budget_rule": "preserve_manifest_order_then_take_first_n_rows_for_task",
+    "lofo_rule": "remove_held_out_family_from_complete_200_row_task_pool_without_replacement_or_resampling",
+    "padding_mask_rule": "one_for_real_cycle_zero_for_padding",
+    "sequence_state_reset": "at_every_episode_boundary"
+  },
+  "development_examples_only": true,
+  "normal_calibration_access": false,
+  "sealed_test_access": false,
+  "formal_threshold_authority": "server_a"
+}

@@ -24,7 +24,7 @@ from ..model.relation_events import RelationEventId
 from ..inference.relation_filter import RelationDecision, RelationEstimate
 from ..inference.runtime_features import RuntimeFeatures
 from ..model.scene_factors import FactorId
-from ..inference.state_evaluator import joint_poe_pose_support
+from ..inference.state_evaluator import joint_peak_normalized_pose_support
 from ..model.state_index import StateId
 from ..model.task_model import ClosedLoopTaskModel
 
@@ -166,7 +166,9 @@ class EntryGuard:
             if key.startswith(prefix)
         }
         results = []
-        joint_entries: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, float]] = []
+        joint_entries: list[
+            tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]
+        ] = []
         all_available = bool(selected)
         features = belief.runtime_features
         for key, distribution in sorted(selected.items()):
@@ -189,6 +191,7 @@ class EntryGuard:
                         features.frame_poses[frame],
                         distribution.mean,
                         distribution.covariance,
+                        value,
                         reliability,
                     )
                 )
@@ -214,9 +217,8 @@ class EntryGuard:
                 )
             )
         if all_available:
-            joint_compatibility, _, _ = joint_poe_pose_support(
+            joint_compatibility, _, _ = joint_peak_normalized_pose_support(
                 joint_entries,
-                features.ee_pose,
                 diagonalize=(
                     self.task_model.base_policy.config.diagonalize_transformed_covariance
                 ),

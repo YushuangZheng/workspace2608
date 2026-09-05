@@ -77,14 +77,22 @@ def build_task(
     execution_config: Path,
     recovery_config: Path,
     boundary_root: Path,
+    task_spec=None,
+    task_data_dir: Path | None = None,
+    boundary_config: Path | None = None,
+    segmentation_config=None,
 ) -> Path:
     output = output_root / task
     if output.exists():
         raise FileExistsError(f"拒绝覆盖既有闭环模型：{output}")
-    paths = tuple(demonstration_paths(data_root, task, demonstration_count))
+    paths = tuple(
+        demonstration_paths(data_root, task, demonstration_count)
+        if task_data_dir is None
+        else demonstration_paths(task_data_dir.parent, task_data_dir.name, demonstration_count)
+    )
     episodes = load_low_dim_obs_pickles(paths)
     names = [path.parent.name for path in paths]
-    spec = (
+    spec = task_spec or (
         store_bottle_semantic_task_spec()
         if task == STORE_BOTTLE_TASK_NAME
         else get_task_spec(task)
@@ -93,9 +101,13 @@ def build_task(
         make_store_bottle_semantic_demonstrations(episodes, names=names)
         if task == STORE_BOTTLE_TASK_NAME
         else (
-            make_bimanual_demonstrations(episodes, spec, names=names)
+            make_bimanual_demonstrations(
+                episodes, spec, names=names, config=segmentation_config
+            )
             if spec.bimanual
-            else make_unimanual_demonstrations(episodes, spec, names=names)
+            else make_unimanual_demonstrations(
+                episodes, spec, names=names, config=segmentation_config
+            )
         )
     )
     builder = ClosedLoopTaskModelBuilder(
@@ -127,7 +139,7 @@ def build_task(
         models = {"single": model}
         checkpoints = (task_dir / "model.npz",)
 
-    boundary_config = boundary_root / f"{task}.json"
+    boundary_config = boundary_config or boundary_root / f"{task}.json"
     config = ClosedLoopPolicyConfig.from_files(
         belief=belief_config,
         execution=execution_config,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ import numpy as np
 
 from essay2608.policy import DynaMAC
 from essay2608.policy.closed_loop import (
+    BoundaryRuntimeConfig,
     ClosedLoopFeatureProfile,
     ClosedLoopMultiStreamPolicy,
 )
@@ -26,6 +28,7 @@ from integrations.rlbench.rlbench_dynamac.data.direct_policy import (
     POLICY_CLOCK_SEMANTICS_ID,
     PolicyServer as BaselinePolicyServer,
 )
+from integrations.rlbench.rlbench_dynamac.core.task_specs import TaskSpec, load_task_specs
 
 
 CLOSED_LOOP_GRIPPER_TIMING = closed_loop_gripper_timing_metadata()
@@ -42,8 +45,10 @@ class ClosedLoopPolicyServer:
         *,
         diagnostics_dir: Path | None = None,
         feature_profile: str = "full",
+        task_spec: TaskSpec | None = None,
+        boundary_config: Path | None = None,
     ) -> None:
-        baseline = BaselinePolicyServer(task, base_models_dir)
+        baseline = BaselinePolicyServer(task, base_models_dir, task_spec=task_spec)
         self.task = task
         self.task_spec = baseline.task_spec
         self.bimanual = baseline.bimanual
@@ -54,10 +59,16 @@ class ClosedLoopPolicyServer:
             }
         else:
             base_policies = {"single": baseline.policy}
+        runtime_boundary = (
+            None
+            if boundary_config is None
+            else BoundaryRuntimeConfig.from_json(boundary_config)
+        )
         self.policy = ClosedLoopMultiStreamPolicy.load(
             models_dir / task,
             base_policies=base_policies,
             feature_profile=feature_profile,
+            boundary_config=runtime_boundary,
         )
         self.adapter = ClosedLoopObservationAdapter(self.task_spec)
         self.arms = self.policy.arms
@@ -66,6 +77,16 @@ class ClosedLoopPolicyServer:
             "policy_type": self.policy.name,
             "closed_loop_bundle": self.policy.summary(),
             "closed_loop_feature_profile": self.policy.feature_profile.to_dict(),
+            "boundary_runtime_config": (
+                None
+                if boundary_config is None
+                else {
+                    "path": str(Path(boundary_config).resolve()),
+                    "sha256": hashlib.sha256(
+                        Path(boundary_config).read_bytes()
+                    ).hexdigest(),
+                }
+            ),
         }
         self.diagnostics_dir = diagnostics_dir
         self._episode_index = -1
@@ -141,6 +162,50 @@ class ClosedLoopPolicyServer:
             for arm, result in cycle.arms.items()
             if result.failure_reason is not None
         }
+        arm_policy_state = {}
+        cycle_diagnostics = getattr(cycle, "diagnostics", {})
+        diagnostic_arms = (
+            cycle_diagnostics.get("arms", {})
+            if isinstance(cycle_diagnostics, Mapping)
+            else {}
+        )
+        for arm in self.arms:
+            diagnostic = diagnostic_arms.get(arm, {})
+            execution = diagnostic.get("execution") or {}
+            controllers = getattr(self.policy, "execution_controllers", {})
+            controller = controllers.get(arm) if isinstance(controllers, Mapping) else None
+            reference = (
+                None if controller is None else controller.cursor.reference_state
+            )
+            arm_policy_state[arm] = {
+                "skill_index": None if reference is None else reference.skill_index,
+                "time_index": None if reference is None else reference.local_index,
+                "mode": (
+                    None
+                    if reference is None
+                    else self.policy._mode_by_arm_skill[arm][reference.skill_index]
+                ),
+                "active_frames": list(execution.get("participating_streams", ())),
+                "selected_frames": list(execution.get("participating_streams", ())),
+                "poe_weights": dict(execution.get("poe_weights", {})),
+                "progress_status": diagnostic.get("progress_status"),
+                "progress_confidence": diagnostic.get("progress_confidence"),
+            }
+        raw_trigger = (
+            cycle_diagnostics.get("recovery_trigger", {})
+            if isinstance(cycle_diagnostics, Mapping)
+            else {}
+        )
+        monitor_state = {
+            "alarm": bool(raw_trigger.get("triggered", False)),
+            "reasons": list(raw_trigger.get("reasons", ())),
+            "intents": list(raw_trigger.get("intents", ())),
+        }
+        policy_state = (
+            {**arm_policy_state, "monitor": monitor_state}
+            if self.bimanual
+            else {**arm_policy_state["single"], "monitor": monitor_state}
+        )
         return {
             "ok": True,
             "complete": self.policy.complete,
@@ -153,6 +218,7 @@ class ClosedLoopPolicyServer:
             "gripper_authorization": {
                 arm: cycle.commands[arm].gripper_authorized for arm in self.arms
             },
+            "policy_state": policy_state,
         }
 
     def _resolve(self, request: Mapping[str, Any], *, commit: bool) -> dict[str, Any]:
@@ -286,12 +352,30 @@ class ClosedLoopPolicyServer:
                 self._pending = None
             self._save_diagnostics()
             return {"ok": True, "closed": True}
+        if command == "retry_current_skill":
+            if self._pending is not None:
+                raise RuntimeError("待提交动作必须先 abort 才能执行 Skill-Retry")
+            entries = self.policy.restart_current_skill_reference()
+            return {
+                "ok": True,
+                "retried": True,
+                "reference_entries": {
+                    arm: {
+                        "skill": state.skill_index,
+                        "progress": state.local_index,
+                    }
+                    for arm, state in entries.items()
+                },
+            }
         if command == "commit":
             return self._resolve(request, commit=True)
         if command == "abort":
             return self._resolve(request, commit=False)
         if command not in {"reset", "act"}:
-            raise ValueError("command 必须为 ping/reset/act/commit/abort/close")
+            raise ValueError(
+                "command 必须为 ping/reset/act/commit/abort/"
+                "retry_current_skill/close"
+            )
         payload = request.get("observation")
         if not isinstance(payload, Mapping):
             raise TypeError("reset/act 必须携带 RLBench 观测对象")
@@ -305,6 +389,8 @@ def serve(
     *,
     diagnostics_dir: Path | None = None,
     feature_profile: str = "full",
+    task_spec: TaskSpec | None = None,
+    boundary_config: Path | None = None,
 ) -> int:
     server = ClosedLoopPolicyServer(
         task,
@@ -312,6 +398,8 @@ def serve(
         base_models_dir,
         diagnostics_dir=diagnostics_dir,
         feature_profile=feature_profile,
+        task_spec=task_spec,
+        boundary_config=boundary_config,
     )
     for line in sys.stdin:
         if not line.strip():
@@ -334,6 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--models-dir", type=Path, required=True)
     parser.add_argument("--base-models-dir", type=Path, required=True)
     parser.add_argument("--diagnostics-dir", type=Path)
+    parser.add_argument("--task-specs", type=Path)
+    parser.add_argument("--boundary-config", type=Path)
     parser.add_argument(
         "--feature-profile",
         choices=ClosedLoopFeatureProfile.names(),
@@ -344,12 +434,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    task_spec = (
+        None
+        if args.task_specs is None
+        else load_task_specs(args.task_specs)[args.task]
+    )
     return serve(
         args.task,
         args.models_dir,
         args.base_models_dir,
         diagnostics_dir=args.diagnostics_dir,
         feature_profile=args.feature_profile,
+        task_spec=task_spec,
+        boundary_config=args.boundary_config,
     )
 
 
