@@ -213,7 +213,7 @@ def main() -> None:
             "to successful trajectories.",
             "The nominal-frozen OOD row is also reported because it avoids fitting "
             "a detector on OOD trajectories; neither artifact is a paper threshold.",
-            "Server A must regenerate formal calibration artifacts from its private "
+            "Formal calibration artifacts must be regenerated from the held-out "
             "Main-10 normal-calibration split.",
         ],
     }

@@ -20,21 +20,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--run-dir",
         type=pathlib.Path,
-        default=pathlib.Path(
-            "/home/ubuntu/workspace/_runs/fail_detect/square_flow_seed1103_full_20260904"
-        ),
+        required=True,
     )
     parser.add_argument(
         "--project-root",
         type=pathlib.Path,
-        default=pathlib.Path("/home/ubuntu/workspace/essay2608"),
+        required=True,
     )
     parser.add_argument(
         "--dataset",
         type=pathlib.Path,
-        default=pathlib.Path(
-            "/home/ubuntu/workspace/_datasets/robomimic-v0.1/square/ph/image_abs.hdf5"
-        ),
+        required=True,
     )
     parser.add_argument("--poll-seconds", type=int, default=60)
     parser.add_argument("--restart-grace-seconds", type=int, default=300)

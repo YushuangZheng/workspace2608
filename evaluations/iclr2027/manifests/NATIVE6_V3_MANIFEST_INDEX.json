@@ -1,6 +1,5 @@
 {
   "configs": {
-    "evaluations/iclr2027/configs/shared/native6_b_return_contract_v3.json": "0c5b1420f99ce086b31a954a9a144dc85647a293b05a8099e8a5b7e2564b70e2",
     "evaluations/iclr2027/configs/shared/native6_contract_v3.json": "9edb8ca8c93633df71ea16c8d1a22da434a7bc06f88a31801157718c5881da25",
     "evaluations/iclr2027/configs/shared/native6_physical_protocol_v3.json": "b29dda5c50d82a1945f2881f833ffe3fe4223bcf4a07e416f6d7990301a92393",
     "evaluations/iclr2027/configs/shared/native6_result_schema_v3.json": "2269f13d17b9953f0b45c46073220160f621a0185ed95ca2b6f4ddab43aab0c3"

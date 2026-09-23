@@ -25,7 +25,6 @@ from evaluations.iclr2027.methods.fail_detect import (
 )
 
 PINNED_COMMIT = "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed"
-DEFAULT_OFFICIAL_ROOT = Path("/home/ubuntu/workspace/_external/FAIL-Detect")
 
 
 def _official_commit(root: Path) -> str:
@@ -124,7 +123,7 @@ def run_smoke(official_root: Path, device: str) -> dict[str, object]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--official-root", type=Path, default=DEFAULT_OFFICIAL_ROOT)
+    parser.add_argument("--official-root", type=Path, required=True)
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
     print(json.dumps(run_smoke(args.official_root.resolve(), args.device), indent=2))

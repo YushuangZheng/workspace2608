@@ -145,7 +145,7 @@ def calibrate_m2(
     if config.get("schema") != "essay2608.iclr2027.monitor-calibration-config.v1":
         raise ValueError("unsupported monitor calibration config")
     if config.get("calibration_authority") != "server_a_normal_only":
-        raise ValueError("formal monitor calibration must remain on server A")
+        raise ValueError("monitor calibration requires the frozen normal-only authority")
     if config.get("model_weight_updates_allowed") is not False:
         raise ValueError("monitor calibration cannot update model weights")
     spec = load_method_spec("m2_trajectory_likelihood")

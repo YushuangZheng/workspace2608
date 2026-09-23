@@ -88,7 +88,6 @@ def materialize() -> dict[str, Any]:
         CONFIG_ROOT / "native6_physical_protocol_v3.json",
         CONFIG_ROOT / "native6_contract_v3.json",
         CONFIG_ROOT / "native6_result_schema_v3.json",
-        CONFIG_ROOT / "native6_b_return_contract_v3.json",
     )
     index = {
         "schema": "essay2608.iclr2027.native6-v3-manifest-index.v1",

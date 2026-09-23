@@ -1,4 +1,4 @@
-"""Phase-four acceptance tests for guards and multi-arm transactions."""
+"""Acceptance tests for boundary guards and multi-arm transactions."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ from essay2608.policy.tsf.inference.state_evaluator import (
     joint_peak_normalized_pose_support,
     robot_pose_observation_covariance,
 )
-from evaluations.development.boundary_calibration.run import (
+from evaluations.iclr2027.calibration.boundary_runtime import (
     _acceptance_rows,
     _calibrate,
 )

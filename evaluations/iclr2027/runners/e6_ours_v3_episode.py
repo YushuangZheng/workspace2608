@@ -1,4 +1,4 @@
-"""Run one Native-6 v3 episode with the frozen M5 policy on server A.
+"""Run one Native-6 v3 episode with the frozen M5 policy.
 
 The module is an integration layer only.  It delegates policy execution to
 ``shared_episode`` and physical intervention to the already frozen Native-6

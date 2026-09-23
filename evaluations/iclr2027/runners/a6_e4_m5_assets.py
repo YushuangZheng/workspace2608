@@ -37,7 +37,7 @@ from essay2608.policy.tsf import (
     BoundaryCalibration,
     BoundaryRuntimeConfig,
 )
-from evaluations.development.boundary_calibration.run import (
+from evaluations.iclr2027.calibration.boundary_runtime import (
     BELIEF_CONFIG_PATH,
     _acceptance_rows,
     _base_runtime_config,
@@ -77,7 +77,7 @@ PREFLIGHT = ASSET_ROOT / "M5_HORIZON_WORKER_PREFLIGHT.json"
 SIM_MANIFEST = ASSET_ROOT / "development_preflight_manifest.jsonl"
 SIM_RESULTS = EVAL_ROOT / "results" / "development" / "e4_m5_horizon_preflight"
 A5_ACCEPTANCE = EVAL_ROOT / "results" / "controlled" / "e1_e2" / "A5_ACCEPTANCE.json"
-POLICY_PYTHON = Path("/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python")
+POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", sys.executable))
 TASKS = tuple(task.task_id for task in experiment_task_set("horizon3"))
 TASK_LEVELS = {task.task_id: task.task_level for task in experiment_task_set("horizon3")}
 FROZEN_MAIN10_OVERLAP = "place_cups_3"

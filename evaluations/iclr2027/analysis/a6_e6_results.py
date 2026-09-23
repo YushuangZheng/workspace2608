@@ -23,7 +23,6 @@ from typing import Any, Iterable, Mapping
 
 ROOT = Path(__file__).resolve().parents[3]
 EVAL_ROOT = ROOT / "evaluations" / "iclr2027"
-NATIVE = EVAL_ROOT / "results" / "native"
 NATIVE_V3 = EVAL_ROOT / "results" / "native_v3"
 A5_M5_NOMINAL = (
     EVAL_ROOT / "results" / "controlled" / "e1_e2" / "end_to_end" / "m5" / "nominal"
@@ -152,7 +151,7 @@ def _validate_manifest(rows: list[Mapping[str, Any]], *, condition: str) -> None
 
 def _external_results(system: str, condition: str) -> list[dict[str, Any]]:
     path = (
-        NATIVE / system / "formal" / "nominal_episodes.jsonl"
+        NATIVE_V3 / system / "formal" / "nominal_episodes.jsonl"
         if condition == "nominal"
         else NATIVE_V3 / system / "formal" / "perturbed_episodes.jsonl"
     )
@@ -455,8 +454,8 @@ def generate() -> dict[str, Any]:
     inputs = (
         NOMINAL_MANIFEST,
         PERTURBED_MANIFEST,
-        NATIVE / "rvt" / "formal" / "nominal_episodes.jsonl",
-        NATIVE / "racer" / "formal" / "nominal_episodes.jsonl",
+        NATIVE_V3 / "rvt" / "formal" / "nominal_episodes.jsonl",
+        NATIVE_V3 / "racer" / "formal" / "nominal_episodes.jsonl",
         NATIVE_V3 / "rvt" / "formal" / "perturbed_episodes.jsonl",
         NATIVE_V3 / "racer" / "formal" / "perturbed_episodes.jsonl",
         NATIVE_V3 / "ours" / "formal" / "episodes.jsonl",

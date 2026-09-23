@@ -87,7 +87,7 @@ Generate and validate the controlled manifests:
 
 ```bash
 python -m evaluations.iclr2027.manifests.build
-pytest -q evaluations/iclr2027/tests/test_a2_infrastructure.py
+pytest -q evaluations/iclr2027/tests
 ```
 
 The generic launcher executes one isolated simulator process per manifest row:

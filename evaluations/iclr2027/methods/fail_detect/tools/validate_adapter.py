@@ -1,7 +1,7 @@
-"""Replay all A development examples for adapter-contract verification only.
+"""Replay development examples for adapter-contract verification only.
 
 The explicit analytic test backend below is NOT a trained Main-10 logpZO model.
-This command cannot mark M3 formal scoring or the complete A4 delivery ready.
+This command cannot mark the formal M3 evaluation ready.
 It trains nothing, fits no normalizer or threshold, and reads no failure pool,
 calibration or sealed data. Expected scores also have an independent NumPy oracle.
 """
@@ -71,7 +71,7 @@ def load_examples():
     if index["contains_calibration_or_sealed_records"] or index["contains_evaluator_labels"]:
         raise ValueError("only development examples without evaluator labels are allowed")
     if _sha256(fixture) != index["causal_records_sha256"]:
-        raise ValueError("A's development example checksum differs")
+        raise ValueError("development example checksum differs")
     records = [
         validate_feature_record(json.loads(line))
         for line in fixture.read_text().splitlines()
@@ -206,7 +206,7 @@ def evaluate_contract(config=CONFIG):
         "status": "pass",
         "scope": "adapter_contract_only",
         "m3_formal_scorer_bound": False,
-        "complete_A4_delivery": False,
+        "formal_evaluation_ready": False,
         "warning": "Analytic test backend; these are NOT trained Main-10 M3 scores.",
         "backend": BACKEND,
         "backend_sha256": BACKEND_HASH,

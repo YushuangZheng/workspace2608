@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -242,8 +243,8 @@ def run(phase: str) -> int:
         manifest=manifest,
         output_root=output,
         workers=WORKERS,
-        sim_python=Path("/home/zhengyushuang/.conda/envs-migrated-20260816/dynamac-paper/bin/python"),
-        policy_python=Path("/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python"),
+        sim_python=Path(os.environ.get("DYNAMAC_SIM_PYTHON", sys.executable)),
+        policy_python=Path(os.environ.get("DYNAMAC_POLICY_PYTHON", sys.executable)),
         xvfb_run=Path("/usr/bin/xvfb-run"),
         success_target=None,
         retry_infrastructure=1,

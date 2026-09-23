@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from evaluations.development.formal_evaluation.resources import build_lane_specs
+from evaluations.iclr2027.runners.resources import build_lane_specs
 
 
 def test_48_workers_reuse_each_gpu_six_times_without_cpu_overlap() -> None:

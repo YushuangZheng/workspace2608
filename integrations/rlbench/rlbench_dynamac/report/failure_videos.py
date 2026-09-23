@@ -2086,7 +2086,7 @@ def record(args):
                         recorder.used_cameras
                     ) != tuple(args.cameras):
                         raise RuntimeError(
-                            "V4 delivery requires every requested camera"
+                            "video export requires every requested camera"
                         )
                 except Exception:
                     recorder.abort()

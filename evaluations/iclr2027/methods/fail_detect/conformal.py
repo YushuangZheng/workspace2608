@@ -26,8 +26,8 @@ class TimeVaryingConformalBand:
 
     ``fit`` implements the public FAIL-Detect repository's upper-band path:
     the mean and T-function modulation use one successful-rollout split, and
-    a disjoint split determines the band-width quantile.  Splits are explicit
-    so server B never needs access to server A's formal calibration episodes.
+    a disjoint split determines the band-width quantile. Splits are explicit
+    so scorer fitting remains separate from formal normal-rollout calibration.
     """
 
     alpha: float

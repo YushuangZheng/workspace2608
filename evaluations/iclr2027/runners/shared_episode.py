@@ -14,6 +14,7 @@ import importlib
 import json
 import os
 import resource
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -57,10 +58,7 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_POLICY_PYTHON = Path(
-    os.environ.get(
-        "DYNAMAC_POLICY_PYTHON",
-        "/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python",
-    )
+    os.environ.get("DYNAMAC_POLICY_PYTHON", sys.executable)
 )
 SINGLE_MODELS = INTEGRATION_ROOT / "models" / "iclr2027" / "dynamac"
 BIMANUAL_MODELS = INTEGRATION_ROOT / "models" / "v4"

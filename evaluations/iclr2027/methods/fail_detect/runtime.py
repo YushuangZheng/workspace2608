@@ -1,7 +1,7 @@
-"""A-frozen feature adapter for M3, independent of score-backend storage.
+"""Frozen feature adapter for M3, independent of score-backend storage.
 
 ``from_scorer`` binds an existing frozen logpZO scorer without requiring a new
-B-trained checkpoint or a B-specific on-disk weight format. The legacy weight
+checkpoint or an adapter-specific on-disk weight format. The legacy weight
 loader remains optional. Neither entrypoint supplies a missing score backend
 or makes unrelated official Square features compatible with DynaMAC.
 """
@@ -74,7 +74,7 @@ class CanonicalFailDetectMonitor(RuntimeMonitor):
 
         The method-internal binding describes the scorer's *actual* input layout
         and normalizer, frozen config and scorer identities, and task. It is not
-        an additional A-owned interface or a request to create training data.
+        an additional evaluator interface or a request to create training data.
         A matching feature representation is still required; dimensional padding
         alone is not evidence that an unrelated model is a valid backend.
 

@@ -1,8 +1,7 @@
-"""Calibrate Full-method boundary runtime parameters from five success demos.
+"""Calibrate TSF boundary runtime parameters from successful demonstrations.
 
-This is the ICLR task-registry adapter around the already validated phase-four
-normal-demonstration calibration.  It deliberately reads neither the A-only
-monitor-calibration rollouts nor any fault/sealed-test artifact.
+The calibration uses normal demonstrations only. It does not read monitor
+calibration rollouts, fault labels, or retained evaluation outcomes.
 """
 
 from __future__ import annotations
@@ -21,8 +20,8 @@ from essay2608.policy.tsf import (
     TSFTaskModelBuilder,
     TSFTaskModelConfig,
 )
-from evaluations.development.component_comparison.run import ArmCase
-from evaluations.development.boundary_calibration.run import run
+from evaluations.iclr2027.calibration.demo_replay import ArmCase
+from evaluations.iclr2027.calibration.boundary_runtime import run
 from integrations.rlbench.iclr2027.build_assets import (
     TSF_MODEL_ROOT,
     DATA_ROOT,

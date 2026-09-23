@@ -1,7 +1,4 @@
-# Server-B compatibility environment for RTX 6000D (compute capability 12.0).
-# Recreate with the build variables shown in ../README.md.  The local
-# wheel/source paths are immutable external artifacts recorded in
-# ../OFFICIAL_SOURCES.json.
+# Compatibility environment for GPUs requiring CUDA 12.8 wheels.
 name: faildetect-gpu-b758e55f
 channels:
   - conda-forge
@@ -16,7 +13,7 @@ dependencies:
   - pytest=8.3.5
   - gym=0.21.0
   - pip:
-      - --find-links=/home/ubuntu/workspace/_external/_wheels/faildetect-cu128
+      - --extra-index-url=https://download.pytorch.org/whl/cu128
       - torch==2.7.1+cu128
       - torchvision==0.22.1+cu128
       - h5py==3.7.0
@@ -54,5 +51,5 @@ dependencies:
       - numba==0.53.1
       - llvmlite==0.36.0
       - robomimic==0.2.0
-      - robosuite @ file:///home/ubuntu/workspace/_external/_sources/robosuite-277ab9588ad7a4f4b55cf75508b44aa67ec171f0.tar.gz
-      - pytorch3d @ file:///home/ubuntu/workspace/_external/pytorch3d
+      - robosuite @ https://github.com/ARISE-Initiative/robosuite/archive/277ab9588ad7a4f4b55cf75508b44aa67ec171f0.tar.gz
+      - pytorch3d @ https://github.com/facebookresearch/pytorch3d/archive/33824be3cbc87a7dd1db0f6a9a9de9ac81b2d0ba.tar.gz

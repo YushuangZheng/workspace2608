@@ -1,4 +1,4 @@
-"""Prepare and run the A6 E3 budget/LOFO shadow evaluation on server A.
+"""Prepare and run the E3 budget/LOFO shadow evaluation.
 
 Failure-budget and leave-one-family-out experiments measure monitoring quality
 on the same frozen M0 trajectories.  They never launch a simulator, modify an

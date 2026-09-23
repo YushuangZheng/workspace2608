@@ -219,14 +219,17 @@ def accept() -> dict[str, Any]:
         if observed_counts[name] != expected:
             errors.append(f"{name}: {observed_counts[name]} != {expected}")
 
-    e6_delivery_path = RESULTS / "b_delivery" / "A_ACCEPTANCE_E6_V3_FORMAL.json"
-    if not e6_delivery_path.is_file():
-        errors.append("E6 v3 B formal delivery acceptance is missing")
-        e6_delivery = {}
+    e6_verification_path = RESULTS / "native_v3" / "FORMAL_VERIFICATION.json"
+    if not e6_verification_path.is_file():
+        errors.append("E6 native-system formal verification is missing")
+        e6_verification = {}
     else:
-        e6_delivery = _json(e6_delivery_path)
-        if e6_delivery.get("status") != "PASS" or int(e6_delivery.get("results_verified", -1)) != 1200:
-            errors.append("E6 v3 B formal delivery acceptance is not a 1,200-result PASS")
+        e6_verification = _json(e6_verification_path)
+        if (
+            e6_verification.get("status") != "PASS"
+            or int(e6_verification.get("results_verified", -1)) != 1200
+        ):
+            errors.append("E6 native-system verification is not a 1,200-result PASS")
 
     paper_hashes = {}
     for name, path in PAPER_ARTIFACTS.items():
@@ -274,9 +277,9 @@ def accept() -> dict[str, Any]:
         },
         "new_formal_episode_counts": observed_counts,
         "analysis_records": {name: {"path": str(path.relative_to(ROOT)), "sha256": _sha256(path), "status": summaries[name]["status"]} for name, path in ANALYSES.items()},
-        "e6_b_formal_delivery": {
-            "path": str(e6_delivery_path.relative_to(ROOT)),
-            "sha256": _sha256(e6_delivery_path),
+        "e6_native_formal_verification": {
+            "path": str(e6_verification_path.relative_to(ROOT)),
+            "sha256": _sha256(e6_verification_path),
             "results_verified": 1200,
         },
         "paper_artifacts": paper_hashes,

@@ -22,7 +22,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--official-root",
         type=pathlib.Path,
-        default=pathlib.Path("/home/ubuntu/workspace/_external/FAIL-Detect"),
+        required=True,
     )
     parser.add_argument("--features", type=pathlib.Path, required=True)
     parser.add_argument("--checkpoint", type=pathlib.Path, required=True)

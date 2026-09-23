@@ -10,7 +10,7 @@ import numpy as np
 
 
 class ThresholdSchedule(Protocol):
-    """Minimal boundary accepted from A-owned calibration artifacts."""
+    """Minimal boundary accepted from normal-rollout calibration artifacts."""
 
     def threshold(self, score_index: int) -> float: ...
 
@@ -22,8 +22,8 @@ class FeatureEncoder(Protocol):
 class ArrayObservationEncoder:
     """Provisional encoder for already-frozen one-dimensional features.
 
-    It deliberately makes no assumptions about the future A-owned feature
-    schema.  The final integration injects an encoder implementing the same
+    It deliberately makes no assumptions about a benchmark feature schema.
+    The integration injects an encoder implementing the same
     callable shape.
     """
 
@@ -58,7 +58,7 @@ class FailureSupervisedMonitorConfig:
 
 
 class FailureSupervisedMonitor:
-    """Apply a causal stateful classifier and an A-frozen threshold band."""
+    """Apply a causal stateful classifier and a frozen threshold band."""
 
     def __init__(
         self,

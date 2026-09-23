@@ -1,7 +1,7 @@
 """Compare the wrapper with the pinned official function using real Square weights.
 
 This is a non-training official-domain regression check, not a DynaMAC/Main-10
-model binding. The large external checkpoint stays outside the delivery tree.
+model binding. The large external checkpoint stays outside the source tree.
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ def evaluate(official_root: Path, run: Path):
         "status": "pass",
         "scope": "official_square_only_not_Main10_golden",
         "m3_formal_scorer_bound": False,
-        "complete_A4_delivery": False,
+        "formal_evaluation_ready": False,
         "official_commit": COMMIT,
         "artifacts_sha256": hashes,
         "official_function_sha256": _sha256(official_root / "UQ_test/eval_load_baseline.py"),

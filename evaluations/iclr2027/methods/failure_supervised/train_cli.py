@@ -78,7 +78,6 @@ def prepare_task(task: str) -> dict:
         "encoder_sha256": encoder_hash,
         "reader_sha256": sha256(BASE / "interfaces/failure_train.py"),
         "feature_schema_sha256": sha256(BASE / "interfaces/feature_schema.py"),
-        "train_handoff_sha256": sha256(BASE / "results/a2_acceptance/B_FAILURE_TRAIN_HANDOFF.json"),
     }
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
@@ -254,7 +253,6 @@ def train(
         "config_sha256": sha256(CONFIG),
         "code_sha256": code_identity(),
         "source_manifest_sha256": sha256(MANIFEST),
-        "source_train_handoff_sha256": meta["train_handoff_sha256"],
         "encoded_cache_sha256": meta["npz_sha256"],
         "selection_episode_ids_sha256": selection_hash,
         "positive_weight": pos_weight,

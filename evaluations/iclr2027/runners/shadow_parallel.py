@@ -8,14 +8,13 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[3]
-POLICY_PYTHON = Path(
-    "/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python"
-)
+POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", sys.executable))
 
 
 def _sha256(path: Path) -> str:

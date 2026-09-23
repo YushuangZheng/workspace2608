@@ -48,9 +48,7 @@ M5_HORIZON_WORKER_PREFLIGHT = (
 M5_HORIZON_SIMULATOR_PREFLIGHT = (
     RESULT_ROOT / "m5_horizon_assets" / "M5_HORIZON_SIMULATOR_PREFLIGHT.json"
 )
-M3_POLICY_PYTHON = Path(
-    "/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python"
-)
+M3_POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", sys.executable))
 TASK_ADAPTER = ROOT / "integrations" / "rlbench" / "iclr2027" / "tasks.py"
 HORIZON_EVENTS = EVAL_ROOT / "audit" / "horizon_events.py"
 HORIZON_EPISODE = EVAL_ROOT / "runners" / "a6_horizon_episode.py"

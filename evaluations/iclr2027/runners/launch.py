@@ -8,13 +8,14 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from evaluations.development.formal_evaluation.resources import (
+from evaluations.iclr2027.runners.resources import (
     build_lane_specs,
 )
 from evaluations.iclr2027.runners.episode_io import (
@@ -29,12 +30,8 @@ from integrations.rlbench.rlbench_dynamac.eval.v4_formal_launch import (
     _launch_environment,
 )
 
-DEFAULT_SIM_PYTHON = Path(
-    "/home/zhengyushuang/.conda/envs-migrated-20260816/dynamac-paper/bin/python"
-)
-DEFAULT_POLICY_PYTHON = Path(
-    "/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python"
-)
+DEFAULT_SIM_PYTHON = Path(os.environ.get("DYNAMAC_SIM_PYTHON", sys.executable))
+DEFAULT_POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", sys.executable))
 DEFAULT_XVFB_RUN = Path("/usr/bin/xvfb-run")
 FAULT_CONFIG = (
     REPOSITORY_ROOT / "evaluations" / "iclr2027" / "configs" / "shared" / "faults.json"

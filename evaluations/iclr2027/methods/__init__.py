@@ -1,4 +1,4 @@
-"""A-owned controlled methods used by the ICLR 2027 evaluation."""
+"""Controlled methods used by the TSF evaluation suite."""
 
 from .registry import MethodSpec, load_method_spec
 

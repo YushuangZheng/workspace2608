@@ -1,4 +1,4 @@
-"""Frozen method identities and runtime factories for server A."""
+"""Frozen method identities and runtime factories for controlled evaluation."""
 
 from __future__ import annotations
 

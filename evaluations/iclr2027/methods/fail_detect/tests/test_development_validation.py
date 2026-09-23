@@ -19,7 +19,8 @@ def test_all_examples_and_explicit_scope(report):
     assert report["records"] == 18 and report["episodes"] == 4
     assert set(report["task_input_dimensions"]) == {"close_jar", "bimanual_handover_item"}
     assert report["scope"] == "adapter_contract_only"
-    assert not report["m3_formal_scorer_bound"] and not report["complete_A4_delivery"]
+    assert not report["m3_formal_scorer_bound"]
+    assert not report["formal_evaluation_ready"]
     assert report["default_test_backend_rejection"]
     assert report["shadow_inputs_unchanged"]
     assert not report["training_performed"] and not report["calibration_or_sealed_read"]

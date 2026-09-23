@@ -11,6 +11,7 @@ import argparse
 import importlib
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -49,10 +50,7 @@ DEFAULT_MODELS = INTEGRATION_ROOT / "models" / "iclr2027" / "dynamac"
 DEFAULT_OUTPUT_ROOT = INTEGRATION_ROOT / "results" / "iclr2027" / "a1_development_gate"
 DEFAULT_SEED = 2_707_200_000
 DEFAULT_POLICY_PYTHON = Path(
-    os.environ.get(
-        "DYNAMAC_POLICY_PYTHON",
-        "/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python",
-    )
+    os.environ.get("DYNAMAC_POLICY_PYTHON", sys.executable)
 )
 
 

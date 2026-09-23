@@ -17,8 +17,6 @@ import numpy as np
 from omegaconf import OmegaConf
 
 PINNED_COMMIT = "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed"
-DEFAULT_OFFICIAL_ROOT = Path("/home/ubuntu/workspace/_external/FAIL-Detect")
-DEFAULT_DATASET = Path("/home/ubuntu/workspace/_datasets/robomimic-v0.1/square/ph/image_abs.hdf5")
 CONFIG_NAME = "image_square_ph_visual_flow_policy_cnn.yaml"
 
 
@@ -118,8 +116,8 @@ def run_smoke(official_root: Path, dataset_path: Path, device: str) -> dict[str,
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--official-root", type=Path, default=DEFAULT_OFFICIAL_ROOT)
-    parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
+    parser.add_argument("--official-root", type=Path, required=True)
+    parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--device", default="cuda:0")
     args = parser.parse_args()
     report = run_smoke(args.official_root.resolve(), args.dataset.resolve(), args.device)

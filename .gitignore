@@ -117,41 +117,13 @@ lightning_logs/
 # Raw formal results, diagnostics, replay manifests, and videos are generated
 # artifacts (some JSON files exceed GitHub's normal per-file limit).
 /integrations/rlbench/results/**
-/integrations/rlbench/V4_PROTOCOL.md
 
 # Evaluation datasets, model/training artifacts, generated results, and
-# development diagnostics remain local. Source schemas, manifests, runners,
-# analysis code, and tests stay tracked.
+# rollout results remain local. Source schemas, manifests, runners, analysis
+# code, and tests stay tracked.
 /evaluations/iclr2027/datasets/
 /evaluations/iclr2027/artifacts/
 /evaluations/iclr2027/results/**
-/evaluations/iclr2027/analysis/probes/
-/evaluations/iclr2027/delivery/
-
-# One-off experiment migration, promotion, and diagnostic helpers are retained
-# in local working copies, not in the reusable code repository.
-/evaluations/iclr2027/analysis/freeze_*.py
-/evaluations/iclr2027/analysis/install_*.py
-/evaluations/iclr2027/analysis/normalize_*.py
-/evaluations/iclr2027/analysis/prepare_*.py
-/evaluations/iclr2027/analysis/promote_*.py
-/evaluations/iclr2027/analysis/rebuild_*.py
-/evaluations/iclr2027/analysis/repair_*.py
-/evaluations/iclr2027/analysis/compare_m5_versions.py
-/evaluations/iclr2027/analysis/development_executor_trace.py
-/evaluations/iclr2027/analysis/m5_post_e4_impact.py
-/evaluations/iclr2027/analysis/m5_recovery_diagnostic.py
-/evaluations/iclr2027/analysis/a5_*.py
-/evaluations/iclr2027/analysis/a6_environment_change_*.py
-/evaluations/iclr2027/analysis/a6_pending_direct_identity_refresh_results.py
-/evaluations/iclr2027/analysis/a6_post_e4_main10_refresh_results.py
-/evaluations/iclr2027/analysis/audit_versioned_endpoint.py
-/evaluations/iclr2027/analysis/reaudit_endpoint_cell.py
-/evaluations/iclr2027/runners/*_diagnostic.py
-/evaluations/iclr2027/runners/*_refresh.py
-/evaluations/iclr2027/runners/a5.py
-/evaluations/iclr2027/runners/a6_endpoint_compatibility.py
-/evaluations/iclr2027/runners/a6_pending_lifecycle_stress.py
 
 # Native RVT/RACER execution stacks, machine identities, and run evidence are
 # maintained outside this source repository. Retain only the simulator-facing
@@ -165,20 +137,6 @@ lightning_logs/
 !/evaluations/iclr2027/native_systems/rvt/e6_v3/mapping/candidate_filter.py
 /evaluations/iclr2027/native6_v3/*.md
 !/evaluations/iclr2027/native6_v3/README.md
-/evaluations/iclr2027/methods/failure_supervised/HANDOFF.md
-/evaluations/iclr2027/manifests/amendments/invalidated_legacy_*/
-
-# Historical handoff acceptance tests bind local result manifests byte for
-# byte and belong with the untracked delivery evidence, not the source suite.
-/evaluations/iclr2027/tests/test_a2_infrastructure.py
-/evaluations/iclr2027/tests/test_a4_integration.py
-/evaluations/iclr2027/tests/test_e6_native_handoff.py
-/evaluations/iclr2027/tests/test_e6_native_v3*.py
-/evaluations/iclr2027/tests/test_e6_v3_racer_mi_diagnostic_contract.py
-
-# Historical implementation-stage checks remain available in the local
-# workspace but are not part of the maintained source distribution.
-/evaluations/development/
 
 # Only pinned notices and lock files belong under third_party. Source trees,
 # archives, conda prefixes, compiled extensions, and overlays remain local.

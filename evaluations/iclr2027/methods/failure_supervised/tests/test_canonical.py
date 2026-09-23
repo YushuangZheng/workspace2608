@@ -1,4 +1,4 @@
-"""Server-B method-scoped tests. A-owned fixture/interface files stay read-only."""
+"""Method-scoped tests over read-only fixtures and public interfaces."""
 
 from __future__ import annotations
 

@@ -157,7 +157,7 @@ def validate_mapping_preflight(
     system_id: str,
     expected_mapping_identity: str | None = None,
 ) -> None:
-    """Fail closed on a B-side live-scene mapping preflight report."""
+    """Fail closed on a native adapter's live-scene mapping preflight report."""
 
     validate_mapping(mapping)
     if report.get("schema") != "essay2608.iclr2027.native6-object-mapping-preflight.v1":

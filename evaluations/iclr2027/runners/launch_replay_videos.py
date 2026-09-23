@@ -6,25 +6,22 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evaluations.development.formal_evaluation.resources import build_lane_specs
+from evaluations.iclr2027.runners.resources import build_lane_specs
 from evaluations.iclr2027.runners import replay_video, shared_episode
 from integrations.rlbench.rlbench_dynamac.core.paths import REPOSITORY_ROOT
 from integrations.rlbench.rlbench_dynamac.core.records import atomic_json
 from integrations.rlbench.rlbench_dynamac.eval.v4_formal_launch import _launch_environment
 
 
-DEFAULT_SIM_PYTHON = Path(
-    "/home/zhengyushuang/.conda/envs-migrated-20260816/dynamac-paper/bin/python"
-)
-DEFAULT_POLICY_PYTHON = Path(
-    "/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python"
-)
+DEFAULT_SIM_PYTHON = Path(os.environ.get("DYNAMAC_SIM_PYTHON", sys.executable))
+DEFAULT_POLICY_PYTHON = Path(os.environ.get("DYNAMAC_POLICY_PYTHON", sys.executable))
 
 
 @dataclass
