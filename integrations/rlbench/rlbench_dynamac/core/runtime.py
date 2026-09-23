@@ -411,7 +411,7 @@ IK_SAMPLING_MAX_CONFIGS = 5
 IK_SAMPLING_MAX_TIME_MS = 10
 IK_JOINT_LIMIT_ATOL = 1.0e-9
 GLOBAL_IK_CONTROLLER_PROFILE = "global_pseudo_trac_sampling_path_formal_v1"
-STAGE6_IK_CONTROLLER_PROFILE = "stage6_hybrid_cartesian_executor_v19"
+HYBRID_IK_CONTROLLER_PROFILE = "hybrid_cartesian_executor_v19"
 FROZEN_V4_CONTROLLER_PROFILE = "v4_frozen_legacy_replay"
 FROZEN_V4_IK_RESOLUTION_METHOD = "pseudo_inverse"
 FROZEN_V4_IK_MAX_ITERATIONS = 6
@@ -545,13 +545,13 @@ class GlobalIKControllerConfig:
 
 
 @dataclass(frozen=True)
-class Stage6IKControllerConfig(GlobalIKControllerConfig):
+class HybridIKControllerConfig(GlobalIKControllerConfig):
     """RLBench integration profile with physical Cartesian feedback.
 
     The frozen V4 executor accepts a joint controller ``stopped`` return as a
     completed primary action.  That is adequate for reproducing its clock but
     not for a closed-loop policy whose StateId must remain at an unreached
-    target.  Stage six therefore verifies physical Cartesian progress while
+    target.  The hybrid executor therefore verifies physical Cartesian progress while
     keeping solver failure separate from a physically stalled but valid motor
     command.  The latter is reported to the closed-loop policy without hidden
     extra motion, so progress and recovery remain observation-driven.
@@ -657,13 +657,13 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
 
     @property
     def protocol_id(self) -> str:
-        return "rlbench-stage6-hybrid-cartesian-continuation-v23"
+        return "rlbench-hybrid-hybrid-cartesian-continuation-v25"
 
     def metadata(self) -> dict[str, Any]:
         value = super().metadata()
         value.update(
             {
-                "profile": STAGE6_IK_CONTROLLER_PROFILE,
+                "profile": HYBRID_IK_CONTROLLER_PROFILE,
                 "protocol_id": self.protocol_id,
                 "formal_default": False,
                 "ik_order": (
@@ -758,6 +758,10 @@ class Stage6IKControllerConfig(GlobalIKControllerConfig):
                 "same_target_solver_tier_persistence": (
                     "per_arm_exact_target_across_closed_loop_cycles"
                 ),
+                "same_target_solver_exhaustion_memory": (
+                    "reuse_final_exhaustion_while_target_is_solver_equivalent_"
+                    "and_tip_joints_are_unchanged"
+                ),
                 "physical_stall_solver_order": (
                     "pseudo_inverse_then_trac_ik_distance_then_"
                     "cartesian_continuation_then_sampling_then_"
@@ -794,8 +798,8 @@ def global_ik_controller_metadata(
     metadata = {
         "schema": FORMAL_CONTROLLER_METADATA_SCHEMA,
         "profile": (
-            STAGE6_IK_CONTROLLER_PROFILE
-            if isinstance(config, Stage6IKControllerConfig)
+            HYBRID_IK_CONTROLLER_PROFILE
+            if isinstance(config, HybridIKControllerConfig)
             else GLOBAL_IK_CONTROLLER_PROFILE
         ),
         "protocol_id": config.protocol_id,
@@ -854,7 +858,7 @@ def global_ik_controller_metadata(
         "task_specific_controller_branches": False,
         "legacy_v4_frozen_profile_used": False,
     }
-    if isinstance(config, Stage6IKControllerConfig):
+    if isinstance(config, HybridIKControllerConfig):
         metadata.update(
             {
                 "post_execution_cartesian_verification": True,
@@ -882,6 +886,9 @@ def global_ik_controller_metadata(
                 "same_target_alternate_solver_after_primary_stall": True,
                 "same_target_solver_tier_persistence": config.metadata()[
                     "same_target_solver_tier_persistence"
+                ],
+                "same_target_solver_exhaustion_memory": config.metadata()[
+                    "same_target_solver_exhaustion_memory"
                 ],
                 "physical_stall_resolution": (
                     "same_target_bounded_solver_escalation_then_report_stall"
@@ -945,7 +952,7 @@ def _release_configuration_path_motion_handle(
     """Release one unfinished PyRep configuration-path motion handle.
 
     ``ArmConfigurationPath.step`` removes its Reflexxes handle only when the
-    complete path reaches its end.  Stage six deliberately returns to the
+    complete path reaches its end.  The hybrid executor deliberately returns to the
     observer after a bounded number of raw physics steps, so an unfinished
     path is discarded by design and must release that simulator resource at
     the same ownership boundary.  Completed paths have already removed their
@@ -968,26 +975,29 @@ def _release_configuration_path_motion_handle(
     return True
 
 
-_STAGE6_JOINT_CACHE_ATTRIBUTE = "_dynamac_stage6_joint_target_cache_v1"
-_STAGE6_SOLVER_TIER_ATTRIBUTE = "_dynamac_stage6_solver_tier_v1"
-_STAGE6_SOLVER_TIER_COUNT = 8
+_HYBRID_JOINT_CACHE_ATTRIBUTE = "_dynamac_hybrid_joint_target_cache_v1"
+_HYBRID_SOLVER_TIER_ATTRIBUTE = "_dynamac_hybrid_solver_tier_v1"
+_HYBRID_SOLVER_TIER_COUNT = 8
+# Match the joint-space tolerance already used by the bounded command executor
+# to decide that a physical command has stopped.
+_HYBRID_SOLVER_EXHAUSTION_JOINT_ATOL_RAD = 0.001
 
 
-def _same_stage6_cartesian_target(left: Array, right: Array) -> bool:
+def _same_hybrid_cartesian_target(left: Array, right: Array) -> bool:
     translation, rotation = end_effector_pose_distance(left, right)
     return bool(translation <= 1.0e-10 and rotation <= 1.0e-10)
 
 
-def _cached_stage6_joint_command(
+def _cached_hybrid_joint_command(
     arm: Any,
     target: Array,
     *,
     current: Array,
     limits: tuple[tuple[bool, float, float], ...],
-    config: Stage6IKControllerConfig,
+    config: HybridIKControllerConfig,
     diagnostics: dict[str, Any],
 ) -> PreparedEECommand | None:
-    cached = getattr(arm, _STAGE6_JOINT_CACHE_ATTRIBUTE, None)
+    cached = getattr(arm, _HYBRID_JOINT_CACHE_ATTRIBUTE, None)
     if not isinstance(cached, dict):
         _increment_ik_diagnostic(diagnostics, "same_target_joint_cache_misses")
         return None
@@ -995,7 +1005,7 @@ def _cached_stage6_joint_command(
     if (
         cached_pose.shape != (7,)
         or not np.all(np.isfinite(cached_pose))
-        or not _same_stage6_cartesian_target(cached_pose, target)
+        or not _same_hybrid_cartesian_target(cached_pose, target)
     ):
         _increment_ik_diagnostic(diagnostics, "same_target_joint_cache_misses")
         return None
@@ -1009,7 +1019,7 @@ def _cached_stage6_joint_command(
         _increment_ik_diagnostic(diagnostics, "same_target_joint_cache_rejections")
         _record_ik_candidate_rejection(diagnostics, str(rejection))
         try:
-            delattr(arm, _STAGE6_JOINT_CACHE_ATTRIBUTE)
+            delattr(arm, _HYBRID_JOINT_CACHE_ATTRIBUTE)
         except AttributeError:
             pass
         return None
@@ -1023,16 +1033,16 @@ def _cached_stage6_joint_command(
     )
 
 
-def _store_stage6_joint_command(command: PreparedEECommand, target: Array) -> None:
+def _store_hybrid_joint_command(command: PreparedEECommand, target: Array) -> None:
     if (
         command.mode != "joint_target"
         or command.target_joints is None
-        or not _same_stage6_cartesian_target(command.target_pose, target)
+        or not _same_hybrid_cartesian_target(command.target_pose, target)
     ):
         return
     setattr(
         command.arm,
-        _STAGE6_JOINT_CACHE_ATTRIBUTE,
+        _HYBRID_JOINT_CACHE_ATTRIBUTE,
         {
             "target_pose": np.asarray(target, dtype=np.float64).copy(),
             "target_joints": command.target_joints.copy(),
@@ -1040,22 +1050,22 @@ def _store_stage6_joint_command(command: PreparedEECommand, target: Array) -> No
     )
 
 
-def _invalidate_stage6_joint_command(arm: Any, target: Array) -> bool:
-    cached = getattr(arm, _STAGE6_JOINT_CACHE_ATTRIBUTE, None)
+def _invalidate_hybrid_joint_command(arm: Any, target: Array) -> bool:
+    cached = getattr(arm, _HYBRID_JOINT_CACHE_ATTRIBUTE, None)
     if not isinstance(cached, dict):
         return False
     cached_pose = np.asarray(cached.get("target_pose"), dtype=np.float64)
     if (
         cached_pose.shape != (7,)
         or not np.all(np.isfinite(cached_pose))
-        or not _same_stage6_cartesian_target(cached_pose, target)
+        or not _same_hybrid_cartesian_target(cached_pose, target)
     ):
         return False
-    delattr(arm, _STAGE6_JOINT_CACHE_ATTRIBUTE)
+    delattr(arm, _HYBRID_JOINT_CACHE_ATTRIBUTE)
     return True
 
 
-def _stage6_same_target_solver_tier(
+def _hybrid_same_target_solver_tier(
     arm: Any,
     target: Array,
     *,
@@ -1063,24 +1073,24 @@ def _stage6_same_target_solver_tier(
 ) -> int:
     """Restore the bounded solver tier for one unchanged Cartesian target.
 
-    A Stage-6 policy target may span several observation cycles.  The raw
+    A Hybrid policy target may span several observation cycles.  The raw
     physics budget intentionally ends each cycle early, so a physically
     stalled solver family must remember that result; otherwise every new
     cycle restarts at pseudo-inverse and the documented fallback chain is
     unreachable.  A changed target starts a fresh chain at tier zero.
     """
 
-    state = getattr(arm, _STAGE6_SOLVER_TIER_ATTRIBUTE, None)
+    state = getattr(arm, _HYBRID_SOLVER_TIER_ATTRIBUTE, None)
     if isinstance(state, dict):
         cached_pose = np.asarray(state.get("target_pose"), dtype=np.float64)
         tier = state.get("minimum_solver_tier")
         if (
             cached_pose.shape == (7,)
             and np.all(np.isfinite(cached_pose))
-            and _same_stage6_cartesian_target(cached_pose, target)
+            and _same_hybrid_cartesian_target(cached_pose, target)
             and isinstance(tier, int)
             and not isinstance(tier, bool)
-            and tier in range(_STAGE6_SOLVER_TIER_COUNT)
+            and tier in range(_HYBRID_SOLVER_TIER_COUNT)
         ):
             _increment_ik_diagnostic(diagnostics, "same_target_solver_tier_cache_hits")
             if tier > 0:
@@ -1091,7 +1101,7 @@ def _stage6_same_target_solver_tier(
     _increment_ik_diagnostic(diagnostics, "same_target_solver_tier_cache_misses")
     setattr(
         arm,
-        _STAGE6_SOLVER_TIER_ATTRIBUTE,
+        _HYBRID_SOLVER_TIER_ATTRIBUTE,
         {
             "target_pose": np.asarray(target, dtype=np.float64).copy(),
             "minimum_solver_tier": 0,
@@ -1100,16 +1110,16 @@ def _stage6_same_target_solver_tier(
     return 0
 
 
-def _store_stage6_same_target_solver_tier(
+def _store_hybrid_same_target_solver_tier(
     arm: Any,
     target: Array,
     tier: int,
 ) -> None:
-    if isinstance(tier, bool) or tier not in range(_STAGE6_SOLVER_TIER_COUNT):
-        raise ValueError("stage-six solver tier must be an integer in [0, 7]")
+    if isinstance(tier, bool) or tier not in range(_HYBRID_SOLVER_TIER_COUNT):
+        raise ValueError("hybrid solver tier must be an integer in [0, 7]")
     setattr(
         arm,
-        _STAGE6_SOLVER_TIER_ATTRIBUTE,
+        _HYBRID_SOLVER_TIER_ATTRIBUTE,
         {
             "target_pose": np.asarray(target, dtype=np.float64).copy(),
             "minimum_solver_tier": int(tier),
@@ -1117,11 +1127,99 @@ def _store_stage6_same_target_solver_tier(
     )
 
 
-def _clear_stage6_same_target_solver_tier(arm: Any) -> None:
+def _clear_hybrid_same_target_solver_tier(arm: Any) -> None:
     try:
-        delattr(arm, _STAGE6_SOLVER_TIER_ATTRIBUTE)
+        delattr(arm, _HYBRID_SOLVER_TIER_ATTRIBUTE)
     except AttributeError:
         pass
+
+
+def _store_hybrid_same_target_solver_exhaustion(arm: Any, target: Array) -> None:
+    """Remember that every bounded family stalled at one physical state."""
+
+    joints = np.asarray(arm.get_joint_positions(), dtype=np.float64)
+    tip_pose = _arm_tip_pose(arm)
+    if (
+        joints.ndim != 1
+        or joints.size == 0
+        or not np.all(np.isfinite(joints))
+        or tip_pose.shape != (7,)
+        or not np.all(np.isfinite(tip_pose))
+    ):
+        return
+    setattr(
+        arm,
+        _HYBRID_SOLVER_TIER_ATTRIBUTE,
+        {
+            "target_pose": np.asarray(target, dtype=np.float64).copy(),
+            "minimum_solver_tier": _HYBRID_SOLVER_TIER_COUNT - 1,
+            "exhausted_joint_positions": joints.copy(),
+            "exhausted_tip_pose": tip_pose.copy(),
+        },
+    )
+
+
+def _hybrid_same_target_solver_exhaustion_state(
+    arm: Any,
+    target: Array,
+    *,
+    config: HybridIKControllerConfig,
+) -> Literal["absent", "unchanged", "changed"]:
+    """Return whether a saved final exhaustion still explains this call.
+
+    A changed object-centric reference changes the world target. A changed
+    robot configuration or physical tip changes the local planning problem.
+    Either observation invalidates the negative result and reopens the normal
+    bounded solver chain; otherwise repeating its final expensive tier cannot
+    add information.
+    """
+
+    state = getattr(arm, _HYBRID_SOLVER_TIER_ATTRIBUTE, None)
+    if not isinstance(state, dict) or "exhausted_joint_positions" not in state:
+        return "absent"
+    cached_target = np.asarray(state.get("target_pose"), dtype=np.float64)
+    cached_joints = np.asarray(
+        state.get("exhausted_joint_positions"), dtype=np.float64
+    )
+    cached_tip = np.asarray(state.get("exhausted_tip_pose"), dtype=np.float64)
+    current_joints = np.asarray(arm.get_joint_positions(), dtype=np.float64)
+    current_tip = _arm_tip_pose(arm)
+    valid = bool(
+        cached_target.shape == (7,)
+        and cached_tip.shape == (7,)
+        and cached_joints.ndim == 1
+        and cached_joints.size > 0
+        and current_joints.shape == cached_joints.shape
+        and current_tip.shape == (7,)
+        and np.all(np.isfinite(cached_target))
+        and np.all(np.isfinite(cached_tip))
+        and np.all(np.isfinite(cached_joints))
+        and np.all(np.isfinite(current_joints))
+        and np.all(np.isfinite(current_tip))
+    )
+    target_translation, target_rotation = end_effector_pose_distance(
+        cached_target, target
+    ) if valid else (math.inf, math.inf)
+    if (
+        not valid
+        or target_translation > config.physical_completion_translation_tolerance_m
+        or target_rotation > config.physical_completion_rotation_tolerance_rad
+    ):
+        return "changed"
+    tip_translation, tip_rotation = end_effector_pose_distance(
+        cached_tip, current_tip
+    )
+    unchanged = bool(
+        np.allclose(
+            current_joints,
+            cached_joints,
+            rtol=0.0,
+            atol=_HYBRID_SOLVER_EXHAUSTION_JOINT_ATOL_RAD,
+        )
+        and tip_translation <= config.physical_completion_translation_tolerance_m
+        and tip_rotation <= config.physical_completion_rotation_tolerance_rad
+    )
+    return "unchanged" if unchanged else "changed"
 
 
 @dataclass
@@ -1256,10 +1354,10 @@ def policy_action_execution_status(task_environment: Any) -> str:
     """Return whether the latest absolute-EE policy target was completed.
 
     RLBench's public ``TaskEnvironment.step`` API does not return the status of
-    its arm action mode.  Stage 6 deliberately allows one absolute Cartesian
+    its arm action mode.  Hybrid deliberately allows one absolute Cartesian
     target to consume several bounded observation cycles, so the evaluator
     must distinguish a fully reached target from useful bounded progress.  A
-    non-Stage-6 action mode retains the historical one-step ``reached``
+    non-Hybrid action mode retains the historical one-step ``reached``
     semantics.
     """
 
@@ -1308,13 +1406,12 @@ def apply_gripper_for_policy_target(
     arm_status: str,
     gripper_authorized: bool | None = None,
 ) -> bool:
-    """Apply a gripper command under task authorization or legacy sequencing.
+    """Apply a gripper command under the task or auxiliary action contract.
 
-    Closed-loop TASK commands pass an explicit authorization derived from the
-    task posterior and boundary transaction.  Frozen DynaMAC passes an
-    explicit authorization from its own fixed-clock gripper command.  ``None``
-    retains pose-completion sequencing only for auxiliary commands that have
-    no task-level authorization source.
+    An explicit ``True`` is a task-state decision made by the closed-loop
+    policy from progress and boundary semantics.  The executor must not add a
+    second fixed-pose completion gate to that decision.  Commands without a
+    task-level decision (``None``) retain reached-only physical sequencing.
     """
 
     if arm_status not in {"reached", "progressed", "stopped"}:
@@ -1323,10 +1420,9 @@ def apply_gripper_for_policy_target(
         gripper_authorized, (bool, np.bool_)
     ):
         raise TypeError("gripper_authorized must be Boolean or None")
-    apply = (
-        arm_status == "reached"
-        if gripper_authorized is None
-        else bool(gripper_authorized)
+    apply = bool(
+        gripper_authorized is True
+        or (gripper_authorized is None and arm_status == "reached")
     )
     if not apply:
         return False
@@ -1495,6 +1591,9 @@ def initialize_global_ik_controller_diagnostics() -> dict[str, Any]:
             "same_target_cross_cycle_solver_resumes": 0,
             "same_target_cross_cycle_solver_escalations": 0,
             "same_target_solver_tier_resets_after_progress": 0,
+            "same_target_solver_exhaustion_records": 0,
+            "same_target_solver_exhaustion_fast_returns": 0,
+            "same_target_solver_exhaustion_reopens": 0,
             "same_target_joint_cache_hits": 0,
             "same_target_joint_cache_misses": 0,
             "same_target_joint_cache_rejections": 0,
@@ -1885,7 +1984,7 @@ class DiscreteGripperProtocol:
             f"rlbench-discrete-gripper-{layout}-velocity{velocity}"
             f"-attach{attach}-detach-before-open{detach}"
             f"-transfer-detect{int(self.ownership_transfer_requires_receiver_detection)}"
-            "-retry-pending-close1-v3"
+            "-retry-pending-close1-attachment-aware-open-v4"
         )
 
     def extend_evaluation_protocol_id(self, base_protocol_id: str) -> str:
@@ -2172,7 +2271,14 @@ def _make_discrete_gripper_action_mode(protocol: DiscreteGripperProtocol) -> Any
                 gripper = scene.robot.gripper
                 current = float(all(value > 0.9 for value in gripper.get_open_amount()))
                 requested = float(values[0] > 0.5)
-                changed = current != requested
+                # Finger aperture alone cannot represent the OPEN/CLOSED
+                # transaction: a thin attached object can leave both fingers
+                # above the nominal open threshold.  OPEN still owns the
+                # physical UNLINK and must therefore release any attachment.
+                release_required = bool(
+                    requested == 1.0 and gripper.get_grasped_objects()
+                )
+                changed = current != requested or release_required
                 if changed:
                     self._dynamac_pending_close_attachment = requested == 0.0
                     if not self._detach_before_open:
@@ -2647,7 +2753,6 @@ def _prepare_sampling_after_trac_command(
                     diagnostics, "sampling_collision_relaxed_failures"
                 )
             continue
-
         if isinstance(sampling_result, np.ndarray):
             if sampling_result.ndim == 2:
                 candidates = tuple(sampling_result)
@@ -2752,7 +2857,7 @@ def _prepare_pseudo_trac_sampling_command(
         invalid_action_error=invalid_action_error,
         error_message=error_message,
         continuity_config=(
-            config if isinstance(config, Stage6IKControllerConfig) else None
+            config if isinstance(config, HybridIKControllerConfig) else None
         ),
     )
     if pseudo_command is not None:
@@ -2777,7 +2882,7 @@ def _prepare_pseudo_trac_sampling_command(
         diagnostics=diagnostics,
         configuration_error=configuration_error,
         allow_collision_relaxed=(
-            isinstance(config, Stage6IKControllerConfig)
+            isinstance(config, HybridIKControllerConfig)
             and config.allow_collision_relaxed_sampling
         ),
     )
@@ -2845,11 +2950,11 @@ def _prepare_pseudo_inverse_command(
     return None
 
 
-def _prepare_stage6_hybrid_command(
+def _prepare_hybrid_command(
     arm: Any,
     target: Array,
     *,
-    config: Stage6IKControllerConfig,
+    config: HybridIKControllerConfig,
     diagnostics: dict[str, Any],
     external_solver_factory: TracIKDistanceSolverFactory,
     ik_error: type[Exception],
@@ -2868,7 +2973,7 @@ def _prepare_stage6_hybrid_command(
     """
 
     if isinstance(minimum_solver_tier, bool) or minimum_solver_tier not in range(
-        _STAGE6_SOLVER_TIER_COUNT
+        _HYBRID_SOLVER_TIER_COUNT
     ):
         raise ValueError("minimum_solver_tier must be an integer in [0, 7]")
 
@@ -2881,7 +2986,7 @@ def _prepare_stage6_hybrid_command(
         raise invalid_action_error(error_message) from exc
 
     if minimum_solver_tier <= 0:
-        cached_command = _cached_stage6_joint_command(
+        cached_command = _cached_hybrid_joint_command(
             arm,
             target,
             current=current,
@@ -3014,7 +3119,7 @@ def _prepare_collision_aware_path_command(
         invalid_action_error=invalid_action_error,
         error_message=error_message,
     )
-    if isinstance(config, Stage6IKControllerConfig):
+    if isinstance(config, HybridIKControllerConfig):
         linear_path = getattr(arm, "get_linear_path", None)
         if callable(linear_path) and minimum_path_tier <= 0:
             _increment_ik_diagnostic(diagnostics, "linear_path_attempts")
@@ -3161,8 +3266,8 @@ def _prepare_collision_aware_path_command(
                 )
         return None
 
-    if isinstance(config, Stage6IKControllerConfig):
-        raise AssertionError("unreachable stage-six path branch")
+    if isinstance(config, HybridIKControllerConfig):
+        raise AssertionError("unreachable hybrid path branch")
 
     _increment_ik_diagnostic(diagnostics, "far_target_planner_attempts")
     try:
@@ -3204,9 +3309,10 @@ def execute_global_ik_ee_control(
     error_message: str,
     max_steps: int = 200,
     budget_exhaustion_is_stopped: bool = False,
-    use_stage6_hybrid_solver_order: bool = False,
-    stage6_minimum_solver_tier: int = 0,
+    use_hybrid_solver_order: bool = False,
+    hybrid_minimum_solver_tier: int = 0,
     prepared_commands_out: dict[int, PreparedEECommand] | None = None,
+    solver_preparation_exhausted_out: set[int] | None = None,
 ) -> Literal["reached", "stopped"]:
     """Run the global formal pseudo/TRAC/sampling/path controller."""
 
@@ -3216,14 +3322,14 @@ def execute_global_ik_ee_control(
         raise TypeError("external_solver_factory must be callable")
     if max_steps < 1:
         raise ValueError("max_steps must be positive")
-    if stage6_minimum_solver_tier != 0 and not use_stage6_hybrid_solver_order:
+    if hybrid_minimum_solver_tier != 0 and not use_hybrid_solver_order:
         raise ValueError(
-            "stage6_minimum_solver_tier requires the stage-six solver order"
+            "hybrid_minimum_solver_tier requires the hybrid solver order"
         )
-    if use_stage6_hybrid_solver_order and not isinstance(
-        config, Stage6IKControllerConfig
+    if use_hybrid_solver_order and not isinstance(
+        config, HybridIKControllerConfig
     ):
-        raise TypeError("the stage-six solver order requires its stage-six config")
+        raise TypeError("the hybrid solver order requires its hybrid config")
     _ensure_global_ik_controller_diagnostics(diagnostics)
     normalized = tuple(
         (arm, np.asarray(target, dtype=np.float64).copy())
@@ -3239,9 +3345,9 @@ def execute_global_ik_ee_control(
     prepared: list[PreparedEECommand] = []
     try:
         for (arm, target), translation in zip(normalized, translations):
-            if use_stage6_hybrid_solver_order:
-                assert isinstance(config, Stage6IKControllerConfig)
-                command = _prepare_stage6_hybrid_command(
+            if use_hybrid_solver_order:
+                assert isinstance(config, HybridIKControllerConfig)
+                command = _prepare_hybrid_command(
                     arm,
                     target,
                     config=config,
@@ -3251,7 +3357,7 @@ def execute_global_ik_ee_control(
                     configuration_error=configuration_error,
                     invalid_action_error=invalid_action_error,
                     error_message=error_message,
-                    minimum_solver_tier=stage6_minimum_solver_tier,
+                    minimum_solver_tier=hybrid_minimum_solver_tier,
                 )
             else:
                 command = _prepare_pseudo_trac_sampling_command(
@@ -3266,7 +3372,7 @@ def execute_global_ik_ee_control(
                     error_message=error_message,
                 )
             if command is None and (
-                isinstance(config, Stage6IKControllerConfig)
+                isinstance(config, HybridIKControllerConfig)
                 or translation > config.far_translation_threshold_m
             ):
                 _increment_ik_diagnostic(diagnostics, "path_after_all_ik_exhaustion")
@@ -3280,16 +3386,18 @@ def execute_global_ik_ee_control(
                     path_algorithm=path_algorithm,
                     error_message=error_message,
                     allow_near_nonlinear=bool(
-                        use_stage6_hybrid_solver_order
-                        and stage6_minimum_solver_tier >= 4
+                        use_hybrid_solver_order
+                        and hybrid_minimum_solver_tier >= 4
                     ),
                     minimum_path_tier=(
-                        max(0, stage6_minimum_solver_tier - 4)
-                        if use_stage6_hybrid_solver_order
+                        max(0, hybrid_minimum_solver_tier - 4)
+                        if use_hybrid_solver_order
                         else 0
                     ),
                 )
             if command is None:
+                if solver_preparation_exhausted_out is not None:
+                    solver_preparation_exhausted_out.add(id(arm))
                 raise invalid_action_error(error_message)
             prepared.append(command)
         _increment_ik_diagnostic(
@@ -3370,7 +3478,7 @@ def execute_global_ik_ee_control(
 def _cartesian_unresolved_targets(
     arm_targets: tuple[tuple[Any, Array], ...],
     *,
-    config: Stage6IKControllerConfig,
+    config: HybridIKControllerConfig,
     diagnostics: dict[str, Any],
 ) -> tuple[tuple[Any, Array], ...]:
     """Return arms whose physical tips still miss their commanded poses."""
@@ -3400,7 +3508,7 @@ def _cartesian_residual_score(
     arm: Any,
     target: Array,
     *,
-    config: Stage6IKControllerConfig,
+    config: HybridIKControllerConfig,
 ) -> float:
     translation, rotation = end_effector_pose_distance(_arm_tip_pose(arm), target)
     return math.hypot(
@@ -3454,11 +3562,11 @@ def _cartesian_vector_made_progress(
     return no_arm_regressed and bool(improved), len(improved) < len(before_scores)
 
 
-def execute_stage6_ik_ee_control(
+def execute_hybrid_ik_ee_control(
     scene: Any,
     arm_targets: tuple[tuple[Any, Array], ...],
     *,
-    config: Stage6IKControllerConfig,
+    config: HybridIKControllerConfig,
     diagnostics: dict[str, Any],
     external_solver_factory: TracIKDistanceSolverFactory,
     ik_error: type[Exception],
@@ -3532,19 +3640,50 @@ def execute_stage6_ik_ee_control(
         rotation_tolerance_rad=config.control_acceptance_rotation_tolerance_rad,
     ):
         for arm, _target in normalized:
-            _clear_stage6_same_target_solver_tier(arm)
+            _clear_hybrid_same_target_solver_tier(arm)
         _increment_ik_diagnostic(
             diagnostics,
             "cartesian_pre_execution_control_accepts",
         )
         return finish("reached")
+
+    exhaustion_states = tuple(
+        _hybrid_same_target_solver_exhaustion_state(
+            arm,
+            target,
+            config=config,
+        )
+        for arm, target in normalized
+    )
+    if all(state == "unchanged" for state in exhaustion_states):
+        _increment_ik_diagnostic(
+            diagnostics, "same_target_solver_exhaustion_fast_returns"
+        )
+        return finish("stopped")
+    if any(state != "absent" for state in exhaustion_states):
+        # A multi-arm target is one transaction. If any lane or target has
+        # changed, reopen every lane from the same initial tier rather than
+        # mixing a stale exhausted lane with a fresh one.
+        for arm, _target in normalized:
+            _clear_hybrid_same_target_solver_tier(arm)
+        _increment_ik_diagnostic(
+            diagnostics, "same_target_solver_exhaustion_reopens"
+        )
+
+    def remember_final_exhaustion() -> None:
+        for arm, target in normalized:
+            _store_hybrid_same_target_solver_exhaustion(arm, target)
+        _increment_ik_diagnostic(
+            diagnostics, "same_target_solver_exhaustion_records"
+        )
+
     before_scores = dict(original_scores)
     made_any_progress = False
     # Restore the lowest tier shared by the unchanged multi-arm transaction.
     # If any arm has a new target its tier is zero, so the whole synchronized
     # command safely restarts before later common stalls advance every lane.
     minimum_solver_tier = min(
-        _stage6_same_target_solver_tier(
+        _hybrid_same_target_solver_tier(
             arm,
             target,
             diagnostics=diagnostics,
@@ -3566,9 +3705,15 @@ def execute_stage6_ik_ee_control(
                 diagnostics,
                 "cartesian_policy_action_physics_budget_exhaustions",
             )
+            if (
+                not made_any_progress
+                and minimum_solver_tier == _HYBRID_SOLVER_TIER_COUNT - 1
+            ):
+                remember_final_exhaustion()
             return finish("progressed" if made_any_progress else "stopped")
         _increment_ik_diagnostic(diagnostics, "cartesian_direct_goal_attempts")
         prepared_commands: dict[int, PreparedEECommand] = {}
+        solver_preparation_exhausted: set[int] = set()
         try:
             direct_status = execute_global_ik_ee_control(
                 scene,
@@ -3583,15 +3728,39 @@ def execute_stage6_ik_ee_control(
                 path_algorithm=path_algorithm,
                 error_message=error_message,
                 max_steps=min(max_steps, remaining_raw_steps),
-                # A Stage-6 policy action owns only the remaining raw-physics
+                # A Hybrid policy action owns only the remaining raw-physics
                 # budget.  Reaching that budget is therefore a normal bounded
                 # return to the closed-loop observer, not an IK failure.
                 budget_exhaustion_is_stopped=True,
-                use_stage6_hybrid_solver_order=True,
-                stage6_minimum_solver_tier=minimum_solver_tier,
+                use_hybrid_solver_order=True,
+                hybrid_minimum_solver_tier=minimum_solver_tier,
                 prepared_commands_out=prepared_commands,
+                solver_preparation_exhausted_out=solver_preparation_exhausted,
             )
         except invalid_action_error:
+            if solver_preparation_exhausted:
+                unresolved_near_target = any(
+                    id(arm) in solver_preparation_exhausted
+                    and end_effector_pose_distance(_arm_tip_pose(arm), target)[0]
+                    <= config.far_translation_threshold_m
+                    for arm, target in normalized
+                )
+                if minimum_solver_tier < 4 and unresolved_near_target:
+                    minimum_solver_tier = 4
+                    for arm, target in normalized:
+                        _store_hybrid_same_target_solver_tier(
+                            arm, target, minimum_solver_tier
+                        )
+                    _increment_ik_diagnostic(
+                        diagnostics, "physical_stall_solver_escalations"
+                    )
+                    diagnostics["physical_stall_solver_tier_max"] = max(
+                        int(diagnostics.get("physical_stall_solver_tier_max", 0)),
+                        minimum_solver_tier,
+                    )
+                    continue
+                remember_final_exhaustion()
+                return finish("progressed" if made_any_progress else "stopped")
             if minimum_solver_tier == 0 and not made_any_progress:
                 raise
             _increment_ik_diagnostic(
@@ -3601,6 +3770,11 @@ def execute_stage6_ik_ee_control(
                 diagnostics,
                 "cartesian_multi_pass_solver_exhaustions_after_progress",
             )
+            if (
+                not made_any_progress
+                and minimum_solver_tier == _HYBRID_SOLVER_TIER_COUNT - 1
+            ):
+                remember_final_exhaustion()
             return finish("progressed" if made_any_progress else "stopped")
 
         if segment_index > 0:
@@ -3614,14 +3788,14 @@ def execute_stage6_ik_ee_control(
         )
         if not unresolved_after_direct:
             for arm, _target in normalized:
-                _clear_stage6_same_target_solver_tier(arm)
+                _clear_hybrid_same_target_solver_tier(arm)
             for arm, target in normalized:
                 command = prepared_commands.get(id(arm))
                 if command is not None:
-                    _store_stage6_joint_command(command, target)
+                    _store_hybrid_joint_command(command, target)
                     if (
                         command.mode == "joint_target"
-                        and _same_stage6_cartesian_target(command.target_pose, target)
+                        and _same_hybrid_cartesian_target(command.target_pose, target)
                     ):
                         _increment_ik_diagnostic(
                             diagnostics, "same_target_joint_cache_stores"
@@ -3638,14 +3812,14 @@ def execute_stage6_ik_ee_control(
             rotation_tolerance_rad=config.control_acceptance_rotation_tolerance_rad,
         ):
             for arm, _target in normalized:
-                _clear_stage6_same_target_solver_tier(arm)
+                _clear_hybrid_same_target_solver_tier(arm)
             for arm, target in normalized:
                 command = prepared_commands.get(id(arm))
                 if command is not None:
-                    _store_stage6_joint_command(command, target)
+                    _store_hybrid_joint_command(command, target)
                     if (
                         command.mode == "joint_target"
-                        and _same_stage6_cartesian_target(command.target_pose, target)
+                        and _same_hybrid_cartesian_target(command.target_pose, target)
                     ):
                         _increment_ik_diagnostic(
                             diagnostics, "same_target_joint_cache_stores"
@@ -3683,8 +3857,8 @@ def execute_stage6_ik_ee_control(
                 command = prepared_commands.get(key)
                 if command is None:
                     continue
-                _store_stage6_joint_command(command, target)
-                if command.mode == "joint_target" and _same_stage6_cartesian_target(
+                _store_hybrid_joint_command(command, target)
+                if command.mode == "joint_target" and _same_hybrid_cartesian_target(
                     command.target_pose, target
                 ):
                     _increment_ik_diagnostic(
@@ -3707,7 +3881,7 @@ def execute_stage6_ik_ee_control(
             # not a permanent ban after the world has improved.
             if minimum_solver_tier > 0:
                 for arm, target in normalized:
-                    _store_stage6_same_target_solver_tier(arm, target, 0)
+                    _store_hybrid_same_target_solver_tier(arm, target, 0)
                 _increment_ik_diagnostic(
                     diagnostics, "same_target_solver_tier_resets_after_progress"
                 )
@@ -3736,7 +3910,7 @@ def execute_stage6_ik_ee_control(
 
         _increment_ik_diagnostic(diagnostics, "cartesian_direct_goal_stalls")
         for arm, target in normalized:
-            if _invalidate_stage6_joint_command(arm, target):
+            if _invalidate_hybrid_joint_command(arm, target):
                 _increment_ik_diagnostic(
                     diagnostics, "same_target_joint_cache_invalidations"
                 )
@@ -3749,13 +3923,17 @@ def execute_stage6_ik_ee_control(
             ),
         )
         if raw_physics_budget_exhausted:
+            final_solver_tier_exhausted = bool(
+                not direct_progressed
+                and minimum_solver_tier == _HYBRID_SOLVER_TIER_COUNT - 1
+            )
             if (
                 not direct_progressed
-                and minimum_solver_tier < _STAGE6_SOLVER_TIER_COUNT - 1
+                and minimum_solver_tier < _HYBRID_SOLVER_TIER_COUNT - 1
             ):
                 minimum_solver_tier += 1
                 for arm, target in normalized:
-                    _store_stage6_same_target_solver_tier(
+                    _store_hybrid_same_target_solver_tier(
                         arm, target, minimum_solver_tier
                     )
                 _increment_ik_diagnostic(
@@ -3778,13 +3956,15 @@ def execute_stage6_ik_ee_control(
                 ),
                 raw_steps_used,
             )
+            if not made_any_progress and final_solver_tier_exhausted:
+                remember_final_exhaustion()
             return finish("progressed" if made_any_progress else "stopped")
         if made_any_progress:
             return finish("progressed")
-        if minimum_solver_tier < _STAGE6_SOLVER_TIER_COUNT - 1:
+        if minimum_solver_tier < _HYBRID_SOLVER_TIER_COUNT - 1:
             minimum_solver_tier += 1
             for arm, target in normalized:
-                _store_stage6_same_target_solver_tier(arm, target, minimum_solver_tier)
+                _store_hybrid_same_target_solver_tier(arm, target, minimum_solver_tier)
             _increment_ik_diagnostic(diagnostics, "physical_stall_solver_escalations")
             diagnostics["physical_stall_solver_tier_max"] = max(
                 int(diagnostics.get("physical_stall_solver_tier_max", 0)),
@@ -3794,6 +3974,7 @@ def execute_stage6_ik_ee_control(
         _increment_ik_diagnostic(
             diagnostics, "physical_stall_solver_escalation_exhaustions"
         )
+        remember_final_exhaustion()
         return finish("progressed" if made_any_progress else "stopped")
 
     _increment_ik_diagnostic(diagnostics, "cartesian_multi_pass_limit_exhaustions")
@@ -3805,6 +3986,11 @@ def execute_stage6_ik_ee_control(
         original_scores,
         final_scores,
     )
+    if (
+        not overall_progressed
+        and minimum_solver_tier == _HYBRID_SOLVER_TIER_COUNT - 1
+    ):
+        remember_final_exhaustion()
     return finish("progressed" if overall_progressed else "stopped")
 
 
@@ -6101,11 +6287,11 @@ class StagedMotionPlan:
             "validation": dict(self.validation),
         }
 
-    def fingerprint(self) -> str:
+    def identity_digest(self) -> str:
         return _canonical_json_fingerprint(self.metadata())
 
     def to_json(self) -> dict[str, Any]:
-        return {**self.metadata(), "fingerprint": self.fingerprint()}
+        return {**self.metadata(), "fingerprint": self.identity_digest()}
 
     @classmethod
     def from_json(cls, payload: dict[str, Any]) -> StagedMotionPlan:
@@ -6125,7 +6311,7 @@ class StagedMotionPlan:
             raise ValueError("staged motion plan protocol ID is invalid")
         if payload.get("schema") != STAGED_MOTION_PLAN_SCHEMA:
             raise ValueError("staged motion plan schema is invalid")
-        if payload.get("fingerprint") != plan.fingerprint():
+        if payload.get("fingerprint") != plan.identity_digest():
             raise ValueError("staged motion plan fingerprint is invalid")
         return plan
 
@@ -6364,11 +6550,11 @@ class StagedSourcePlan:
             "validation": self.validation,
         }
 
-    def fingerprint(self) -> str:
+    def identity_digest(self) -> str:
         return _canonical_json_fingerprint(self.metadata())
 
     def to_json(self) -> dict[str, Any]:
-        return {**self.metadata(), "fingerprint": self.fingerprint()}
+        return {**self.metadata(), "fingerprint": self.identity_digest()}
 
     @classmethod
     def from_json(cls, payload: dict[str, Any]) -> StagedSourcePlan:
@@ -6385,7 +6571,7 @@ class StagedSourcePlan:
         if (
             payload.get("schema") != STAGED_SOURCE_PLAN_SCHEMA
             or payload.get("protocol_id") != STAGED_SOURCE_PROTOCOL_ID
-            or payload.get("fingerprint") != plan.fingerprint()
+            or payload.get("fingerprint") != plan.identity_digest()
         ):
             raise ValueError("staged source payload authentication failed")
         return plan
@@ -6639,7 +6825,7 @@ def bind_staged_source_plan(
         "fresh_task_generation": fresh_task_generation,
         "task_validate_calls": 0,
         "source_reconstruction": audit,
-        "plan_fingerprint": plan.fingerprint(),
+        "plan_fingerprint": plan.identity_digest(),
     }
 
 
@@ -7504,7 +7690,7 @@ class ScenarioController:
                 dtype=np.float64,
             )
             self._instance_preservation = {
-                "motion_plan_fingerprint": self.motion_plan.fingerprint(),
+                "motion_plan_fingerprint": self.motion_plan.identity_digest(),
                 "validation_fingerprint": _canonical_json_fingerprint(
                     self.motion_plan.validation
                 ),
@@ -7547,7 +7733,7 @@ class ScenarioController:
                     "formal_intervention_task_get_state": False,
                     "formal_intervention_task_restore_state": False,
                     "result_based_candidate_selection": False,
-                    "stage6_smooth_background_extension": (
+                    "hybrid_smooth_background_extension": (
                         self.kind == "smooth_task_motion"
                     ),
                     "task_scoped_plan_evidence": dict(v4_lift),
@@ -7896,7 +8082,7 @@ class ScenarioController:
             ),
             "selected_source_fingerprint": selected_source_fingerprint,
             "formal_source_fingerprint": formal_source_fingerprint,
-            "motion_plan_fingerprint": self.motion_plan.fingerprint(),
+            "motion_plan_fingerprint": self.motion_plan.identity_digest(),
         }
 
     def _ensure_motion_plan(self, scene: Any) -> None:

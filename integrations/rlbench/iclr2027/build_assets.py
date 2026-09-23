@@ -1,4 +1,4 @@
-"""Build A1 DynaMAC and closed-loop task models from five demonstrations."""
+"""Build DynaMAC backbones and TSF task models from five demonstrations."""
 
 from __future__ import annotations
 
@@ -6,9 +6,7 @@ import argparse
 from pathlib import Path
 
 from integrations.rlbench.iclr2027.task_registry import TASKS, experiment_task
-from integrations.rlbench.rlbench_closed_loop.build_models import (
-    build_task as build_closed_loop,
-)
+from integrations.rlbench.rlbench_tsf.build_models import build_task as build_tsf
 from integrations.rlbench.rlbench_dynamac.core.paths import (
     INTEGRATION_ROOT,
     REPOSITORY_ROOT,
@@ -24,10 +22,12 @@ from integrations.rlbench.rlbench_dynamac.data.tapas_segmentation import (
 DATA_ROOT = INTEGRATION_ROOT / "data" / "iclr2027" / "demonstrations"
 MODEL_ROOT = INTEGRATION_ROOT / "models" / "iclr2027"
 DYNAMAC_ROOT = MODEL_ROOT / "dynamac"
-CLOSED_LOOP_ROOT = MODEL_ROOT / "closed_loop"
-PHASE6_DATA_ROOT = INTEGRATION_ROOT / "data" / "training" / "main"
-PHASE6_DYNAMAC_ROOT = INTEGRATION_ROOT / "models" / "phase6_v1"
-PHASE6_SEGMENTATION_CONFIG = INTEGRATION_ROOT / "configs" / "tapas_segmentation.json"
+TSF_MODEL_ROOT = MODEL_ROOT / "tsf"
+BIMANUAL_DATA_ROOT = INTEGRATION_ROOT / "data" / "training" / "main"
+DYNAMAC_BACKBONE_ROOT = INTEGRATION_ROOT / "models" / "dynamac_backbone_v1"
+BIMANUAL_SEGMENTATION_CONFIG = (
+    INTEGRATION_ROOT / "configs" / "tapas_segmentation.json"
+)
 SEGMENTATION_CONFIG = (
     INTEGRATION_ROOT / "configs" / "iclr2027" / "tapas_segmentation.json"
 )
@@ -39,7 +39,7 @@ UNCALIBRATED_BOUNDARY_CONFIG = (
 def build_dynamac(task_id: str) -> Path:
     task = experiment_task(task_id)
     if task.spec.bimanual:
-        raise ValueError(f"{task_id} is reused from the authenticated phase-six assets")
+        raise ValueError(f"{task_id} reuses the authenticated bimanual backbone")
     config = load_rlbench_segmentation_config(SEGMENTATION_CONFIG)
     train_task(
         task_id,
@@ -54,26 +54,26 @@ def build_dynamac(task_id: str) -> Path:
     return DYNAMAC_ROOT / task_id / "training.json"
 
 
-def build_closed(
+def build_tsf_task(
     task_id: str,
     *,
-    output_root: Path = CLOSED_LOOP_ROOT,
+    output_root: Path = TSF_MODEL_ROOT,
 ) -> Path:
     task = experiment_task(task_id)
     config = load_rlbench_segmentation_config(
-        PHASE6_SEGMENTATION_CONFIG if task.spec.bimanual else SEGMENTATION_CONFIG
+        BIMANUAL_SEGMENTATION_CONFIG if task.spec.bimanual else SEGMENTATION_CONFIG
     )
-    return build_closed_loop(
+    return build_tsf(
         task_id,
-        data_root=PHASE6_DATA_ROOT if task.spec.bimanual else DATA_ROOT,
-        base_models=PHASE6_DYNAMAC_ROOT if task.spec.bimanual else DYNAMAC_ROOT,
+        data_root=BIMANUAL_DATA_ROOT if task.spec.bimanual else DATA_ROOT,
+        base_models=DYNAMAC_BACKBONE_ROOT if task.spec.bimanual else DYNAMAC_ROOT,
         output_root=output_root,
         demonstration_count=5,
-        task_model_config=REPOSITORY_ROOT / "configs" / "closed_loop_task_model.json",
-        belief_config=REPOSITORY_ROOT / "configs" / "closed_loop_belief.json",
-        execution_config=REPOSITORY_ROOT / "configs" / "closed_loop_execution.json",
-        recovery_config=REPOSITORY_ROOT / "configs" / "closed_loop_recovery.json",
-        boundary_root=REPOSITORY_ROOT / "configs" / "closed_loop_boundary",
+        task_model_config=REPOSITORY_ROOT / "configs" / "tsf_task_model.json",
+        belief_config=REPOSITORY_ROOT / "configs" / "tsf_inference.json",
+        execution_config=REPOSITORY_ROOT / "configs" / "tsf_execution.json",
+        recovery_config=REPOSITORY_ROOT / "configs" / "tsf_recovery.json",
+        boundary_root=REPOSITORY_ROOT / "configs" / "tsf_boundaries",
         task_spec=task.spec,
         boundary_config=UNCALIBRATED_BOUNDARY_CONFIG,
         segmentation_config=config,
@@ -85,9 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", action="append", choices=available + ["all"])
     parser.add_argument(
-        "--component", choices=("dynamac", "closed_loop", "all"), default="all"
+        "--component", choices=("dynamac", "tsf", "all"), default="all"
     )
-    parser.add_argument("--closed-loop-output", type=Path, default=CLOSED_LOOP_ROOT)
+    parser.add_argument("--tsf-output", type=Path, default=TSF_MODEL_ROOT)
     return parser
 
 
@@ -100,14 +100,14 @@ def main(argv=None) -> int:
             if TASKS[task_id].spec.bimanual:
                 if args.component == "dynamac":
                     raise ValueError(
-                        f"{task_id} reuses its authenticated phase-six DynaMAC"
+                        f"{task_id} reuses its authenticated bimanual DynaMAC"
                     )
             else:
                 print(f"{task_id}: {build_dynamac(task_id)}", flush=True)
-        if args.component in {"closed_loop", "all"}:
+        if args.component in {"tsf", "all"}:
             print(
                 f"{task_id}: "
-                f"{build_closed(task_id, output_root=args.closed_loop_output)}",
+                f"{build_tsf_task(task_id, output_root=args.tsf_output)}",
                 flush=True,
             )
     return 0

@@ -1,0 +1,88 @@
+{
+  "schema": "essay2608.iclr2027.native6-b-return-contract.v3",
+  "status": "FROZEN_FOR_DEVELOPMENT_DELIVERY",
+  "purpose": "B-to-A return of isolated event-grounded E6 v3 adapters and raw results",
+  "separate_from_previous_deliveries": true,
+  "delivery_manifests": {
+    "rvt": {
+      "development": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_v3_rvt_development.json",
+      "formal": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_v3_rvt_formal.json"
+    },
+    "racer": {
+      "development": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_v3_racer_development.json",
+      "formal": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_v3_racer_formal.json"
+    }
+  },
+  "delivery_manifest_schema": "essay2608.iclr2027.b-to-a-e6-v3-native-delivery.v1",
+  "required_delivery_manifest_fields": [
+    "schema",
+    "delivery_id",
+    "created_utc",
+    "producer",
+    "phase",
+    "system_id",
+    "source_handoff_sha256",
+    "system_identity_path",
+    "system_identity_sha256",
+    "files"
+  ],
+  "required_file_fields": ["path", "bytes", "sha256"],
+  "system_roots": {
+    "rvt": "evaluations/iclr2027/native_systems/rvt/e6_v3/",
+    "racer": "evaluations/iclr2027/native_systems/racer/e6_v3/"
+  },
+  "result_roots": {
+    "rvt": "evaluations/iclr2027/results/native_v3/rvt/",
+    "racer": "evaluations/iclr2027/results/native_v3/racer/"
+  },
+  "required_development_files": [
+    "development/episodes.jsonl",
+    "development/gate.json",
+    "development/cycles/"
+  ],
+  "formal_files_required_only_after_A_acceptance": [
+    "formal/perturbed_episodes.jsonl",
+    "formal/cycles/",
+    "resource_usage.json"
+  ],
+  "development_rows_per_system": 180,
+  "formal_perturbed_rows_per_system": 600,
+  "nominal_results_returned_again": false,
+  "required_system_identity_fields": [
+    "system_id",
+    "official_repository_url",
+    "official_repository_commit",
+    "adapter_identity",
+    "checkpoint_identity",
+    "config_identity",
+    "environment_identity",
+    "fault_adapter_identity",
+    "fault_config_identity",
+    "audit_protocol_revision",
+    "manifest_identity",
+    "frozen_at_utc",
+    "formal_started_at_utc",
+    "identity_files"
+  ],
+  "adapter_diff_requirements": {
+    "base": "accepted E6 v2 native adapter",
+    "must_list_changed_files": true,
+    "must_explain_policy_input_changes": true,
+    "must_explain_action_execution_changes": true,
+    "must_include_nominal_behavior_differential_tests": true,
+    "server_A_decides_nominal_reuse": true
+  },
+  "forbidden_prefixes": [
+    "evaluations/iclr2027/results/native/rvt/",
+    "evaluations/iclr2027/results/native/racer/",
+    "evaluations/iclr2027/configs/shared/",
+    "evaluations/iclr2027/manifests/",
+    "evaluations/iclr2027/native6_v3/",
+    "evaluations/iclr2027/audit/",
+    "evaluations/iclr2027/interfaces/",
+    "integrations/rlbench/",
+    "iclr2027/"
+  ],
+  "overwrite_A_owned_paths_allowed": false,
+  "copy_entire_external_repository_allowed": false
+}

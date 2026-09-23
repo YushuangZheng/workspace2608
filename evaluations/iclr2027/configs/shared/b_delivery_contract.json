@@ -42,7 +42,7 @@
     "evaluations/iclr2027/results/native/racer/"
   ],
   "forbidden_prefixes": [
-    "source/policy/closed_loop/",
+    "source/policy/tsf/",
     "evaluations/iclr2027/interfaces/",
     "evaluations/iclr2027/configs/shared/",
     "evaluations/iclr2027/runners/",

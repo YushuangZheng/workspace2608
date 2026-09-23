@@ -1,0 +1,171 @@
+{
+  "schema": "essay2608.iclr2027.native6-b-return-contract.v1",
+  "status": "FROZEN_BEFORE_E6_DEVELOPMENT",
+  "purpose": "B-to-A delivery of E6 Native-6 RVT or RACER adapter metadata and raw evaluation results only",
+  "separate_from_previous_delivery": {
+    "previous_contract": "evaluations/iclr2027/configs/shared/b_delivery_contract.json",
+    "previous_delivery_ids": [
+      "B_TO_A_MAIN10_A4",
+      "B_TO_A_E3_M4"
+    ],
+    "mixing_previous_and_e6_files_in_one_delivery": false
+  },
+  "transfer_mode": "manifest_scoped_file_copy_preserving_repository_relative_paths",
+  "copy_entire_repository_allowed": false,
+  "git_commit_or_patch_transfer_allowed": false,
+  "repository_relative_paths": true,
+  "delivery_manifest_schema": "essay2608.iclr2027.b-to-a-e6-native-delivery.v1",
+  "validator": "evaluations/iclr2027/delivery/verify_e6_b_return.py",
+  "required_delivery_manifest_fields": [
+    "schema",
+    "delivery_id",
+    "created_utc",
+    "producer",
+    "base_commit",
+    "system_id",
+    "source_handoff_sha256",
+    "native6_contract_sha256",
+    "native6_manifest_index_sha256",
+    "system_identity_path",
+    "system_identity_sha256",
+    "files"
+  ],
+  "required_file_fields": [
+    "path",
+    "bytes",
+    "sha256"
+  ],
+  "systems": {
+    "rvt": {
+      "delivery_id": "B_TO_A_E6_RVT",
+      "delivery_manifest": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_rvt.json",
+      "code_root": "evaluations/iclr2027/native_systems/rvt/",
+      "result_root": "evaluations/iclr2027/results/native/rvt/",
+      "system_identity": "evaluations/iclr2027/native_systems/rvt/SYSTEM_IDENTITY.json",
+      "required_exact_paths": [
+        "evaluations/iclr2027/native_systems/rvt/SYSTEM_IDENTITY.json",
+        "evaluations/iclr2027/native_systems/rvt/REPRODUCTION.md",
+        "evaluations/iclr2027/results/native/rvt/development/episodes.jsonl",
+        "evaluations/iclr2027/results/native/rvt/development/gate.json",
+        "evaluations/iclr2027/results/native/rvt/formal/nominal_episodes.jsonl",
+        "evaluations/iclr2027/results/native/rvt/formal/perturbed_episodes.jsonl",
+        "evaluations/iclr2027/results/native/rvt/resource_usage.json"
+      ]
+    },
+    "racer": {
+      "delivery_id": "B_TO_A_E6_RACER",
+      "delivery_manifest": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_racer.json",
+      "code_root": "evaluations/iclr2027/native_systems/racer/",
+      "result_root": "evaluations/iclr2027/results/native/racer/",
+      "system_identity": "evaluations/iclr2027/native_systems/racer/SYSTEM_IDENTITY.json",
+      "required_exact_paths": [
+        "evaluations/iclr2027/native_systems/racer/SYSTEM_IDENTITY.json",
+        "evaluations/iclr2027/native_systems/racer/REPRODUCTION.md",
+        "evaluations/iclr2027/results/native/racer/development/episodes.jsonl",
+        "evaluations/iclr2027/results/native/racer/development/gate.json",
+        "evaluations/iclr2027/results/native/racer/formal/nominal_episodes.jsonl",
+        "evaluations/iclr2027/results/native/racer/formal/perturbed_episodes.jsonl",
+        "evaluations/iclr2027/results/native/racer/resource_usage.json"
+      ]
+    }
+  },
+  "allowed_code_subpaths": [
+    "SYSTEM_IDENTITY.json",
+    "REPRODUCTION.md",
+    "adapter/",
+    "config/",
+    "environment/",
+    "tests/"
+  ],
+  "allowed_result_subpaths": [
+    "development/episodes.jsonl",
+    "development/gate.json",
+    "development/cycles/",
+    "formal/nominal_episodes.jsonl",
+    "formal/perturbed_episodes.jsonl",
+    "formal/cycles/",
+    "resource_usage.json",
+    "qualitative/"
+  ],
+  "required_system_identity_fields": [
+    "schema",
+    "system_id",
+    "official_repository_url",
+    "official_repository_commit",
+    "adapter_identity",
+    "checkpoint_identity",
+    "config_identity",
+    "environment_identity",
+    "task_mapping_identity",
+    "fault_adapter_identity",
+    "frozen_at_utc",
+    "formal_started_at_utc",
+    "services",
+    "identity_files"
+  ],
+  "identity_file_rule": "Every adapter, config, environment export, compatibility patch, and method-scoped test used for E6 must be listed in SYSTEM_IDENTITY.json with repository-relative path, bytes, and SHA256, and must also appear in the delivery manifest.",
+  "external_repository_rule": "Do not vendor the complete official RVT or RACER repository. Record its URL and immutable commit in SYSTEM_IDENTITY.json and return only project-side adapters, compatibility patches, configs, environment exports, tests, and reproduction notes.",
+  "checkpoint_rule": "The checkpoint binary need not be copied to A when it belongs to the independently executed native system, but its immutable source, SHA256 identity, precision or quantization, and loading configuration must be recorded in SYSTEM_IDENTITY.json.",
+  "result_identity_binding": {
+    "required_equal_for_every_episode": [
+      "method_id",
+      "config_identity",
+      "checkpoint_identity",
+      "environment_identity"
+    ],
+    "development_and_formal_must_share_identity": true,
+    "identity_change_after_first_formal_episode_allowed": false
+  },
+  "development_result_requirements": {
+    "manifest": "evaluations/iclr2027/manifests/native6_development.jsonl",
+    "episode_file": "development/episodes.jsonl",
+    "total_rows": 120,
+    "nominal_rows_per_task": 10,
+    "perturbed_rows_per_task": 10,
+    "all_six_tasks_must_pass_gate_before_formal": true,
+    "paper_result": false
+  },
+  "formal_result_requirements": {
+    "nominal_manifest": "evaluations/iclr2027/manifests/native6_nominal.jsonl",
+    "perturbed_manifest": "evaluations/iclr2027/manifests/native6_perturbed.jsonl",
+    "nominal_episode_file": "formal/nominal_episodes.jsonl",
+    "perturbed_episode_file": "formal/perturbed_episodes.jsonl",
+    "nominal_rows": 600,
+    "perturbed_rows": 600,
+    "rows_per_system": 1200,
+    "duplicate_episode_ids_allowed": false,
+    "missing_assigned_episode_allowed": false,
+    "rerun_selection_by_outcome_allowed": false
+  },
+  "raw_result_rule": "Every episode row must satisfy native6_result_schema.json and exactly match its assigned Native-6 manifest row. Every referenced cycle_file must remain under the same system result root, appear in the delivery manifest, and match cycle_file_sha256.",
+  "source_binding_files": [
+    "evaluations/iclr2027/results/e6_handoff/A_TO_B_E6_HANDOFF.json",
+    "evaluations/iclr2027/configs/shared/native6_contract.json",
+    "evaluations/iclr2027/manifests/NATIVE6_MANIFEST_INDEX.json"
+  ],
+  "forbidden_prefixes": [
+    "source/policy/tsf/",
+    "evaluations/iclr2027/interfaces/",
+    "evaluations/iclr2027/configs/shared/",
+    "evaluations/iclr2027/manifests/",
+    "evaluations/iclr2027/audit/",
+    "evaluations/iclr2027/delivery/",
+    "evaluations/iclr2027/recovery/",
+    "evaluations/iclr2027/runners/",
+    "evaluations/iclr2027/analysis/",
+    "evaluations/iclr2027/results/controlled/",
+    "integrations/rlbench/",
+    "iclr2027/"
+  ],
+  "forbidden_path_tokens": [
+    "normal_calibration",
+    "sealed_test",
+    "main10_nominal",
+    "main10_perturbed",
+    "failure_train",
+    "m3_fail_detect",
+    "m4_failure_supervised"
+  ],
+  "cross_system_delivery_allowed": false,
+  "overwrite_a_owned_paths_allowed": false
+}

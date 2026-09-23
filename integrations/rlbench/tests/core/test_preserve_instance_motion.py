@@ -1291,7 +1291,7 @@ def test_staged_motion_plan_batch_is_scenario_independent_and_authenticated() ->
 
     assert payload["scenario_independent"] is True
     assert "scenario" not in payload
-    assert restored[0].fingerprint() == plan.fingerprint()
+    assert restored[0].identity_digest() == plan.identity_digest()
     assert restored[0].validation["formal_rollout_sample_or_restore"] is False
 
     legacy = copy.deepcopy(payload)

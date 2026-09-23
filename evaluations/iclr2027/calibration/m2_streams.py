@@ -76,7 +76,7 @@ def _cached_policies(task_id: str) -> tuple[dict[str, DynaMAC], dict[str, str]]:
         root = SINGLE_MODELS / task.task_id
         policies = {"single": DynaMAC.load(root / "model.npz")}
     return policies, {
-        arm: policy.fingerprint() for arm, policy in policies.items()
+        arm: policy.identity_digest() for arm, policy in policies.items()
     }
 
 
@@ -157,7 +157,7 @@ def reconstruct_stream_marginals(
     if not cycles:
         raise ValueError("cannot reconstruct an empty episode")
     task = experiment_task(task_id)
-    policies, fingerprints = _cached_policies(task_id)
+    policies, model_digests = _cached_policies(task_id)
     last_skill: dict[str, int] = {}
     rebuilt: list[dict[str, Any]] = []
     reconstructed_arm_cycles = 0
@@ -258,7 +258,7 @@ def reconstruct_stream_marginals(
         "cycles": len(cycles),
         "reconstructed_arm_cycles": reconstructed_arm_cycles,
         "maximum_poe_weight_absolute_error": maximum_weight_error,
-        "model_fingerprints": fingerprints,
+        "model_digests": model_digests,
         "recorded_active_masks_verified": True,
         "recorded_poe_weights_verified": True,
         "source_cycle_rows_modified": False,

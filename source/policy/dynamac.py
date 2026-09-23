@@ -1377,6 +1377,18 @@ class DynaMACConfig:
     default_mode_strategy: Literal["map", "sample"] = "sample"
     random_seed: int = 2608
 
+    @property
+    def relation_position_weight(self) -> float:
+        """Position weight exposed to downstream relation models."""
+
+        return self.eq5_position_weight
+
+    @property
+    def relation_rotation_weight(self) -> float:
+        """Rotation weight exposed to downstream relation models."""
+
+        return self.eq5_rotation_weight
+
     def __post_init__(self) -> None:
         floating_names = (
             "tau_m",
@@ -3701,7 +3713,12 @@ class DynaMAC:
             raise RuntimeError("DynaMAC 尚未 reset，不能重启技能引用")
         self._time_index = 0
         self._complete = False
-        self._pending_virtual_capture = False
+        # If the previous command has just crossed a skill boundary, the
+        # current skill's entry frame is intentionally captured from the next
+        # observation.  Skill-Retry may be requested in exactly that interval;
+        # preserve the pending capture so the reset entry action has the same
+        # frame context as ordinary execution.  An already captured frame is
+        # left untouched because the flag is then already false.
         self._active_mode = self._mode_path[self._skill_index]
         return self._skill_index, self._time_index
 
@@ -4192,7 +4209,7 @@ class DynaMAC:
             raise ValueError("DynaMAC checkpoint 没有技能")
         return demonstration_count
 
-    def fingerprint(self) -> str:
+    def identity_digest(self) -> str:
         payload = json.dumps(self.summary(), sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(payload.encode("utf-8"))
         for skill in self.skills:
@@ -4220,7 +4237,7 @@ class DynaMAC:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         metadata = self.summary()
-        metadata["fingerprint"] = self.fingerprint()
+        metadata["identity_digest"] = self.identity_digest()
         arrays: dict[str, Array] = {}
         for index, skill in enumerate(self.skills):
             arrays[f"skill_{index}__mode_priors"] = skill.mode_priors
@@ -4267,7 +4284,7 @@ class DynaMAC:
             if schema in {4, 5}:
                 raise ValueError(
                     f"DynaMAC schema {schema} 早于当前 preliminary-analysis/product-"
-                    "clustering 配置语义，无法验证 fingerprint；"
+                    "clustering 配置语义，无法验证内容摘要；"
                     f"请从演示重新拟合为 schema {MODEL_SCHEMA_VERSION}"
                 )
             if schema == 6:
@@ -4371,8 +4388,9 @@ class DynaMAC:
             "demonstration_count"
         ):
             raise ValueError("DynaMAC checkpoint 的演示数量与模式成员不一致")
-        if policy.fingerprint() != metadata.get("fingerprint"):
-            raise ValueError("DynaMAC checkpoint 指纹不一致")
+        stored_digest = metadata.get("identity_digest", metadata.get("fingerprint"))
+        if policy.identity_digest() != stored_digest:
+            raise ValueError("DynaMAC checkpoint 内容摘要不一致")
         return policy
 
 

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from essay2608.policy.closed_loop import ClosedLoopFeatureProfile
+from essay2608.policy.tsf import TSFFeatureProfile
 from evaluations.iclr2027.interfaces.runtime_monitor import EpisodeContext
 from evaluations.iclr2027.methods.ours_monitor import OursTaskStateMonitor
 from evaluations.iclr2027.methods.registry import build_monitor, load_method_spec
@@ -14,8 +14,8 @@ from evaluations.iclr2027.methods.restart import NoProgressMonitor
 from evaluations.iclr2027.methods.trajectory_likelihood import (
     TrajectoryLikelihoodMonitor,
 )
-from integrations.rlbench.rlbench_closed_loop.policy_server import (
-    ClosedLoopPolicyServer,
+from integrations.rlbench.rlbench_tsf.policy_server import (
+    TSFPolicyServer,
 )
 from integrations.rlbench.rlbench_dynamac.data.direct_policy import PolicyServer
 
@@ -29,6 +29,7 @@ METHODS = (
     "ablation_motion_only",
     "ablation_open_loop_progress",
     "ablation_generic_retry",
+    "ablation_simple_state_controller",
 )
 
 
@@ -140,27 +141,63 @@ def test_uncalibrated_trajectory_monitor_never_intervenes() -> None:
 def test_m6_reads_exact_closed_loop_alarm_without_a_second_detector() -> None:
     monitor = OursTaskStateMonitor()
     monitor.reset(_context("m6"))
-    monitor.observe({}, {}, {"monitor": {"alarm": True, "reasons": ["x"]}})
+    monitor.observe(
+        {},
+        {},
+        {
+            "monitor": {
+                "alarm": True,
+                "reasons": ["x"],
+                "continuous_score": 1.4,
+            }
+        },
+    )
     assert monitor.alarm()
-    assert monitor.score() == {"task_state_mismatch": 1.0, "trigger_reasons": 1.0}
+    assert monitor.score() == {"task_state_mismatch": 1.4, "trigger_reasons": 1.0}
+    assert monitor.threshold == 1.0
+
+
+def test_m6_monitor_keeps_backward_compatible_binary_score() -> None:
+    monitor = OursTaskStateMonitor()
+    monitor.reset(_context("m6"))
+    monitor.observe({}, {}, {"monitor": {"alarm": True, "reasons": ["x"]}})
+    assert monitor.score()["task_state_mismatch"] == 1.0
 
 
 def test_core_ablation_profiles_switch_only_prespecified_authority() -> None:
-    full = ClosedLoopFeatureProfile.named("full")
-    motion = ClosedLoopFeatureProfile.named("motion_only")
-    clock = ClosedLoopFeatureProfile.named("open_loop_progress")
-    retry = ClosedLoopFeatureProfile.named("generic_retry")
+    full = TSFFeatureProfile.named("full")
+    motion = TSFFeatureProfile.named("motion_only")
+    clock = TSFFeatureProfile.named("open_loop_progress")
+    retry = TSFFeatureProfile.named("generic_retry")
+    simple = TSFFeatureProfile.named("simple_state_controller")
     assert full.complete_state_progress_evidence
     assert not motion.complete_state_progress_evidence
     assert not motion.dynamic_frame_roles
     assert not motion.relation_scene_boundary_guards
     assert not clock.belief_driven_progress
     assert not clock.boundary_gated_advancement
-    assert clock.auxiliary_verification_recovery
+    assert clock.active_relation_verification
+    assert clock.state_aware_recovery_reentry
     assert retry.complete_state_progress_evidence
     assert retry.belief_driven_progress
     assert retry.boundary_gated_advancement
-    assert not retry.auxiliary_verification_recovery
+    assert retry.active_relation_verification
+    assert not retry.state_aware_recovery_reentry
+    assert simple.state_inference == "nearest_demo_guard"
+    for field in (
+        "dynamic_frame_roles",
+        "relation_scene_boundary_guards",
+        "active_relation_verification",
+        "state_aware_recovery_reentry",
+        "complete_state_progress_evidence",
+        "belief_driven_progress",
+        "boundary_gated_advancement",
+        "relation_progress_evidence",
+        "scene_progress_evidence",
+        "legal_reentry_selection",
+        "control_equivalence_aggregation",
+    ):
+        assert getattr(simple, field) == getattr(full, field)
 
 
 def test_both_policy_servers_expose_dormant_generic_retry_endpoint() -> None:
@@ -175,7 +212,7 @@ def test_both_policy_servers_expose_dormant_generic_retry_endpoint() -> None:
         "single": {"skill": 2, "progress": 0}
     }
 
-    closed = object.__new__(ClosedLoopPolicyServer)
+    closed = object.__new__(TSFPolicyServer)
     closed._pending = None
     closed.policy = SimpleNamespace(
         restart_current_skill_reference=lambda: {
@@ -211,5 +248,5 @@ def test_horizon3_has_all_levels_manifests_and_both_model_families() -> None:
         ).is_file()
         assert (
             ROOT / "integrations" / "rlbench" / "models" / "iclr2027"
-            / "closed_loop" / task / "policy.json"
+            / "tsf" / task / "policy.json"
         ).is_file()

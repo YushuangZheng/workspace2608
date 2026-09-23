@@ -1,6 +1,0 @@
-task,transaction_group,demonstration,expected_members,received_members,first_joint_hold_permit_cycle,all_members_final_permitted,accepted
-bimanual_lift_tray,joint:left-k1-to-2:right-k1-to-2:item-tray,0,left:1->2|right:1->2,left:1->2|right:1->2,1,1,1
-bimanual_lift_tray,joint:left-k1-to-2:right-k1-to-2:item-tray,1,left:1->2|right:1->2,left:1->2|right:1->2,1,1,1
-bimanual_lift_tray,joint:left-k1-to-2:right-k1-to-2:item-tray,2,left:1->2|right:1->2,left:1->2|right:1->2,1,1,1
-bimanual_lift_tray,joint:left-k1-to-2:right-k1-to-2:item-tray,3,left:1->2|right:1->2,left:1->2|right:1->2,1,1,1
-bimanual_lift_tray,joint:left-k1-to-2:right-k1-to-2:item-tray,4,left:1->2|right:1->2,left:1->2|right:1->2,1,1,1

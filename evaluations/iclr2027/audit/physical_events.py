@@ -46,6 +46,9 @@ class PhysicalEventAuditor:
         self.relation_restored_cycle = None
         self.legal_reentry_cycle = None
         self._stable_relation_cycles = 0
+        self._stable_relation_signature = None
+        self._active_relation_signature = None
+        self._restored_contact_cycles = 0
         self._composed_motion_eligible = False
         self._composed_relation_eligible = False
         self._pre = None
@@ -67,6 +70,15 @@ class PhysicalEventAuditor:
         robot = self._robot()
         return getattr(robot, arm + "_gripper") if self.task.spec.bimanual else robot.gripper
 
+    def _gripper_is_open(self, arm: str) -> bool:
+        getter = getattr(self._gripper(arm), "get_open_amount", None)
+        if not callable(getter):
+            raise RuntimeError("physical relation audit requires gripper opening observation")
+        values = np.asarray(getter(), dtype=np.float64).reshape(-1)
+        if values.size == 0 or not np.all(np.isfinite(values)):
+            raise RuntimeError("physical relation audit requires finite gripper opening")
+        return bool(np.all(values > 0.9))
+
     def _arm_pose(self, observation: Any, arm: str) -> np.ndarray:
         value = getattr(observation, arm).gripper_pose if self.task.spec.bimanual else observation.gripper_pose
         return np.asarray(value, dtype=np.float64)
@@ -81,14 +93,19 @@ class PhysicalEventAuditor:
         for arm in self._arms():
             gripper = self._gripper(arm)
             grasped = sorted(str(obj.get_name()) for obj in gripper.get_grasped_objects())
+            source = "attachment" if grasped else None
+            if not grasped and not self._gripper_is_open(arm):
+                grasped = list(self._detected_interaction_names(arm))
+                source = "maintained_contact" if grasped else None
             result[arm] = {
                 "state": "linked" if grasped else "external",
                 "objects": grasped,
+                "source": source,
             }
         return result
 
-    def _interaction_detected(self, arm: str) -> bool:
-        """Independently test the physical target predicate for a close.
+    def _detected_interaction_names(self, arm: str) -> tuple[str, ...]:
+        """Independently return task objects physically detected by a gripper.
 
         A close-valued command in free space is not an eligible missed
         interaction.  Eligibility requires the selected gripper's proximity
@@ -101,7 +118,6 @@ class PhysicalEventAuditor:
             graspables = getattr(live_task, "get_graspable_objects", None)
             if callable(graspables):
                 candidates.extend(graspables())
-            dynamic_candidates = []
             get_base = getattr(live_task, "get_base", None)
             if callable(get_base):
                 get_tree = getattr(get_base(), "get_objects_in_tree", None)
@@ -115,33 +131,7 @@ class PhysicalEventAuditor:
                             and bool(dynamic())
                             and bool(respondable())
                         ):
-                            dynamic_candidates.append(obj)
-            # Contact-style task targets (for example tray handles) are not
-            # always registered as graspables.  Select the dynamic task-tree
-            # shapes nearest the frozen semantic entity poses rather than
-            # querying every decorative sub-shape on every close cycle.
-            semantic_poses = self.task.spec.extract_pose_chunks(
-                _task_state(self.environment.get_observation()),
-                convention="rlbench_xyzw",
-            )
-            positioned = []
-            for obj in dynamic_candidates:
-                getter = getattr(obj, "get_position", None)
-                if not callable(getter):
-                    continue
-                position = np.asarray(getter(), dtype=np.float64)
-                if position.shape == (3,) and np.all(np.isfinite(position)):
-                    positioned.append((obj, position))
-            for pose in semantic_poses.values():
-                if positioned:
-                    candidates.append(
-                        min(
-                            positioned,
-                            key=lambda item: float(
-                                np.linalg.norm(item[1] - np.asarray(pose)[:3])
-                            ),
-                        )[0]
-                    )
+                            candidates.append(obj)
             unique = []
             seen = set()
             for obj in candidates:
@@ -152,11 +142,15 @@ class PhysicalEventAuditor:
         sensor = getattr(self._gripper(arm), "_proximity_sensor", None)
         detects = getattr(sensor, "is_detected", None)
         if not callable(detects):
-            return False
+            return ()
+        detected = []
         for obj in self._interaction_candidates:
             if bool(detects(obj)):
-                return True
-        return False
+                detected.append(str(obj.get_name()))
+        return tuple(sorted(set(detected)))
+
+    def _interaction_detected(self, arm: str) -> bool:
+        return bool(self._detected_interaction_names(arm))
 
     def snapshot(self, observation: Any) -> dict:
         success, terminate = self.environment._scene.task.success()
@@ -174,14 +168,26 @@ class PhysicalEventAuditor:
         selected = self._arms() if self.target_arm == "all" else (self.target_arm,)
         motion = []
         closes = []
-        linked = []
         interactions = []
+        relation_signatures = []
         for arm in selected:
             target, gripper = self._arm_action(command, arm)
             motion.append(float(np.linalg.norm(target[:3] - self._pre["ee"][arm][:3])))
             close = bool(gripper <= 0.5)
             closes.append(close)
-            linked.append(self._pre["relations"][arm]["state"] == "linked")
+            relation = self._pre["relations"][arm]
+            if self.family in {"relation_loss", "composed_event"}:
+                if relation["state"] == "linked" and relation["objects"]:
+                    relation_signatures.append(
+                        (str(relation.get("source") or "attachment"), tuple(relation["objects"]))
+                    )
+                elif close:
+                    names = self._detected_interaction_names(arm)
+                    relation_signatures.append(
+                        ("maintained_contact", names) if names else None
+                    )
+                else:
+                    relation_signatures.append(None)
             if self.family == "missed_interaction":
                 if close and not self._previous_close[arm]:
                     self._close_interval_counted[arm] = False
@@ -200,6 +206,29 @@ class PhysicalEventAuditor:
                         self._close_interval_counted[arm] = True
                 interactions.append(detected)
                 self._previous_close[arm] = close
+
+        # Relation-loss eligibility is a history predicate: the interaction
+        # must have been stable for several consecutive physical cycles before
+        # it may be broken.  The preregistered earliest cycle is only a floor
+        # on *triggering* the intervention, not a reason to discard the
+        # preceding physical relation history.  The injector follows exactly
+        # this causal order, so the independent auditor must accumulate the
+        # same pre-floor history while still refusing to declare eligibility
+        # before the floor itself.
+        if self.family in {"relation_loss", "composed_event"}:
+            signature = relation_signatures[0] if len(relation_signatures) == 1 else tuple(relation_signatures)
+            if signature is None or (
+                isinstance(signature, tuple)
+                and signature
+                and all(value is None for value in signature)
+            ):
+                self._stable_relation_signature = None
+                self._stable_relation_cycles = 0
+            elif signature == self._stable_relation_signature:
+                self._stable_relation_cycles += 1
+            else:
+                self._stable_relation_signature = signature
+                self._stable_relation_cycles = 1
         if cycle < self.earliest_cycle:
             return
         if self.family in {"actuation_delay", "environment_change"}:
@@ -214,7 +243,6 @@ class PhysicalEventAuditor:
                 for close, detected in zip(closes, interactions)
             )
         elif self.family == "relation_loss":
-            self._stable_relation_cycles = self._stable_relation_cycles + 1 if any(linked) else 0
             self.eligible = self.eligible or self._stable_relation_cycles >= 3
         elif self.family == "composed_event":
             # The frozen composed protocol is an early actuation delay followed
@@ -229,7 +257,6 @@ class PhysicalEventAuditor:
             self._composed_motion_eligible = self._composed_motion_eligible or any(
                 value >= self.motion_threshold for value in all_motion
             )
-            self._stable_relation_cycles = self._stable_relation_cycles + 1 if any(linked) else 0
             self._composed_relation_eligible = (
                 self._composed_relation_eligible or self._stable_relation_cycles >= 3
             )
@@ -258,10 +285,40 @@ class PhysicalEventAuditor:
                     movement <= self.effect_tolerance for movement in movements
                 )
             elif self.family in {"missed_interaction", "relation_loss"}:
-                physical_effect = effect_claimed and any(
-                    current["relations"][arm]["state"] == "external"
-                    for arm in selected
-                )
+                if self.family == "relation_loss":
+                    signature = self._stable_relation_signature
+                    if (
+                        isinstance(signature, tuple)
+                        and len(signature) == 2
+                        and signature[0] == "attachment"
+                    ):
+                        target_names = set(signature[1])
+                        relation_broken = any(
+                            current["relations"][arm].get("source") != "attachment"
+                            or target_names.isdisjoint(
+                                current["relations"][arm].get("objects", ())
+                            )
+                            for arm in selected
+                        )
+                    elif (
+                        isinstance(signature, tuple)
+                        and len(signature) == 2
+                        and signature[0] == "maintained_contact"
+                    ):
+                        relation_broken = any(
+                            self._gripper_is_open(arm) for arm in selected
+                        )
+                    else:
+                        relation_broken = any(
+                            current["relations"][arm]["state"] == "external"
+                            for arm in selected
+                        )
+                    physical_effect = effect_claimed and relation_broken
+                else:
+                    physical_effect = effect_claimed and any(
+                        current["relations"][arm].get("source") != "attachment"
+                        for arm in selected
+                    )
             elif self.family == "environment_change":
                 physical_effect = effect_claimed and float(
                     np.linalg.norm(current["task_state"] - self._pre["task_state"])
@@ -272,6 +329,8 @@ class PhysicalEventAuditor:
             self.physically_triggered = True
             if self.violation_onset_cycle is None:
                 self.violation_onset_cycle = cycle
+                if self.family in {"relation_loss", "composed_event"}:
+                    self._active_relation_signature = self._stable_relation_signature
                 if injector:
                     self._target_objects = list(injector.get("target_objects", ()))
         if self.violation_onset_cycle is not None and self.violation_end_cycle is None:
@@ -283,10 +342,52 @@ class PhysicalEventAuditor:
                 if ended:
                     self.violation_end_cycle = cycle
             elif self.family in {"missed_interaction", "relation_loss"}:
-                if any(
-                    current["relations"][arm]["state"] == "linked"
-                    for arm in selected
+                signature = self._active_relation_signature
+                if self.family == "missed_interaction":
+                    restored = any(
+                        current["relations"][arm].get("source") == "attachment"
+                        for arm in selected
+                    )
+                elif (
+                    self.family == "relation_loss"
+                    and isinstance(signature, tuple)
+                    and len(signature) == 2
+                    and signature[0] == "attachment"
                 ):
+                    expected_names = set(signature[1])
+                    restored = any(
+                        current["relations"][arm].get("source") == "attachment"
+                        and not expected_names.isdisjoint(
+                            current["relations"][arm].get("objects", ())
+                        )
+                        for arm in selected
+                    )
+                elif (
+                    self.family == "relation_loss"
+                    and isinstance(signature, tuple)
+                    and len(signature) == 2
+                    and signature[0] == "maintained_contact"
+                ):
+                    expected_names = set(signature[1])
+                    contact_restored = any(
+                        not self._gripper_is_open(arm)
+                        and expected_names.issubset(
+                            set(self._detected_interaction_names(arm))
+                        )
+                        for arm in selected
+                    )
+                    self._restored_contact_cycles = (
+                        self._restored_contact_cycles + 1
+                        if contact_restored
+                        else 0
+                    )
+                    restored = self._restored_contact_cycles >= 3
+                else:
+                    restored = any(
+                        current["relations"][arm]["state"] == "linked"
+                        for arm in selected
+                    )
+                if restored:
                     self.violation_end_cycle = cycle
                     self.relation_restored_cycle = cycle
         self._last = current

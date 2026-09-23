@@ -1,6 +1,6 @@
 {
   "schema": "essay2608.iclr2027.task-registry.v1",
-  "status": "DEVELOPMENT_ONLY_UNTIL_A1_FREEZE",
+  "status": "FROZEN_AFTER_A1_ACCEPTANCE",
   "main10_place_cups_level": 3,
   "task_sets": {
     "main10": ["close_jar", "open_drawer", "insert_onto_square_peg", "place_cups_3", "stack_cups", "sweep_to_dustpan", "bimanual_handover_item", "bimanual_lift_tray", "bimanual_sweep_to_dustpan", "bimanual_put_bottle_in_fridge"],
@@ -19,7 +19,7 @@
       "base_task": "open_drawer", "task_level": null, "fixed_base_variation": null,
       "task_sets": ["main10", "stress4", "native6"], "success_source": "rlbench_task.success", "demonstration_source": "new_iclr2027_a1",
       "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change"],
-      "semantic_entities": {"drawer": "variation-selected articulated drawer"}
+      "semantic_entities": {"drawer_panel": "variation-selected moving drawer panel", "drawer_support": "variation-selected fixed articulation support"}
     },
     "insert_onto_square_peg": {
       "base_task": "insert_onto_square_peg", "task_level": null, "fixed_base_variation": null,
@@ -59,25 +59,25 @@
     },
     "bimanual_handover_item": {
       "base_task": "bimanual_handover_item", "task_level": null, "fixed_base_variation": null,
-      "task_sets": ["main10", "stress4"], "success_source": "rlbench_task.success", "demonstration_source": "phase6_exact_reuse",
+      "task_sets": ["main10", "stress4"], "success_source": "rlbench_task.success", "demonstration_source": "authenticated_bimanual_reuse",
       "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "coordination_delay"],
       "semantic_entities": {"item0": "variation-zero target item", "item1": "candidate item", "item2": "candidate item", "item3": "candidate item", "item4": "candidate item"}
     },
     "bimanual_lift_tray": {
       "base_task": "bimanual_lift_tray", "task_level": null, "fixed_base_variation": null,
-      "task_sets": ["main10", "stress4"], "success_source": "rlbench_task.success", "demonstration_source": "phase6_exact_reuse",
+      "task_sets": ["main10", "stress4"], "success_source": "rlbench_task.success", "demonstration_source": "authenticated_bimanual_reuse",
       "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "coordination_delay"],
       "semantic_entities": {"item": "task payload item", "tray": "cooperatively operated tray"}
     },
     "bimanual_sweep_to_dustpan": {
       "base_task": "bimanual_sweep_to_dustpan", "task_level": null, "fixed_base_variation": null,
-      "task_sets": ["main10"], "success_source": "rlbench_task.success", "demonstration_source": "phase6_exact_reuse",
+      "task_sets": ["main10"], "success_source": "rlbench_task.success", "demonstration_source": "authenticated_bimanual_reuse",
       "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "coordination_delay"],
       "semantic_entities": {"broom": "left-arm operated broom", "dustpan": "right-arm operated dustpan"}
     },
     "bimanual_put_bottle_in_fridge": {
       "base_task": "bimanual_put_bottle_in_fridge", "task_level": null, "fixed_base_variation": null,
-      "task_sets": ["main10"], "success_source": "rlbench_task.success", "demonstration_source": "phase6_exact_reuse",
+      "task_sets": ["main10"], "success_source": "rlbench_task.success", "demonstration_source": "authenticated_bimanual_reuse",
       "compatible_faults": ["actuation_delay", "missed_interaction", "relation_loss", "environment_change", "coordination_delay"],
       "semantic_entities": {"bottle": "operated bottle", "fridge": "articulated refrigerator reference"}
     },

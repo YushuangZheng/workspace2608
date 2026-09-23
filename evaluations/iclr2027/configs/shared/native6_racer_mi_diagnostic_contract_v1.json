@@ -1,0 +1,107 @@
+{
+  "schema": "essay2608.iclr2027.native6-racer-mi-diagnostic-contract.v1",
+  "status": "FROZEN_FOR_DIAGNOSTIC_ONLY_REPLAY",
+  "purpose": "distinguish a RACER eligibility false negative from absence of a physically valid interaction opportunity",
+  "source_A_review": "evaluations/iclr2027/results/e6_handoff/A_REVIEW_E6_V3_DEVELOPMENT_AMENDMENT_3.json",
+  "source_development_manifest": "evaluations/iclr2027/manifests/native6_v3_development.jsonl",
+  "source_development_manifest_sha256": "7c4cbd8e8b579fd3a616a20eee63c06553a3c1da0e77823ca42f48bb5b7fac45",
+  "source_racer_delivery": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_v3_racer_development.json",
+  "source_racer_delivery_sha256": "9a5ad1954a7659ee15d787df486a33824923d28cab04b5c7418cb33ebbecaae2",
+  "source_racer_results": "evaluations/iclr2027/results/native_v3/racer/development/episodes.jsonl",
+  "source_racer_results_sha256": "742b86a51037e4387bd958e37547d2fc426b2337679b410fce920eb21b8d896a",
+  "source_racer_gate": "evaluations/iclr2027/results/native_v3/racer/development/gate.json",
+  "source_racer_gate_sha256": "766314738bf7f36d7525b6712f3e09e54b370457ab2fc246192049fdf706942c",
+  "scope": {
+    "system_id": "racer",
+    "task": "place_cups_3",
+    "variation": 0,
+    "fault_family": "missed_interaction",
+    "episodes": 10,
+    "episode_ids": [
+      "native6_v3_development/place_cups_3/missed_interaction/0000",
+      "native6_v3_development/place_cups_3/missed_interaction/0001",
+      "native6_v3_development/place_cups_3/missed_interaction/0002",
+      "native6_v3_development/place_cups_3/missed_interaction/0003",
+      "native6_v3_development/place_cups_3/missed_interaction/0004",
+      "native6_v3_development/place_cups_3/missed_interaction/0005",
+      "native6_v3_development/place_cups_3/missed_interaction/0006",
+      "native6_v3_development/place_cups_3/missed_interaction/0007",
+      "native6_v3_development/place_cups_3/missed_interaction/0008",
+      "native6_v3_development/place_cups_3/missed_interaction/0009"
+    ],
+    "seeds": [
+      2880310000,
+      2880310001,
+      2880310002,
+      2880310003,
+      2880310004,
+      2880310005,
+      2880310006,
+      2880310007,
+      2880310008,
+      2880310009
+    ]
+  },
+  "execution": {
+    "mode": "active_amendment_2_protocol_with_observation_only_extra_instrumentation",
+    "attempts_per_episode": 1,
+    "retry_failed_or_inconclusive_episode": false,
+    "replace_existing_development_results": false,
+    "recompute_or_replace_existing_gate": false,
+    "change_policy_or_native_action": false,
+    "change_fault_decision_inputs_or_intervention": false,
+    "access_formal_manifest_or_results": false
+  },
+  "instrumentation_boundaries": [
+    "immediately_before_EventGroundedFaultState.observe_close_attempt",
+    "immediately_before_native_gripper_action",
+    "each_completed_simulator_step_during_a_physical_close_transaction"
+  ],
+  "required_gripper_boundary_fields": [
+    "record_type",
+    "episode_id",
+    "cycle",
+    "gripper_call_index",
+    "sim_step",
+    "simulation_time_s",
+    "command_open_amount",
+    "actual_open_amount_before",
+    "actual_transition_to_closed",
+    "frozen_root_detections",
+    "detected_task_objects",
+    "contact_objects_before",
+    "attachment_objects_before",
+    "decision",
+    "noneligible_reason"
+  ],
+  "required_close_step_fields": [
+    "record_type",
+    "episode_id",
+    "cycle",
+    "gripper_call_index",
+    "sim_step",
+    "simulation_time_s",
+    "actual_open_amount",
+    "frozen_root_detections",
+    "contact_objects",
+    "attachment_objects",
+    "native_close_complete"
+  ],
+  "allowed_noneligible_reasons": [
+    "not_an_open_to_close_transition",
+    "no_frozen_attachment_capable_root_detected",
+    "fault_already_injected",
+    "not_missed_interaction",
+    "not_applicable_eligible"
+  ],
+  "required_outputs": {
+    "instrumentation_diff": "evaluations/iclr2027/native_systems/racer/e6_v3/diagnostics/place_cups_mi_boundary_v1/INSTRUMENTATION_DIFF.json",
+    "test_results": "evaluations/iclr2027/native_systems/racer/e6_v3/diagnostics/place_cups_mi_boundary_v1/TEST_RESULTS.json",
+    "episode_summary": "evaluations/iclr2027/results/native_v3/racer/development/diagnostic_replays/place_cups_mi_boundary_v1/episodes.jsonl",
+    "summary": "evaluations/iclr2027/results/native_v3/racer/development/diagnostic_replays/place_cups_mi_boundary_v1/SUMMARY.json",
+    "trace_root": "evaluations/iclr2027/results/native_v3/racer/development/diagnostic_replays/place_cups_mi_boundary_v1/traces/",
+    "B_delivery_manifest": "evaluations/iclr2027/results/b_delivery/B_TO_A_DELIVERY_e6_v3_racer_mi_diagnostic.json"
+  },
+  "formal_authorization": "LOCKED",
+  "A_makes_final_root_cause_decision": true
+}

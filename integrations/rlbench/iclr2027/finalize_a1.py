@@ -18,7 +18,9 @@ from integrations.rlbench.rlbench_dynamac.core.records import (
 
 SCHEMA = "essay2608.iclr2027.a1-acceptance.v1"
 DEFAULT_GATE_ROOT = INTEGRATION_ROOT / "results" / "iclr2027" / "a1_development_gate"
-DEFAULT_PHASE6_ROOT = INTEGRATION_ROOT / "results" / "phase6_formal_v1" / "normal"
+DEFAULT_ARCHIVED_BIMANUAL_ROOT = (
+    INTEGRATION_ROOT / "results" / "formal_evaluation_v1" / "normal"
+)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -100,8 +102,10 @@ def _unimanual_gate(task_id: str, parts_root: Path) -> dict[str, Any]:
     }
 
 
-def _reused_bimanual_gate(task_id: str, phase6_root: Path) -> dict[str, Any]:
-    path = phase6_root / task_id / "full_n200.json"
+def _reused_bimanual_gate(
+    task_id: str, archived_bimanual_root: Path
+) -> dict[str, Any]:
+    path = archived_bimanual_root / task_id / "full_n200.json"
     payload = _load(path)
     rows = payload.get("results")
     if (
@@ -111,7 +115,7 @@ def _reused_bimanual_gate(task_id: str, phase6_root: Path) -> dict[str, Any]:
         or not isinstance(rows, list)
         or len(rows) != 200
     ):
-        raise RuntimeError(f"{task_id}: reused phase-six evidence is incomplete")
+        raise RuntimeError(f"{task_id}: archived bimanual evidence is incomplete")
     infrastructure_reasons = {
         "joint_hold_failed",
         "policy_error",
@@ -124,7 +128,7 @@ def _reused_bimanual_gate(task_id: str, phase6_root: Path) -> dict[str, Any]:
     successes = sum(bool(row.get("success")) for row in rows)
     return {
         "status": "PASS" if infrastructure_errors == 0 and successes > 0 else "FAIL",
-        "evidence_source": "REUSED_AUTHENTICATED_PHASE6_DEVELOPMENT",
+        "evidence_source": "REUSED_AUTHENTICATED_BIMANUAL_DEVELOPMENT",
         "episodes": len(rows),
         "successes": successes,
         "success_rate": successes / len(rows),
@@ -135,12 +139,12 @@ def _reused_bimanual_gate(task_id: str, phase6_root: Path) -> dict[str, Any]:
     }
 
 
-def finalize(parts_root: Path, phase6_root: Path) -> dict[str, Any]:
+def finalize(parts_root: Path, archived_bimanual_root: Path) -> dict[str, Any]:
     assets = audit_all_task_assets()
     gates = {}
     for task_id, task in TASKS.items():
         gates[task_id] = (
-            _reused_bimanual_gate(task_id, phase6_root)
+            _reused_bimanual_gate(task_id, archived_bimanual_root)
             if task.spec.bimanual
             else _unimanual_gate(task_id, parts_root)
         )
@@ -157,23 +161,23 @@ def finalize(parts_root: Path, phase6_root: Path) -> dict[str, Any]:
         "schema": SCHEMA,
         "status": "PASS" if assets["status"] == "PASS" and not failed else "FAIL",
         "purpose": "A1_TASK_ASSET_ACCEPTANCE_NOT_PAPER_RESULTS",
-        "phase6_reuse_decisions": {
+        "asset_reuse_decisions": {
             "reused_exact_task_demonstrations_and_base_models": [
                 "bimanual_handover_item",
                 "bimanual_lift_tray",
                 "bimanual_sweep_to_dustpan",
                 "bimanual_put_bottle_in_fridge",
             ],
-            "rebuilt_closed_loop_sidecars_with_current_normal_task_model": list(TASKS),
+            "rebuilt_tsf_sidecars_with_current_task_model": list(TASKS),
             "rebuilt_from_new_five_demonstrations": [
                 task_id for task_id, task in TASKS.items() if not task.spec.bimanual
             ],
             "not_reused": {
-                "phase6_place_cups": (
-                    "Phase-six PlaceCups is a one-cup task; Main-10 and Native-6 "
+                "archived_place_cups": (
+                    "The archived PlaceCups asset is a one-cup task; Main-10 and Native-6 "
                     "freeze the native three-cup repeated-interaction level."
                 ),
-                "phase6_numeric_results": (
+                "archived_numeric_results": (
                     "Development evidence only; no value is inserted into E1-E6."
                 ),
             },
@@ -196,12 +200,16 @@ def finalize(parts_root: Path, phase6_root: Path) -> dict[str, Any]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parts-root", type=Path, default=DEFAULT_GATE_ROOT / "parts")
-    parser.add_argument("--phase6-root", type=Path, default=DEFAULT_PHASE6_ROOT)
+    parser.add_argument(
+        "--archived-bimanual-root",
+        type=Path,
+        default=DEFAULT_ARCHIVED_BIMANUAL_ROOT,
+    )
     parser.add_argument(
         "--output", type=Path, default=DEFAULT_GATE_ROOT / "A1_ACCEPTANCE.json"
     )
     args = parser.parse_args(argv)
-    payload = finalize(args.parts_root, args.phase6_root)
+    payload = finalize(args.parts_root, args.archived_bimanual_root)
     with reserve_output(args.output):
         atomic_json(args.output, payload)
     print(

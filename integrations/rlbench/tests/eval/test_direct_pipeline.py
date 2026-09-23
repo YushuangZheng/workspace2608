@@ -101,7 +101,7 @@ def test_v4_store_model_identity_accepts_the_frozen_composite_copy() -> None:
         task,
     )
     composite = direct_evaluate._task_model_content_identity(
-        direct_evaluate.INTEGRATION_ROOT / "models" / "phase6_v1",
+        direct_evaluate.INTEGRATION_ROOT / "models" / "dynamac_backbone_v1",
         task,
     )
 
@@ -135,7 +135,7 @@ class _LoadedPolicyForValidation:
         self._fingerprint = fingerprint
         self._identity = dict(identity)
 
-    def fingerprint(self):
+    def identity_digest(self):
         return self._fingerprint
 
     def summary(self):
@@ -384,11 +384,11 @@ def _bimanual_validation_case(monkeypatch):
         "config": asdict(base),
         "left": {
             "config": asdict(policies["left.npz"].config),
-            "fingerprint": policies["left.npz"].fingerprint(),
+            "fingerprint": policies["left.npz"].identity_digest(),
         },
         "right": {
             "config": asdict(policies["right.npz"].config),
-            "fingerprint": policies["right.npz"].fingerprint(),
+            "fingerprint": policies["right.npz"].identity_digest(),
         },
     }
     return manifest, policies
@@ -1070,7 +1070,7 @@ def test_policy_ping_binds_results_to_the_loaded_checkpoint(tmp_path) -> None:
             mode_demonstration_indices=((0,),),
         )
     ]
-    expected_fingerprint = policy.fingerprint()
+    expected_digest = policy.identity_digest()
     expected_summary = policy.summary()
 
     model_dir = tmp_path / "models" / "stack_wine"
@@ -1083,7 +1083,8 @@ def test_policy_ping_binds_results_to_the_loaded_checkpoint(tmp_path) -> None:
                 "task": "stack_wine",
                 "bimanual": False,
                 "config": asdict(config),
-                "fingerprint": expected_fingerprint,
+                # Legacy V2 manifests used this field; the runtime normalizes it.
+                "fingerprint": expected_digest,
             }
         ),
         encoding="utf-8",
@@ -1104,16 +1105,16 @@ def test_policy_ping_binds_results_to_the_loaded_checkpoint(tmp_path) -> None:
         "selection_semantics_id",
         "tapas_reference_commit",
         "config",
-        "fingerprint",
+        "identity_digest",
         "training_manifest_schema",
         "manifest_authenticated",
         "training_config",
         "training_adapter_protocol",
-        "checkpoint_trigger_audit_fingerprint",
+        "checkpoint_trigger_audit_digest",
         "v3_trigger_anchor_evidence",
-        "phase6_dynamic_trigger_evidence",
+        "tsf_dynamic_trigger_evidence",
     }
-    assert identity["phase6_dynamic_trigger_evidence"] is None
+    assert identity["tsf_dynamic_trigger_evidence"] is None
     assert identity["model_schema_version"] == expected_summary["model_schema_version"]
     assert (
         identity["selection_semantics_id"] == expected_summary["selection_semantics_id"]
@@ -1122,7 +1123,7 @@ def test_policy_ping_binds_results_to_the_loaded_checkpoint(tmp_path) -> None:
     assert identity["config"]["covariance_estimation_method"] == (
         "diagonal_empirical_ridge"
     )
-    assert identity["fingerprint"] == expected_fingerprint
+    assert identity["identity_digest"] == expected_digest
     assert identity["manifest_authenticated"] is True
     assert identity["training_config"] == asdict(config)
 
@@ -1690,7 +1691,7 @@ def test_inherited_trigger_rejects_an_inactive_smooth_window() -> None:
         _inherited_trigger_policy(break_required_window=True)
     )
 
-    with pytest.raises(RuntimeError, match=r"Equation \(5\)-available"):
+    with pytest.raises(RuntimeError, match="trigger window is not eligible"):
         build_v3_trigger_anchor_evidence("stack_wine", audit, {})
 
 

@@ -17,6 +17,7 @@ class OursTaskStateMonitor(RuntimeMonitor):
     def reset(self, episode_context: EpisodeContext | None) -> None:
         self._alarm = False
         self._reason_count = 0
+        self._continuous_score = 0.0
 
     def observe(
         self,
@@ -26,19 +27,26 @@ class OursTaskStateMonitor(RuntimeMonitor):
     ) -> None:
         monitor = policy_state.get("monitor", {})
         if not isinstance(monitor, Mapping):
-            raise ValueError("M6 requires the closed-loop monitor state")
+            raise ValueError("TSF monitor state is missing from the policy output")
         reasons = monitor.get("reasons", ())
         self._reason_count = len(reasons) if isinstance(reasons, (list, tuple)) else 0
         self._alarm = bool(monitor.get("alarm", False))
+        self._continuous_score = float(
+            monitor.get("continuous_score", float(self._alarm))
+        )
 
     def score(self) -> Mapping[str, float]:
         return {
-            "task_state_mismatch": float(self._alarm),
+            "task_state_mismatch": self._continuous_score,
             "trigger_reasons": float(self._reason_count),
         }
 
     def alarm(self) -> bool:
         return self._alarm
+
+    @property
+    def threshold(self) -> float:
+        return 1.0
 
 
 __all__ = ["OursTaskStateMonitor"]

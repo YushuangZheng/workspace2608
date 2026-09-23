@@ -1,0 +1,24 @@
+{
+  "schema": "essay2608-boundary-calibration-config-v2",
+  "claim_boundary": "E4 Horizon-3 的 M5 边界运行参数只由对应任务每任务5条成功示范的控制周期及正常末端保持标定；使用与Main-10相同的全局标定规则，不读取failure-train、故障标签、development故障结果、sealed E4 manifest或sealed E4结果，也不按任务调参。",
+  "tasks": [
+    "place_cups_1",
+    "place_cups_2",
+    "place_cups_3",
+    "remove_cups_1",
+    "remove_cups_2",
+    "push_buttons_1",
+    "push_buttons_2",
+    "push_buttons_3"
+  ],
+  "demonstration_indices": [0, 1, 2, 3, 4],
+  "control_period_seconds": 0.05,
+  "control_period_source": "RLBench/rlbench/task_environment.py::_DT",
+  "terminal_hold_seconds": 2.0,
+  "terminal_settling_seconds": 0.25,
+  "positive_floor_fraction": 0.8,
+  "default_relation_probability": 0.7,
+  "minimum_tracking_reliability": 0.25,
+  "minimum_scene_reliability": 0.25,
+  "minimum_information_weight": 0.1
+}

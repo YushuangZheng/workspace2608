@@ -14,6 +14,13 @@
     ],
     "previous_physical_response": ["action_resolution"]
   },
+  "action_resolution_semantics": {
+    "initial": "no previous command has been executed",
+    "reached": "the previous target was fully reached",
+    "progressed": "the previous command produced valid bounded physical progress without yet fully reaching its target",
+    "stopped": "the previous command produced no valid physical progress",
+    "monitor_projection": "reached and progressed share the successful-response channel; stopped uses the blocked-response channel"
+  },
   "variable_width": {
     "task_state": "defined_by_frozen_task_spec",
     "action": "9_unimanual_or_18_bimanual",

@@ -5,7 +5,24 @@
   "control_period_seconds": 0.05,
   "normal_calibration_successes_per_task": 50,
   "normal_calibration_candidate_limit_per_task": 600,
+  "normal_calibration_candidate_extensions": {
+    "open_drawer": {
+      "start_index": 600,
+      "count": 1000,
+      "manifest": "amendments/open_drawer_task_state_v2_normal_calibration_extension.jsonl",
+      "reason": "the_frozen_backbone_produced_23_successes_in_the_preregistered_600_candidate_pool"
+    }
+  },
   "failure_train_episodes_per_task": 200,
+  "failure_train_seed_replacements": {
+    "failure_train/place_cups_3/0018": {
+      "original_seed": 2720300018,
+      "replacement_seed": 2720300210,
+      "fault_family": "relation_loss",
+      "trigger_stage": "middle",
+      "reason": "stable_infrastructure_timeout_under_32_4_and_1_worker_execution"
+    }
+  },
   "development_nominal_per_task": 10,
   "development_perturbed_per_task": 10,
   "sealed_nominal_per_task": 200,
@@ -21,6 +38,7 @@
   },
   "one_episode_per_job": true,
   "intention_to_treat": true,
+  "fault_protocol_revision": "relation_loss_source_conditioned_physics_v2",
+  "maintained_contact_relation_loss": "open_selected_gripper_in_place_without_entity_translation",
   "sealed_results_visible_during_method_development": false
 }
-

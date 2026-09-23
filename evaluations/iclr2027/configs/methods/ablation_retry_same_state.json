@@ -1,0 +1,16 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "ablation_retry_same_state",
+  "paper_name": "Retry same state / no legal re-entry",
+  "policy_type": "task_state_feedback",
+  "feature_profile": "retry_same_state",
+  "runtime": {
+    "tsf_models_root": "integrations/rlbench/models/iclr2027/tsf",
+    "boundary_config_root": "evaluations/iclr2027/artifacts/calibration/normal_task_boundaries/main10/runtime_configs"
+  },
+  "monitor": null,
+  "recovery": {
+    "kind": "relation_repair_and_same_state_reentry",
+    "owned_by_policy": true
+  }
+}

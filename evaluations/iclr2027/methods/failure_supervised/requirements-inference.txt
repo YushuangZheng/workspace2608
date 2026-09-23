@@ -1,0 +1,4 @@
+# Tested with Python 3.9.23. Training used the +cu128 build; inference is CPU.
+# PyTorch's platform-specific build must pass tools.acceptance before use.
+numpy==1.23.3
+torch==2.7.1

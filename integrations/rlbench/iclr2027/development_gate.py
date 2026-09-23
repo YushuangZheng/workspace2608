@@ -1,7 +1,7 @@
 """Run the A1 real-simulator task/interface development gate.
 
-The gate uses the frozen DynaMAC backbone and the shared stage-six executor.
-It does not create paper results, calibrate closed-loop thresholds, or expose
+The gate uses the frozen DynaMAC backbone and the shared RLBench executor.
+It does not create paper results, calibrate TSF thresholds, or expose
 any future sealed-test episode.
 """
 
@@ -175,7 +175,9 @@ def run_task(
 ) -> dict[str, Any]:
     task = experiment_task(task_id)
     if task.spec.bimanual:
-        raise ValueError(f"{task_id} is validated through reused phase-six evidence")
+        raise ValueError(
+            f"{task_id} is validated through authenticated archived evidence"
+        )
     task_class = getattr(
         importlib.import_module(task.spec.module), task.spec.class_name
     )

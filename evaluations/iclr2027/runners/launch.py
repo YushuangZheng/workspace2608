@@ -14,13 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from evaluations.development.phase6_formal_evaluation.resources import (
+from evaluations.development.formal_evaluation.resources import (
     build_lane_specs,
 )
 from evaluations.iclr2027.runners.episode_io import (
+    EpisodeWriter,
     completed_episode_ids,
     load_episode,
 )
+from evaluations.iclr2027.interfaces.feature_schema import EPISODE_SCHEMA
+from evaluations.iclr2027.methods.registry import load_method_spec
 from integrations.rlbench.rlbench_dynamac.core.paths import REPOSITORY_ROOT
 from integrations.rlbench.rlbench_dynamac.eval.v4_formal_launch import (
     _launch_environment,
@@ -33,10 +36,21 @@ DEFAULT_POLICY_PYTHON = Path(
     "/home/zhengyushuang/.conda/envs-migrated-20260816/RoboTwin/bin/python"
 )
 DEFAULT_XVFB_RUN = Path("/usr/bin/xvfb-run")
+FAULT_CONFIG = (
+    REPOSITORY_ROOT / "evaluations" / "iclr2027" / "configs" / "shared" / "faults.json"
+)
 
 
 def _safe(episode_id: str) -> str:
     return episode_id.replace("/", "__")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _rows(path: Path) -> list[dict[str, Any]]:
@@ -114,6 +128,9 @@ class DynamicQueue:
                 result = load_episode(result_path)
                 self.finished[row["task"]] += 1
                 self.successes[row["task"]] += int(result["success"])
+                self.infrastructure_errors += int(
+                    result.get("reason") == "infrastructure_error"
+                )
                 continue
             self.pending_by_task.setdefault(row["task"], deque()).append(row)
         self.task_order = deque(sorted(self.pending_by_task))
@@ -259,21 +276,139 @@ class DynamicQueue:
         if task not in self.task_order:
             self.task_order.append(task)
 
+    def _discard_episode_outputs(self, row: dict[str, Any]) -> None:
+        """Remove outputs from an attempt that exceeded the wall-time limit.
+
+        A simulator process can take a few seconds to unwind after its
+        ``xvfb-run`` parent receives SIGTERM.  Such an attempt is invalid even
+        if it manages to write a result during that grace interval; removing
+        all episode-scoped files before requeueing prevents a late attempt from
+        being mistaken for its deterministic retry.
+        """
+
+        identifier = _safe(row["episode_id"])
+        for path in (
+            self.output_root / "episodes" / f"{identifier}.json",
+            self.output_root / "episodes" / f"{identifier}.json.tmp",
+            self.output_root / "cycles" / f"{identifier}.jsonl.gz",
+            self.output_root / "cycles" / f"{identifier}.jsonl.gz.tmp",
+        ):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _write_exhausted_infrastructure_failure(
+        self, row: dict[str, Any], *, timed_out: bool, elapsed: float
+    ) -> dict[str, Any]:
+        """Commit an ITT failure after the frozen infrastructure retry is exhausted."""
+
+        spec = load_method_spec(self.method)
+        writer = EpisodeWriter(self.output_root, str(row["episode_id"]))
+        summary = {
+            "schema": EPISODE_SCHEMA,
+            "episode_id": str(row["episode_id"]),
+            "split": str(row["split"]),
+            "task": str(row["task"]),
+            "task_level": row.get("task_level"),
+            "variation": int(row["variation"]),
+            "seed": int(row["seed"]),
+            "condition": str(row["condition"]),
+            "fault_family": row.get("fault_family"),
+            "fault_severity": row.get("fault_severity"),
+            "trigger_stage": row.get("trigger_stage"),
+            "method_id": spec.method_id,
+            "method_config_identity": {
+                "path": str(spec.config_path.relative_to(REPOSITORY_ROOT)),
+                "sha256": spec.config_sha256,
+                "fault_config_sha256": _sha256(FAULT_CONFIG),
+                "policy_model": None,
+                "monitor_calibration": (
+                    None
+                    if self.calibration_artifact is None
+                    else {
+                        "path": str(
+                            self.calibration_artifact.relative_to(REPOSITORY_ROOT)
+                        ),
+                        "sha256": _sha256(self.calibration_artifact),
+                    }
+                ),
+            },
+            "success": False,
+            "final_success": False,
+            "reason": "infrastructure_error",
+            "termination_reason": "infrastructure_error",
+            "cycles": 0,
+            "recovery_cycles": 0,
+            "generic_retry_cycles": 0,
+            "policy_recovery_cycles": 0,
+            "first_alarm_cycle": None,
+            "false_interventions": 0,
+            "relation_restored_cycle": None,
+            "legal_reentry_cycle": None,
+            "post_reentry_completion": None,
+            "invalid_actions": 0,
+            "wall_seconds": float(elapsed),
+            "peak_memory_kib": 0,
+            "audit": {
+                "eligible": False,
+                "physically_triggered": False,
+                "violation_onset_cycle": None,
+                "violation_end_cycle": None,
+                "relation_restored_cycle": None,
+                "legal_reentry_cycle": None,
+            },
+            "fault_protocol": None,
+            "fresh_task_generation": None,
+            "error": {
+                "type": "EpisodeProcessTimeout" if timed_out else "EpisodeProcessFailure",
+                "message": "episode infrastructure retry budget exhausted",
+                "attempts": int(self.attempts[row["episode_id"]]) + 1,
+            },
+        }
+        writer.finalize(summary)
+        return load_episode(writer.episode_path)
+
     def _collect(self, lane_index: int, running: Running) -> None:
         code = running.process.poll()
         if code is None:
             return
+        if (
+            running.timed_out
+            and time.monotonic() - running.started
+            <= self.episode_timeout_seconds + 10.0
+        ):
+            # Keep the lane reserved for the full termination grace period.
+            # Otherwise an exited xvfb-run wrapper can cause the same episode
+            # to be relaunched while a simulator grandchild is still writing.
+            return
+        if running.timed_out:
+            try:
+                os.killpg(running.process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         running.stream.close()
         del self.running[lane_index]
         self.free_lanes.append(lane_index)
         row = running.row
+        if running.timed_out:
+            self._discard_episode_outputs(row)
         path = self.output_root / "episodes" / (_safe(row["episode_id"]) + ".json")
         result = load_episode(path) if path.is_file() else None
-        infrastructure = result is None or result.get("reason") == "infrastructure_error"
+        infrastructure = (
+            running.timed_out
+            or result is None
+            or result.get("reason") == "infrastructure_error"
+        )
         if infrastructure and self.attempts[row["episode_id"]] < self.retry_infrastructure:
             self.attempts[row["episode_id"]] += 1
             self._requeue_infrastructure_retry(row)
             return
+        elapsed = time.monotonic() - running.started
+        if infrastructure and result is None:
+            result = self._write_exhausted_infrastructure_failure(
+                row, timed_out=running.timed_out, elapsed=elapsed
+            )
         if infrastructure:
             self.infrastructure_errors += 1
         self.finished[row["task"]] += 1
@@ -287,8 +422,7 @@ class DynamicQueue:
             reason = result["reason"]
         else:
             trigger = "0/0"
-            reason = "missing_result"
-        elapsed = time.monotonic() - running.started
+            reason = "episode_timeout" if running.timed_out else "missing_result"
         print(
             "[%d active, %d free] %s %s %.1fs; task=%d done %d success; trigger=%s"
             % (

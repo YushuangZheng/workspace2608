@@ -7,6 +7,7 @@ import hashlib
 import json
 from collections import defaultdict
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from evaluations.iclr2027.manifests.build import (
@@ -35,7 +36,7 @@ def _rows(path: Path) -> list[dict[str, Any]]:
 
 
 def materialize(
-    candidate_manifest: Path,
+    candidate_manifest: Path | Sequence[Path],
     result_root: Path,
     output_manifest: Path,
     *,
@@ -47,10 +48,27 @@ def materialize(
     selection never rewrites causal cycle records or relabels a failed rollout.
     """
 
+    candidate_manifests = (
+        [candidate_manifest]
+        if isinstance(candidate_manifest, Path)
+        else list(candidate_manifest)
+    )
+    if not candidate_manifests:
+        raise ValueError("at least one candidate manifest is required")
+    source_rows: list[dict[str, Any]] = []
+    seen_source_ids: set[str] = set()
+    for path in candidate_manifests:
+        for row in _rows(path):
+            episode_id = str(row["episode_id"])
+            if episode_id in seen_source_ids:
+                raise ValueError(f"duplicate calibration candidate: {episode_id}")
+            seen_source_ids.add(episode_id)
+            source_rows.append(row)
+
     selected: list[dict[str, Any]] = []
     counts: dict[str, int] = defaultdict(int)
     result_root = result_root.resolve()
-    for source in _rows(candidate_manifest):
+    for source in source_rows:
         task = str(source["task"])
         if counts[task] >= successes_per_task:
             continue
@@ -81,7 +99,7 @@ def materialize(
             }
         )
         counts[task] += 1
-    tasks = sorted({str(row["task"]) for row in _rows(candidate_manifest)})
+    tasks = sorted({str(row["task"]) for row in source_rows})
     missing = {task: successes_per_task - counts[task] for task in tasks if counts[task] < successes_per_task}
     if missing:
         raise RuntimeError(f"insufficient successful calibration candidates: {missing}")
@@ -97,7 +115,7 @@ def materialize(
     index["manifests"][output_manifest.name] = {
         "rows": len(selected),
         "sha256": _sha256(output_manifest),
-        "materialized_from": candidate_manifest.name,
+        "materialized_from": [str(path) for path in candidate_manifests],
         "successes_per_task": successes_per_task,
     }
     index_path.write_text(
@@ -112,7 +130,8 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--candidate-manifest",
         type=Path,
-        default=ROOT / "main10_normal_calibration_candidates.jsonl",
+        action="append",
+        help="candidate manifest in selection order; may be repeated",
     )
     parser.add_argument("--result-root", type=Path, required=True)
     parser.add_argument(
@@ -122,8 +141,11 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--successes-per-task", type=int, default=50)
     args = parser.parse_args(argv)
+    candidate_manifests = args.candidate_manifest or [
+        ROOT / "main10_normal_calibration_candidates.jsonl"
+    ]
     rows = materialize(
-        args.candidate_manifest,
+        candidate_manifests,
         args.result_root,
         args.output_manifest,
         successes_per_task=args.successes_per_task,

@@ -9,6 +9,11 @@ from typing import Any, Iterable, Mapping, Optional
 
 from integrations.rlbench.iclr2027.task_registry import experiment_task_set
 from integrations.rlbench.rlbench_dynamac.core.paths import REPOSITORY_ROOT
+from evaluations.iclr2027.manifests.native6 import (
+    build_development_rows as build_native6_development_rows,
+    build_nominal_view as build_native6_nominal_view,
+    build_perturbed_view as build_native6_perturbed_view,
+)
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_ROOT = ROOT.parent / "configs" / "shared"
@@ -137,6 +142,36 @@ def _task_rows(
     return rows
 
 
+def _apply_seed_replacements(
+    rows: Iterable[Mapping[str, Any]],
+    replacements: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Apply protocol-recorded infrastructure replacements without changing row order."""
+
+    result = [dict(row) for row in rows]
+    by_episode = {row["episode_id"]: row for row in result}
+    for episode_id, spec in replacements.items():
+        if episode_id not in by_episode:
+            raise KeyError(f"seed replacement refers to unknown episode: {episode_id}")
+        row = by_episode[episode_id]
+        original_seed = int(spec["original_seed"])
+        replacement_seed = int(spec["replacement_seed"])
+        if int(row["seed"]) != original_seed:
+            raise ValueError(
+                f"seed replacement source mismatch for {episode_id}: "
+                f"{row['seed']} != {original_seed}"
+            )
+        for field in ("fault_family", "trigger_stage"):
+            expected = spec.get(field)
+            if expected is not None and row.get(field) != expected:
+                raise ValueError(
+                    f"seed replacement {field} mismatch for {episode_id}: "
+                    f"{row.get(field)} != {expected}"
+                )
+        row["seed"] = replacement_seed
+    return result
+
+
 def _readonly_view(
     rows: Iterable[Mapping[str, Any]],
     *,
@@ -162,13 +197,118 @@ def _readonly_view(
     return result
 
 
+def _stress4_severity_rows(
+    tasks: Iterable[Any],
+    main_perturbed: Iterable[Mapping[str, Any]],
+    extension_seed: int,
+) -> list[dict[str, Any]]:
+    """Build the paired E3-C severity, stage, and composition conditions.
+
+    Low/high severity and early/middle/late timing deliberately reuse the
+    corresponding E1 initialization.  They change only the physical condition,
+    so they are paired conditions rather than statistically independent splits.
+    Composed events use the disjoint extension seed namespace.
+    """
+
+    source_rows: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for source in main_perturbed:
+        key = (str(source["task"]), str(source["fault_family"]))
+        source_rows.setdefault(key, []).append(dict(source))
+    for rows in source_rows.values():
+        rows.sort(key=lambda row: str(row["episode_id"]))
+
+    result: list[dict[str, Any]] = []
+    for task_offset, task in enumerate(tasks):
+        task_id = str(task.task_id)
+        third_family = (
+            "coordination_delay"
+            if task_id.startswith("bimanual_")
+            else "environment_change"
+        )
+        continuous_families = (
+            "actuation_delay",
+            "relation_loss",
+            third_family,
+        )
+
+        # Severity changes are paired to the 50 E1 rows of the same task and
+        # family, preserving variation, seed, and trigger stage.
+        for family in continuous_families:
+            sources = source_rows.get((task_id, family), [])
+            if len(sources) != 50:
+                raise ValueError(
+                    f"E3-C requires exactly 50 E1 sources for {task_id}/{family}; "
+                    f"found {len(sources)}"
+                )
+            for severity in ("low", "high"):
+                for index, source in enumerate(sources):
+                    episode_id = (
+                        f"stress4_severity/{task_id}/{family}/{severity}/{index:04d}"
+                    )
+                    result.append(
+                        {
+                            **source,
+                            "episode_id": episode_id,
+                            "pair_id": episode_id,
+                            "split": "stress4_severity",
+                            "source_episode_id": source["episode_id"],
+                            "fault_severity": severity,
+                            "e3c_axis": "severity",
+                        }
+                    )
+
+        # One common, physically eligible family isolates trigger timing.  All
+        # three stages are new paired executions because E1 interleaves stages
+        # within each family and therefore cannot supply 50 middle-stage rows.
+        stage_sources = source_rows.get((task_id, "actuation_delay"), [])
+        if len(stage_sources) != 50:
+            raise ValueError(
+                f"E3-C requires exactly 50 E1 actuation sources for {task_id}; "
+                f"found {len(stage_sources)}"
+            )
+        for stage in ("early", "middle", "late"):
+            for index, source in enumerate(stage_sources):
+                episode_id = (
+                    f"stress4_trigger_stage/{task_id}/actuation_delay/"
+                    f"{stage}/{index:04d}"
+                )
+                result.append(
+                    {
+                        **source,
+                        "episode_id": episode_id,
+                        "pair_id": episode_id,
+                        "split": "stress4_trigger_stage",
+                        "source_episode_id": source["episode_id"],
+                        "fault_severity": "medium",
+                        "trigger_stage": stage,
+                        "e3c_axis": "trigger_stage",
+                    }
+                )
+
+        # Composed events are a genuinely new initialization split.
+        for index in range(50):
+            row = _row(
+                split="stress4_composed",
+                task=task,
+                index=index,
+                seed=extension_seed + task_offset * 100_000 + index,
+                condition="perturbed",
+                fault_family="composed_event",
+                severity="composed",
+                trigger_stage="early",
+            )
+            row["e3c_axis"] = "composition"
+            row["event_schedule"] = "actuation_delay_early_then_relation_loss_late"
+            result.append(row)
+    return result
+
+
 def build_all_manifests(root: Path = ROOT) -> dict[str, Any]:
     protocol = _load(PROTOCOL_PATH)
     seeds = protocol["seed_namespaces"]
     main10 = tuple(experiment_task_set("main10"))
     stress4 = tuple(experiment_task_set("stress4"))
     horizon3 = tuple(experiment_task_set("horizon3"))
-    native6 = tuple(experiment_task_set("native6"))
 
     manifests: dict[str, list[dict[str, Any]]] = {}
     manifests["main10_normal_calibration_candidates.jsonl"] = _task_rows(
@@ -178,6 +318,31 @@ def build_all_manifests(root: Path = ROOT) -> dict[str, Any]:
         int(seeds["normal_calibration_candidates"]),
         perturbed=False,
     )
+    calibration_extensions: dict[str, list[dict[str, Any]]] = {}
+    task_offsets = {task.task_id: offset for offset, task in enumerate(main10)}
+    task_by_id = {task.task_id: task for task in main10}
+    base_candidate_limit = int(protocol["normal_calibration_candidate_limit_per_task"])
+    for task_id, spec in protocol.get("normal_calibration_candidate_extensions", {}).items():
+        if task_id not in task_by_id:
+            raise KeyError(f"normal calibration extension refers to unknown task: {task_id}")
+        start = int(spec["start_index"])
+        count = int(spec["count"])
+        if start < base_candidate_limit or count <= 0:
+            raise ValueError(f"invalid normal calibration extension for {task_id}")
+        relative_path = str(spec["manifest"])
+        if not relative_path.startswith("amendments/") or not relative_path.endswith(".jsonl"):
+            raise ValueError(f"invalid calibration extension manifest path: {relative_path}")
+        seed_base = int(seeds["normal_calibration_candidates"]) + task_offsets[task_id] * 100_000
+        calibration_extensions[relative_path] = [
+            _row(
+                split="normal_calibration_candidates",
+                task=task_by_id[task_id],
+                index=index,
+                seed=seed_base + index,
+                condition="nominal",
+            )
+            for index in range(start, start + count)
+        ]
     # The retained 50 successful rows are materialized after rollout.  Preserve
     # an already materialized read-only view so rebuilding unrelated manifests
     # cannot silently erase the frozen calibration selection.
@@ -187,12 +352,15 @@ def build_all_manifests(root: Path = ROOT) -> dict[str, Any]:
         if calibration_path.is_file() and calibration_path.stat().st_size
         else []
     )
-    manifests["main10_failure_train.jsonl"] = _task_rows(
-        "failure_train",
-        main10,
-        int(protocol["failure_train_episodes_per_task"]),
-        int(seeds["failure_train"]),
-        perturbed=True,
+    manifests["main10_failure_train.jsonl"] = _apply_seed_replacements(
+        _task_rows(
+            "failure_train",
+            main10,
+            int(protocol["failure_train_episodes_per_task"]),
+            int(seeds["failure_train"]),
+            perturbed=True,
+        ),
+        protocol.get("failure_train_seed_replacements", {}),
     )
     development = []
     development.extend(
@@ -256,21 +424,11 @@ def build_all_manifests(root: Path = ROOT) -> dict[str, Any]:
     manifests["stress4_leave_one_family_out.jsonl"] = lofo_rows
 
     extension_seed = int(seeds["extension"])
-    severity_rows = []
-    for severity_offset, severity in enumerate(("low", "high", "composed")):
-        rows = _task_rows(
-            f"stress4_severity_{severity}",
-            stress4,
-            200,
-            extension_seed + severity_offset * 1_000_000,
-            perturbed=True,
-        )
-        for row in rows:
-            row["fault_severity"] = severity
-            if severity == "composed":
-                row["fault_family"] = "composed_event"
-        severity_rows.extend(rows)
-    manifests["stress4_severity.jsonl"] = severity_rows
+    manifests["stress4_severity.jsonl"] = _stress4_severity_rows(
+        stress4,
+        perturbed,
+        extension_seed,
+    )
 
     horizon_ids = {task.task_id for task in horizon3}
     manifests["horizon3_single_event.jsonl"] = _task_rows(
@@ -295,21 +453,34 @@ def build_all_manifests(root: Path = ROOT) -> dict[str, Any]:
         view_name="ablation4",
         task_ids=stress_ids,
     )
-    native_ids = {task.task_id for task in native6}
-    manifests["native6_nominal.jsonl"] = _readonly_view(
-        nominal,
-        view_name="native6_nominal",
-        task_ids=native_ids,
+    # E6 is a smaller, system-level comparison.  Its formal manifests are
+    # deterministic result-blind subsets of E1, and its development split is
+    # disjoint from every formal seed.  Keep this logic shared with the
+    # isolated ``build_native6`` command so a later full rebuild cannot restore
+    # the obsolete 200-per-task/four-fault views.
+    manifests["native6_development.jsonl"] = build_native6_development_rows(
+        nominal
     )
-    manifests["native6_perturbed.jsonl"] = _readonly_view(
-        perturbed,
-        view_name="native6_perturbed",
-        task_ids=native_ids,
+    manifests["native6_nominal.jsonl"] = build_native6_nominal_view(nominal)
+    manifests["native6_perturbed.jsonl"] = build_native6_perturbed_view(
+        perturbed
     )
 
     for name, rows in manifests.items():
         _write_jsonl(root / name, rows)
+    for name, rows in calibration_extensions.items():
+        _write_jsonl(root / name, rows)
     index_path = root / "MANIFEST_INDEX.json"
+    # Rebuilding deterministic manifests after sealed execution may update a
+    # protocol/configuration identity, but it must never make the sealed split
+    # look unused again.  Carry the immutable first-execution provenance
+    # forward when an existing index has already crossed that boundary.
+    existing_index = (
+        _load(index_path)
+        if index_path.is_file() and index_path.stat().st_size
+        else {}
+    )
+    sealed_executed = bool(existing_index.get("sealed_executed", False))
     index = {
         "schema": INDEX_SCHEMA,
         "protocol_sha256": _sha256(PROTOCOL_PATH),
@@ -318,9 +489,18 @@ def build_all_manifests(root: Path = ROOT) -> dict[str, Any]:
             name: {"rows": len(rows), "sha256": _sha256(root / name)}
             for name, rows in manifests.items()
         },
-        "sealed_executed": False,
+        "calibration_candidate_extensions": {
+            name: {"rows": len(rows), "sha256": _sha256(root / name)}
+            for name, rows in calibration_extensions.items()
+        },
+        "sealed_executed": sealed_executed,
         "result_based_task_selection": False,
     }
+    if sealed_executed:
+        for field in ("sealed_first_started_stage", "sealed_first_started_utc"):
+            if field not in existing_index:
+                raise ValueError(f"sealed manifest index is missing {field}")
+            index[field] = existing_index[field]
     index_path.write_text(
         json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -334,7 +514,14 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def validate_all_manifests(root: Path = ROOT) -> dict[str, int]:
-    paths = sorted(root.glob("*.jsonl"))
+    # Native-6 v3 has its own event-grounded schema and verifier.  Those files
+    # intentionally live beside the common episode manifests, but they are not
+    # inputs to this legacy-schema validator.
+    paths = sorted(
+        path
+        for path in root.glob("*.jsonl")
+        if not path.name.startswith("native6_v3_")
+    )
     seen_episode_ids: dict[str, str] = {}
     split_keys: dict[str, set[tuple[Any, ...]]] = {}
     counts = {}
@@ -353,7 +540,15 @@ def validate_all_manifests(root: Path = ROOT) -> dict[str, int]:
                     f"episode id reused by {path.name} and {seen_episode_ids[episode_id]}"
                 )
             seen_episode_ids[episode_id] = path.name
-            key = (row["task"], row["variation"], row["seed"], row["condition"])
+            key = (
+                row["task"],
+                row["variation"],
+                row["seed"],
+                row["condition"],
+                row.get("fault_family"),
+                row.get("fault_severity"),
+                row.get("trigger_stage"),
+            )
             if key in keys:
                 raise ValueError(f"duplicate task/variation/seed/condition in {path}")
             keys.add(key)
@@ -373,7 +568,6 @@ def validate_all_manifests(root: Path = ROOT) -> dict[str, int]:
             "main10_development.jsonl",
             "main10_nominal.jsonl",
             "main10_perturbed.jsonl",
-            "stress4_severity.jsonl",
             "horizon3_single_event.jsonl",
             "horizon3_per_stage.jsonl",
         }
@@ -382,10 +576,10 @@ def validate_all_manifests(root: Path = ROOT) -> dict[str, int]:
         for right in independent[index + 1 :]:
             seed_overlap = {
                 (task, seed)
-                for task, _variation, seed, _condition in split_keys[left]
+                for task, _variation, seed, _condition, *_fault in split_keys[left]
             } & {
                 (task, seed)
-                for task, _variation, seed, _condition in split_keys[right]
+                for task, _variation, seed, _condition, *_fault in split_keys[right]
             }
             if seed_overlap:
                 raise ValueError(f"independent split seeds overlap: {left}, {right}")

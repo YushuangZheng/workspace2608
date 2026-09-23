@@ -1,0 +1,32 @@
+{
+  "schema": "essay2608.iclr2027.native6-b-return-contract-amendment.v1",
+  "status": "FROZEN_FOR_MAPPING_PREFLIGHT_AND_DEVELOPMENT_DELIVERY",
+  "amends": "evaluations/iclr2027/configs/shared/native6_b_return_contract_v3.json",
+  "source_protocol_amendment": "evaluations/iclr2027/results/e6_handoff/A_TO_B_E6_V3_PROTOCOL_AMENDMENT_1.json",
+  "required_delivery_manifest_fields": [
+    "source_protocol_amendment_sha256"
+  ],
+  "required_system_identity_fields": [
+    "object_mapping_identity",
+    "physical_protocol_amendment_identity",
+    "protocol_amendment_identity"
+  ],
+  "expected_identity_files": {
+    "object_mapping_identity": "evaluations/iclr2027/configs/shared/native6_object_contact_mapping_v3.json",
+    "physical_protocol_amendment_identity": "evaluations/iclr2027/configs/shared/native6_physical_protocol_v3_amendment_1.json",
+    "protocol_amendment_identity": "evaluations/iclr2027/results/e6_handoff/A_TO_B_E6_V3_PROTOCOL_AMENDMENT_1.json"
+  },
+  "mapping_preflight": {
+    "rvt": "evaluations/iclr2027/native_systems/rvt/e6_v3/mapping/OBJECT_MAPPING_PREFLIGHT.json",
+    "racer": "evaluations/iclr2027/native_systems/racer/e6_v3/mapping/OBJECT_MAPPING_PREFLIGHT.json",
+    "must_be_listed_in_system_identity_files": true,
+    "must_be_listed_in_development_delivery": true,
+    "server_A_acceptance_required_before_180_episode_development": true,
+    "counts_as_development_result": false
+  },
+  "required_tools": {
+    "B_builder": "evaluations/iclr2027/delivery/build_e6_v3_amended_return.py",
+    "A_verifier": "evaluations/iclr2027/delivery/verify_e6_v3_amended_b_return.py"
+  },
+  "original_v3_handoff_or_results_overwritten": false
+}

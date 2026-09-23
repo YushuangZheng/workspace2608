@@ -24,7 +24,7 @@ class _ArmPolicy:
         self.skill_sequence = tuple(range(len(durations)))
         self.skills = [SimpleNamespace(duration=value) for value in durations]
 
-    def fingerprint(self):
+    def identity_digest(self):
         return self._fingerprint
 
 

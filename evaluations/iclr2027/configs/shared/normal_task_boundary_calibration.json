@@ -1,5 +1,5 @@
 {
-  "schema": "essay2608-phase4-boundary-calibration-config-v2",
+  "schema": "essay2608-boundary-calibration-config-v2",
   "claim_boundary": "A3为E1/E2 Main-10冻结的M5及其闭环变体theta_local与H，只由A1每任务5条成功示范的控制周期及正常末端保持标定；不读取failure-train、A-only监控器校准数据、故障标签或sealed test。Horizon-3的E4运行参数不在A3提前冻结。",
   "tasks": [
     "close_jar",

@@ -1,0 +1,108 @@
+{
+  "schema": "essay2608.iclr2027.native6-event-grounded-physics-amendment.v2",
+  "status": "FROZEN_FOR_DEVELOPMENT_REPAIR",
+  "revision": "native6_event_grounded_physics_v3_amendment_2",
+  "amends": "native6_event_grounded_physics_v3_amendment_1",
+  "precedence": "this amendment overrides only Open Drawer maintained-contact missed-interaction eligibility and intervention timing in amendment 1",
+  "reason": "RVT development established that real Panda-finger-to-active-drawer contact first appears during native gripper closure, so requiring contact before the open-to-close transaction makes the frozen cell physically ineligible by construction",
+  "unchanged": [
+    "task set and task variations",
+    "development and formal episode assignments",
+    "fault families and medium strengths",
+    "semantic object and Panda finger mappings",
+    "actuation-delay semantics",
+    "attachment-source missed-interaction semantics",
+    "relation-loss semantics and the 0.15 second stable-relation requirement",
+    "result denominator and development gate thresholds"
+  ],
+  "open_drawer_missed_interaction": {
+    "task": "open_drawer",
+    "relation_source": "maintained_contact",
+    "transaction_preconditions": {
+      "arm_motion_completed": true,
+      "actual_open_amount_above": 0.9,
+      "native_open_to_close_transaction_started": true,
+      "preexisting_contact_required": false
+    },
+    "observation_location": "after every completed simulator step inside the same native open-to-close gripper transaction",
+    "eligible_event": "first simGetContactInfo contact onset between one of the four frozen Panda finger collision shapes and the active drawer shape for the current variation",
+    "eligible_event_kind": "maintained_contact_onset_during_close",
+    "eligible_contact_stability_seconds": 0.0,
+    "intervention": "at the first eligible contact onset, stop further closing at the earliest adapter-supported simulator-step boundary and reverse the selected gripper to open amount 1.0 without changing the arm path or drawer state",
+    "effect": {
+      "actual_open_amount_above": 0.9,
+      "validated_active_drawer_contacts_absent": true,
+      "active_drawer_attachment_absent": true,
+      "intervention_occurrences": 1,
+      "drawer_pose_or_joint_setter_calls": 0,
+      "arm_target_changes": 0
+    },
+    "required_event_records": [
+      "close_transaction_started",
+      "validated_contact_onset",
+      "reverse_open_started",
+      "physical_effect_confirmed"
+    ],
+    "required_event_fields": {
+      "common": [
+        "sim_step",
+        "simulation_time_s",
+        "arm",
+        "actual_open_amount",
+        "native_closure_in_progress"
+      ],
+      "validated_contact_onset": [
+        "finger_shape_name",
+        "active_drawer_name",
+        "active_drawer_canonical_id",
+        "raw_contact_handles",
+        "contact_source"
+      ],
+      "reverse_open_started": [
+        "applied_open_amount"
+      ],
+      "physical_effect_confirmed": [
+        "validated_contact_objects",
+        "attachment_objects",
+        "intervention_occurrences",
+        "drawer_setter_calls",
+        "arm_target_changes"
+      ]
+    },
+    "distinction_from_relation_loss": "missed interaction intercepts the first contact onset before a maintained relation exists; relation loss requires validated contact to remain stable for at least 0.15 seconds before opening the gripper"
+  },
+  "forbidden": [
+    "using proximity or distance as the eligible contact event",
+    "using policy task state, policy belief, alarm output, cycle fraction, final success, or post-hoc outcome to select the event",
+    "waiting for the close transaction to finish before recording the eligible contact onset",
+    "treating a later closed-gripper hold command as a new open-to-close transaction",
+    "moving, resetting, translating, or directly setting the articulated drawer or its joint",
+    "changing the arm path or TCP target",
+    "counting a transient contact onset as relation loss without 0.15 seconds of stable validated contact",
+    "changing labels in the original failed development rows"
+  ],
+  "development_repair": {
+    "affected_cell": {
+      "task": "open_drawer",
+      "fault_family": "missed_interaction",
+      "episodes": 10
+    },
+    "rvt": "archive and invalidate the complete amendment-1 development bundle, then rerun all 180 assigned episode IDs under one amendment-2 fault-adapter identity",
+    "racer_not_started": "run the complete 180-row development set under amendment 2",
+    "racer_already_started": "apply the same invalidation rule to every result produced under the superseded Open Drawer missed-interaction definition",
+    "full_rerun_reason": "the frozen development gate requires one non-empty value for each of seven result identities across all 180 rows; retaining 170 amendment-1 rows would mix fault-adapter identities or falsely rebind old executions",
+    "original_artifacts_overwritten": false,
+    "full_rerun_archive_requires": [
+      "the original episodes aggregate and failed gate with SHA256",
+      "one immutable per-episode artifact for each of the original 180 assigned episode IDs"
+    ],
+    "formal_remains_locked": true
+  },
+  "identity": {
+    "base_fault_config_identity_remains_sha256_of_native6_physical_protocol_v3_json_for_result_schema_compatibility": true,
+    "system_identity_must_add": [
+      "physical_protocol_amendment_2_identity",
+      "protocol_amendment_2_identity"
+    ]
+  }
+}

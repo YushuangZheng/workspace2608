@@ -20,7 +20,8 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 _DIAGNOSTIC_SCRIPT = (
     _REPOSITORY_ROOT
     / "evaluations"
-    / "phase6_rlbench_integration"
+    / "development"
+    / "rlbench_integration"
     / "run_normal_diagnostic_subset.py"
 )
 _SPEC = importlib.util.spec_from_file_location(
@@ -52,7 +53,7 @@ def test_store_bottle_diagnostic_uses_frozen_v4_budgets():
     assert diagnostic._task_protocol_args("bimanual_sweep_to_dustpan") == []
 
 
-def test_diagnostic_parser_defaults_to_closed_loop_and_supports_frozen_baseline():
+def test_diagnostic_parser_defaults_to_tsf_and_supports_frozen_baseline():
     parser = diagnostic.build_parser()
     common = [
         "--task",
@@ -68,15 +69,15 @@ def test_diagnostic_parser_defaults_to_closed_loop_and_supports_frozen_baseline(
     ]
 
     parsed = parser.parse_args(common)
-    assert parsed.policy_type == "closed_loop_multistream"
-    assert parsed.closed_loop_feature_profile == "full"
+    assert parsed.policy_type == "task_state_feedback"
+    assert parsed.tsf_feature_profile == "full"
     assert parser.parse_args(common + ["--policy-type", "dynamac"]).policy_type == (
         "dynamac"
     )
     assert (
         parser.parse_args(
-            common + ["--closed-loop-feature-profile", "progress_dynamic_roles"]
-        ).closed_loop_feature_profile
+            common + ["--tsf-feature-profile", "progress_dynamic_roles"]
+        ).tsf_feature_profile
         == "progress_dynamic_roles"
     )
 

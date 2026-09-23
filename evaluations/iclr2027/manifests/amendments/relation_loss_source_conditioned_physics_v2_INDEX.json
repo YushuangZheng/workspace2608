@@ -1,0 +1,36 @@
+{
+  "created_utc": "2026-09-11T19:06:00.660790+00:00",
+  "episode_assignments_changed": false,
+  "fault_family": "relation_loss",
+  "outputs": {
+    "main10_failure_train": {
+      "counts_by_task": {
+        "bimanual_lift_tray": 50,
+        "open_drawer": 50
+      },
+      "path": "evaluations/iclr2027/manifests/amendments/relation_loss_source_conditioned_physics_v2_main10_failure_train.jsonl",
+      "rows": 100,
+      "sha256": "613c8400aa8b7063735817911ed17846071f2d7a748dd75d20fa5bd8b33f6176",
+      "source": "evaluations/iclr2027/manifests/main10_failure_train.jsonl",
+      "source_sha256": "a39e0cdc70dff60d1069c8c78b73e5cc22381a3664de2d8fd93f4124598e69ed"
+    },
+    "main10_perturbed": {
+      "counts_by_task": {
+        "bimanual_lift_tray": 50,
+        "open_drawer": 50
+      },
+      "path": "evaluations/iclr2027/manifests/amendments/relation_loss_source_conditioned_physics_v2_main10_perturbed.jsonl",
+      "rows": 100,
+      "sha256": "20966cc414d0b7e053ba65d4b5f8bb6486efd0f0256b596607d16b2b334c56fa",
+      "source": "evaluations/iclr2027/manifests/main10_perturbed.jsonl",
+      "source_sha256": "6d59a96e313acbb9ca7eb0fc6bb542337d69d1479c05233c604ebbc7bb4ed7bf"
+    }
+  },
+  "revision": "relation_loss_source_conditioned_physics_v2",
+  "schema": "essay2608.iclr2027.relation-loss-amendment.v1",
+  "selection_read_episode_results": false,
+  "tasks": [
+    "open_drawer",
+    "bimanual_lift_tray"
+  ]
+}

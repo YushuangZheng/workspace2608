@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.util
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -12,6 +14,14 @@ from typing import Any, Mapping
 from evaluations.iclr2027.interfaces.runtime_monitor import RuntimeMonitor
 
 METHOD_CONFIG_ROOT = Path(__file__).resolve().parents[1] / "configs" / "methods"
+
+
+@dataclass(frozen=True)
+class _ConstantThresholdSchedule:
+    value: float
+
+    def threshold(self, _index: int) -> float:
+        return self.value
 
 
 @dataclass(frozen=True)
@@ -36,11 +46,11 @@ def load_method_spec(method: str | Path) -> MethodSpec:
     if payload.get("schema") != "essay2608.iclr2027.method-config.v1":
         raise ValueError(f"unsupported method config: {path}")
     policy_type = str(payload["policy_type"])
-    if policy_type not in {"dynamac", "closed_loop_multistream"}:
+    if policy_type not in {"dynamac", "task_state_feedback"}:
         raise ValueError(f"unsupported policy type: {policy_type}")
     profile = payload.get("feature_profile")
     if policy_type == "dynamac" and profile is not None:
-        raise ValueError("DynaMAC method configs cannot select a closed-loop profile")
+        raise ValueError("DynaMAC method configs cannot select a TSF feature profile")
     return MethodSpec(
         method_id=str(payload["method_id"]),
         paper_name=str(payload["paper_name"]),
@@ -62,6 +72,9 @@ def _monitor_mapping(
     if spec.monitor is None:
         return None
     value = dict(spec.monitor)
+    if task_id is not None:
+        value["_task_id"] = task_id
+    value["_method_config_sha256"] = spec.config_sha256
     if calibration is None:
         return value
     if task_id is None:
@@ -76,7 +89,18 @@ def _monitor_mapping(
     entry = calibration.get("tasks", {}).get(task_id)
     if not isinstance(entry, Mapping):
         raise ValueError(f"calibration artifact has no threshold for {task_id}")
-    value["threshold"] = float(entry["threshold"])
+    if "threshold_schedule" in entry:
+        from .fail_detect.conformal import TimeVaryingConformalBand
+
+        value["_threshold_schedule"] = TimeVaryingConformalBand.from_dict(
+            entry["threshold_schedule"]
+        )
+    elif "factory" in value:
+        value["_threshold_schedule"] = _ConstantThresholdSchedule(
+            float(entry["threshold"])
+        )
+    else:
+        value["threshold"] = float(entry["threshold"])
     value["persistence_cycles"] = int(entry["persistence_cycles"])
     return value
 
@@ -88,6 +112,14 @@ def _external_monitor(mapping: Mapping[str, Any]) -> RuntimeMonitor:
     module_name, attribute = factory.split(":", 1)
     if not module_name.startswith("evaluations.iclr2027.methods."):
         raise ValueError("external monitor factory must live under the method tree")
+    if importlib.util.find_spec("torch") is None:
+        if "DYNAMAC_POLICY_PYTHON" not in os.environ:
+            raise RuntimeError(
+                "PyTorch monitor requires DYNAMAC_POLICY_PYTHON in this environment"
+            )
+        from .remote import RemoteRuntimeMonitor
+
+        return RemoteRuntimeMonitor(mapping)
     constructor = getattr(importlib.import_module(module_name), attribute)
     monitor = (
         constructor.from_mapping(mapping)

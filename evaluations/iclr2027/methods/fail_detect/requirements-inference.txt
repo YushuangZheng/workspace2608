@@ -1,0 +1,5 @@
+# CPU adapter verification; no simulator, training pool or external model is required.
+# B tested Python 3.9.23 and torch 2.7.1+cu128 with inference on CPU.
+# Other platform builds must pass tools.validate_adapter before use.
+numpy==1.23.3
+torch==2.7.1

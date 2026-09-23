@@ -3,23 +3,27 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "essay2608"
-version = "1.0.0"
-description = "DynaMAC Algorithm 1 reproduction on R3 x S3"
+name = "task-state-feedback"
+version = "0.1.0"
+description = "Task-state feedback for robust multi-stage robot manipulation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
 midigap = ["scipy>=1.10"]
-test = ["pytest>=8"]
+test = ["pytest>=8", "ruff>=0.5"]
 
 [tool.setuptools]
 packages = [
     "essay2608",
     "essay2608.data",
     "essay2608.policy",
-    "essay2608.policy.closed_loop",
+    "essay2608.policy.tsf",
+    "essay2608.policy.tsf.control",
+    "essay2608.policy.tsf.inference",
+    "essay2608.policy.tsf.model",
+    "essay2608.policy.tsf.recovery",
 ]
 package-dir = { essay2608 = "source" }
 

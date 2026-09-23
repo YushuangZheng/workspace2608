@@ -41,6 +41,7 @@ from integrations.rlbench.rlbench_dynamac.core.task_specs import (
     CANDIDATE_FRAME_POLICY_SOURCE_STATUS,
     get_task_spec,
 )
+from integrations.rlbench.iclr2027.task_registry import experiment_task
 
 TABLE_I_DATA_ROOT = (
     Path(__file__).resolve().parents[2]
@@ -420,6 +421,19 @@ def test_task_registry_freezes_candidate_and_bimanual_coordination_provenance() 
             "LOCAL_INTERACTION_INFERENCE_REQUIRES_DEBUG_PLOTS"
         )
         assert inferred.segmentation_debug_plots_required is True
+
+
+def test_iclr_open_drawer_exposes_motion_relation_and_articulation_state() -> None:
+    spec = experiment_task("open_drawer").spec
+
+    assert spec.frame_names == ("drawer_panel", "drawer_support")
+    assert spec.action_frame_names == ("drawer_support",)
+    assert spec.scene_entity_names == ("drawer_panel",)
+    assert spec.recoverable_relation_frames == ("drawer_panel",)
+    assert spec.configuration_schema == {
+        "drawer_panel": {"joint_position": 1}
+    }
+    assert spec.expected_low_dim_size == 15
 
 
 def test_demo_adapter_routes_store_independent_and_handover_shared_union() -> None:

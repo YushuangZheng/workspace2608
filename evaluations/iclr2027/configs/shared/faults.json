@@ -1,5 +1,5 @@
 {
-  "schema": "essay2608.iclr2027.fault-protocol.v1",
+  "schema": "essay2608.iclr2027.fault-protocol.v2",
   "medium": {
     "actuation_delay_cycles": 12,
     "coordination_delay_cycles": 12,
@@ -19,6 +19,7 @@
     "late": 0.65
   },
   "eligibility": {
+    "environment_support_contact_tolerance_m": 0.001,
     "motion_trigger_distance_m": 0.005,
     "minimum_stable_relation_cycles": 3,
     "physical_displacement_tolerance_m": 0.005,
@@ -31,7 +32,11 @@
     "environment_change",
     "coordination_delay"
   ],
+  "relation_loss_action_by_source": {
+    "attachment": "release_and_translate_attached_entity",
+    "maintained_contact": "open_selected_gripper_in_place_without_entity_translation"
+  },
+  "environment_change_action": "move_selected_reference_with_physically_contacting_ungrasped_semantic_support_component",
   "injector_policy_state_access": false,
   "fault_identity_visible_to_policy_or_monitor": false
 }
-

@@ -1,0 +1,62 @@
+{
+  "schema": "essay2608.iclr2027.native6-b-return-contract-amendment.v3",
+  "status": "FROZEN_FOR_PARTIAL_DEVELOPMENT_MIGRATION_DELIVERY",
+  "amends": "evaluations/iclr2027/configs/shared/native6_b_return_contract_v3_amendment_2.json",
+  "source_protocol_amendment": "evaluations/iclr2027/results/e6_handoff/A_TO_B_E6_V3_PROTOCOL_AMENDMENT_3.json",
+  "scope": "migration evidence and return verification only",
+  "runtime_protocol_changed": false,
+  "episode_assignments_changed": false,
+  "result_identity_fields_changed": false,
+  "required_delivery_manifest_fields": [
+    "source_protocol_amendment_3_sha256"
+  ],
+  "migration_path_template": "evaluations/iclr2027/results/native_v3/<system>/development/amendment_2_migration.json",
+  "accepted_prior_migration_schemas": [
+    "essay2608.iclr2027.native6-v3-amendment-2-migration.v1"
+  ],
+  "partial_migration": {
+    "schema": "essay2608.iclr2027.native6-v3-amendment-3-migration.v1",
+    "mode": "partial_development_archived_then_full_rerun",
+    "allowed_systems": [
+      "racer"
+    ],
+    "expected_assignment_count": 180,
+    "expected_completed_old_episode_count": 75,
+    "required_old_partitions": [
+      "completed_episode_ids",
+      "started_incomplete_episode_ids",
+      "not_started_episode_ids"
+    ],
+    "partitions_must_be_disjoint": true,
+    "partitions_must_cover_frozen_manifest": true,
+    "retained_episode_ids": 0,
+    "executed_episode_ids": 180,
+    "final_episode_ids": 180,
+    "required_archive_fields": [
+      "archive_receipt",
+      "completed_episode_artifacts",
+      "started_incomplete_artifacts"
+    ],
+    "one_canonical_artifact_per_completed_or_incomplete_episode": true,
+    "complete_original_aggregate_required": false,
+    "complete_original_gate_required": false,
+    "old_results_may_enter_final_aggregate": false
+  },
+  "invalidated_archive_prefix_template": "evaluations/iclr2027/results/native_v3/<system>/development/invalidated/amendment_2/",
+  "required_false_fields": [
+    "original_results_overwritten",
+    "old_results_relabelled",
+    "old_results_rebound_to_amendment_2",
+    "old_results_reused_in_final"
+  ],
+  "required_tools": {
+    "B_builder": "evaluations/iclr2027/delivery/build_e6_v3_amendment_3_return.py",
+    "A_verifier": "evaluations/iclr2027/delivery/verify_e6_v3_amendment_3_b_return.py"
+  },
+  "formal_authorization": {
+    "status": "LOCKED",
+    "future_A_acceptance_path": "evaluations/iclr2027/results/e6_handoff/A_ACCEPTANCE_E6_V3_DEVELOPMENT.json"
+  },
+  "amendment_2_files_overwritten": false,
+  "archived_partial_results_deleted": false
+}

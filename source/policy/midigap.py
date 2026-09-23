@@ -459,7 +459,7 @@ class SelfCollisionSphere:
 
     The exterior of a sphere is nonconvex in 3D, so this constraint updates
     only mode weights and does not moment-match Gaussians. The confidence test
-    uses a bounding-sphere upper bound. Equation (22) rejects a mode only when
+    uses a bounding-sphere upper bound. The pruning rule rejects a mode only when
     its entire pose confidence ellipsoid is proven to lie in the forbidden
     region.
     """
@@ -670,7 +670,7 @@ def constrained_midigap_update(
             item_mean = mean[mode, time_index]
             item_covariance = covariance[mode, time_index]
             if not constraint.confidence_intersects(item_mean, item_covariance, confidence_z):
-                # Equation (22) assigns zero likelihood to an entire trajectory
+                # The pruning rule assigns zero likelihood to an entire trajectory
                 # mode if any 95% confidence region is disjoint from the feasible set.
                 hard_feasible[mode] = False
                 continue

@@ -1,0 +1,166 @@
+{
+  "schema": "essay2608.iclr2027.native6-object-contact-mapping.v1",
+  "status": "FROZEN_FOR_PREFLIGHT_AND_DEVELOPMENT",
+  "revision": "native6_object_contact_mapping_v3_amendment_1",
+  "scope": "Native-6 v3 RVT/RACER/Ours only",
+  "name_normalization": {
+    "copy_suffix_regex": "#[0-9]+$",
+    "prefix_or_substring_matching_allowed": false,
+    "descendant_membership_source": "live_parent_chain_to_exact_frozen_scene_root"
+  },
+  "gripper_contact_scope": {
+    "robot_model": "Panda",
+    "scope": "finger_collision_shapes_only",
+    "allowed_collision_shape_base_names": [
+      "Panda_leftfinger_respondable",
+      "Panda_leftfinger_force_contact",
+      "Panda_rightfinger_respondable",
+      "Panda_rightfinger_force_contact"
+    ],
+    "exclude_palm_wrist_arm_and_proximity_sensor": true,
+    "either_contact_pair_order_allowed": true,
+    "contact_source": "simGetContactInfo"
+  },
+  "task_object_scope": {
+    "arbitrary_dynamic_or_respondable_task_tree_shapes_allowed": false,
+    "reference_objects_and_success_sensors_allowed": false,
+    "contact_descendants_normalize_to_semantic_root": true,
+    "ambiguous_or_unresolved_objects_fail_closed": true
+  },
+  "tasks": {
+    "close_jar": {
+      "preflight_variations": [0],
+      "interaction_roots": [
+        {
+          "canonical_id": "lid",
+          "scene_root_name": "jar_lid0",
+          "role": "operated_object",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        }
+      ]
+    },
+    "open_drawer": {
+      "preflight_variations": [0, 1, 2],
+      "interaction_roots_by_variation": {
+        "0": [
+          {
+            "canonical_id": "drawer_bottom",
+            "scene_root_name": "drawer_bottom",
+            "role": "articulated_object",
+            "relation_sources": ["maintained_contact"],
+            "missed_interaction_mode": "maintained_contact_close_suppression"
+          }
+        ],
+        "1": [
+          {
+            "canonical_id": "drawer_middle",
+            "scene_root_name": "drawer_middle",
+            "role": "articulated_object",
+            "relation_sources": ["maintained_contact"],
+            "missed_interaction_mode": "maintained_contact_close_suppression"
+          }
+        ],
+        "2": [
+          {
+            "canonical_id": "drawer_top",
+            "scene_root_name": "drawer_top",
+            "role": "articulated_object",
+            "relation_sources": ["maintained_contact"],
+            "missed_interaction_mode": "maintained_contact_close_suppression"
+          }
+        ]
+      }
+    },
+    "insert_onto_square_peg": {
+      "preflight_variations": [0],
+      "interaction_roots": [
+        {
+          "canonical_id": "square_ring",
+          "scene_root_name": "square_ring",
+          "role": "operated_object",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        }
+      ]
+    },
+    "place_cups_3": {
+      "preflight_variations": [0],
+      "interaction_roots": [
+        {
+          "canonical_id": "cup0",
+          "scene_root_name": "mug0",
+          "role": "operated_object",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        },
+        {
+          "canonical_id": "cup1",
+          "scene_root_name": "mug1",
+          "role": "operated_object",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        },
+        {
+          "canonical_id": "cup2",
+          "scene_root_name": "mug2",
+          "role": "operated_object",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        }
+      ]
+    },
+    "stack_cups": {
+      "preflight_variations": [0],
+      "interaction_roots": [
+        {
+          "canonical_id": "cup1",
+          "scene_root_name": "cup1",
+          "role": "operated_object",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        },
+        {
+          "canonical_id": "cup2",
+          "scene_root_name": "cup2",
+          "role": "operated_object",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        },
+        {
+          "canonical_id": "cup3",
+          "scene_root_name": "cup3",
+          "role": "operated_object",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        }
+      ]
+    },
+    "sweep_to_dustpan": {
+      "preflight_variations": [0],
+      "interaction_roots": [
+        {
+          "canonical_id": "broom",
+          "scene_root_name": "broom",
+          "role": "operated_tool",
+          "relation_sources": ["attachment"],
+          "missed_interaction_mode": "attachment_suppression"
+        }
+      ]
+    }
+  },
+  "preflight": {
+    "must_finish_before_180_episode_development": true,
+    "must_not_count_as_development_or_formal_result": true,
+    "required_per_system": true,
+    "required_checks": [
+      "all active semantic roots resolve exactly once",
+      "all task contact shapes map through an exact root parent chain",
+      "all four Panda finger collision shapes resolve after copy-suffix normalization",
+      "Open Drawer observes at least one simGetContactInfo finger-to-active-drawer contact on a nominal probe for each variation",
+      "no reference object, success sensor, distractor jar, peg, spoke, dirt, palm, wrist, or arm shape enters the interaction set"
+    ],
+    "output_path_template": "evaluations/iclr2027/native_systems/<system>/e6_v3/mapping/OBJECT_MAPPING_PREFLIGHT.json",
+    "server_A_acceptance_required": true
+  }
+}

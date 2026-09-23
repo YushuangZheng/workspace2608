@@ -295,7 +295,7 @@ def test_algorithm_1_masks_linked_object_and_uses_virtual_frame(tmp_path) -> Non
     checkpoint = tmp_path / "dynamac.npz"
     policy.save(checkpoint)
     restored = DynaMAC.load(checkpoint)
-    assert restored.fingerprint() == policy.fingerprint()
+    assert restored.identity_digest() == policy.identity_digest()
     assert restored.summary() == policy.summary()
 
 
@@ -545,7 +545,7 @@ def test_failed_refit_restores_model_audit_and_live_episode(monkeypatch) -> None
             return value.item()
         return value
 
-    expected_fingerprint = policy.fingerprint()
+    expected_fingerprint = policy.identity_digest()
     expected_audit = freeze(policy.training_audit)
     expected_skill_index = policy._skill_index
     expected_time_index = policy._time_index
@@ -568,7 +568,7 @@ def test_failed_refit_restores_model_audit_and_live_episode(monkeypatch) -> None
     with np.testing.assert_raises_regex(RuntimeError, "synthetic rejected refit"):
         policy.fit(demonstrations)
 
-    assert policy.fingerprint() == expected_fingerprint
+    assert policy.identity_digest() == expected_fingerprint
     assert freeze(policy.training_audit) == expected_audit
     assert policy._skill_index == expected_skill_index
     assert policy._time_index == expected_time_index

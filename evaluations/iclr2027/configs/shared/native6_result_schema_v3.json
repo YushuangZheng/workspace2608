@@ -1,0 +1,43 @@
+{
+  "schema": "essay2608.iclr2027.native6-v3-result-contract.v1",
+  "episode_schema": "essay2608.iclr2027.native6-v3-episode-result.v1",
+  "protocol_revision": "native6_event_grounded_physics_v3",
+  "allowed_method_ids": ["rvt", "racer", "ours"],
+  "required_identity_fields": [
+    "config_identity",
+    "checkpoint_identity",
+    "environment_identity",
+    "fault_adapter_identity",
+    "fault_config_identity",
+    "audit_protocol_revision",
+    "manifest_identity"
+  ],
+  "required_physical_status_fields": [
+    "eligible",
+    "injection_triggered",
+    "physical_effect_confirmed",
+    "physically_triggered",
+    "eligible_sim_step",
+    "trigger_sim_step",
+    "effect_sim_step",
+    "eligible_time_s",
+    "trigger_time_s",
+    "effect_time_s",
+    "violation_onset_sim_step",
+    "violation_onset_time_s",
+    "violation_end_sim_step",
+    "violation_end_time_s",
+    "relation_restored_sim_step",
+    "relation_restored_time_s",
+    "completed_sim_steps",
+    "final_simulation_time_s"
+  ],
+  "required_cycle_partitions": [
+    "execution",
+    "simulator",
+    "physical_events",
+    "audit"
+  ],
+  "command_applied_state_separation_required": true,
+  "attachment_and_maintained_contact_sources_separate": true
+}

@@ -47,21 +47,43 @@ Thumbs.db
 /CoppeliaSim_Edu_V4_1_0_Ubuntu20_04.tar
 /CoppeliaSim_Edu_V4_1_0_Ubuntu20_04.tar.*
 
-# Reference papers and unrelated top-level data stay local.
-/DynaMAC.pdf
-/MiDiGaP.pdf
+# Local manuscript, research notes, reference papers, and unrelated top-level
+# data stay outside the code repository. The root project README is the only
+# tracked Markdown document at this level.
+/*.md
+!/README.md
+/*.pdf
+/*.zip
+/iclr2027/
 /data/
 
 # Local experiment outputs and release bundles
 /outputs/
 /artifacts/
 /release-artifacts/
+/tmp/
+/iclr2027/tmp/
 wandb/
 lightning_logs/
 *.log
 *.pid
 *.tmp
 *.temp
+
+# LaTeX build products
+/iclr2027/*.aux
+/iclr2027/*.bbl
+/iclr2027/*.blg
+/iclr2027/*.fdb_latexmk
+/iclr2027/*.fls
+/iclr2027/*.lof
+/iclr2027/*.lot
+/iclr2027/*.out
+/iclr2027/*.soc
+/iclr2027/*.synctex.gz
+/iclr2027/*.toc
+/iclr2027/*.upa
+/iclr2027/*.upb
 
 # RLBench data: commit the complete sealed evaluation set and only the five
 # authenticated training manifests. Raw demonstration pickles are distributed
@@ -93,32 +115,70 @@ lightning_logs/
 !/integrations/rlbench/models/v4/release_manifest.json
 
 # Raw formal results, diagnostics, replay manifests, and videos are generated
-# artifacts (some JSON files exceed GitHub's normal per-file limit). Publish
-# them as release assets; keep only the final human-readable baseline report.
+# artifacts (some JSON files exceed GitHub's normal per-file limit).
 /integrations/rlbench/results/**
-!/integrations/rlbench/results/v4/
-!/integrations/rlbench/results/v4/reports/
-!/integrations/rlbench/results/v4/reports/full_22_cell.md
+/integrations/rlbench/V4_PROTOCOL.md
 
-# ICLR 2027 rollout datasets and model/training artifacts are immutable local
-# data. Keep schemas, manifests, fixtures, and compact acceptance/handoff
-# records in Git; transfer canonical data paths listed by the handoff indexes.
+# Evaluation datasets, model/training artifacts, generated results, and
+# development diagnostics remain local. Source schemas, manifests, runners,
+# analysis code, and tests stay tracked.
 /evaluations/iclr2027/datasets/
 /evaluations/iclr2027/artifacts/
 /evaluations/iclr2027/results/**
-!/evaluations/iclr2027/results/a2_acceptance/
-!/evaluations/iclr2027/results/a2_acceptance/A2_ACCEPTANCE.json
-!/evaluations/iclr2027/results/a2_acceptance/B_FAILURE_TRAIN_HANDOFF.json
-!/evaluations/iclr2027/results/a2_acceptance/B_INTERFACE_HANDOFF.json
-!/evaluations/iclr2027/results/a2_acceptance/RESULTS.md
-!/evaluations/iclr2027/results/a3_acceptance/
-!/evaluations/iclr2027/results/a3_acceptance/A3_ACCEPTANCE.json
-!/evaluations/iclr2027/results/a3_acceptance/RESULTS.md
-!/evaluations/iclr2027/results/a4_integration/
-!/evaluations/iclr2027/results/a4_integration/A4_PARTIAL_STATUS.json
-!/evaluations/iclr2027/results/a4_integration/RESULTS.md
-!/evaluations/iclr2027/results/b_delivery/
-!/evaluations/iclr2027/results/b_delivery/*.json
+/evaluations/iclr2027/analysis/probes/
+/evaluations/iclr2027/delivery/
+
+# One-off experiment migration, promotion, and diagnostic helpers are retained
+# in local working copies, not in the reusable code repository.
+/evaluations/iclr2027/analysis/freeze_*.py
+/evaluations/iclr2027/analysis/install_*.py
+/evaluations/iclr2027/analysis/normalize_*.py
+/evaluations/iclr2027/analysis/prepare_*.py
+/evaluations/iclr2027/analysis/promote_*.py
+/evaluations/iclr2027/analysis/rebuild_*.py
+/evaluations/iclr2027/analysis/repair_*.py
+/evaluations/iclr2027/analysis/compare_m5_versions.py
+/evaluations/iclr2027/analysis/development_executor_trace.py
+/evaluations/iclr2027/analysis/m5_post_e4_impact.py
+/evaluations/iclr2027/analysis/m5_recovery_diagnostic.py
+/evaluations/iclr2027/analysis/a5_*.py
+/evaluations/iclr2027/analysis/a6_environment_change_*.py
+/evaluations/iclr2027/analysis/a6_pending_direct_identity_refresh_results.py
+/evaluations/iclr2027/analysis/a6_post_e4_main10_refresh_results.py
+/evaluations/iclr2027/analysis/audit_versioned_endpoint.py
+/evaluations/iclr2027/analysis/reaudit_endpoint_cell.py
+/evaluations/iclr2027/runners/*_diagnostic.py
+/evaluations/iclr2027/runners/*_refresh.py
+/evaluations/iclr2027/runners/a5.py
+/evaluations/iclr2027/runners/a6_endpoint_compatibility.py
+/evaluations/iclr2027/runners/a6_pending_lifecycle_stress.py
+
+# Native RVT/RACER execution stacks, machine identities, and run evidence are
+# maintained outside this source repository. Retain only the simulator-facing
+# adapter used by the TSF Native-6 runner.
+/evaluations/iclr2027/native_systems/**
+!/evaluations/iclr2027/native_systems/rvt/
+!/evaluations/iclr2027/native_systems/rvt/e6_v3/
+!/evaluations/iclr2027/native_systems/rvt/e6_v3/physics.py
+!/evaluations/iclr2027/native_systems/rvt/e6_v3/amendment2.py
+!/evaluations/iclr2027/native_systems/rvt/e6_v3/mapping/
+!/evaluations/iclr2027/native_systems/rvt/e6_v3/mapping/candidate_filter.py
+/evaluations/iclr2027/native6_v3/*.md
+!/evaluations/iclr2027/native6_v3/README.md
+/evaluations/iclr2027/methods/failure_supervised/HANDOFF.md
+/evaluations/iclr2027/manifests/amendments/invalidated_legacy_*/
+
+# Historical handoff acceptance tests bind local result manifests byte for
+# byte and belong with the untracked delivery evidence, not the source suite.
+/evaluations/iclr2027/tests/test_a2_infrastructure.py
+/evaluations/iclr2027/tests/test_a4_integration.py
+/evaluations/iclr2027/tests/test_e6_native_handoff.py
+/evaluations/iclr2027/tests/test_e6_native_v3*.py
+/evaluations/iclr2027/tests/test_e6_v3_racer_mi_diagnostic_contract.py
+
+# Historical implementation-stage checks remain available in the local
+# workspace but are not part of the maintained source distribution.
+/evaluations/development/
 
 # Only pinned notices and lock files belong under third_party. Source trees,
 # archives, conda prefixes, compiled extensions, and overlays remain local.

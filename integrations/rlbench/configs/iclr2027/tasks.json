@@ -18,11 +18,11 @@
     "open_drawer": {
       "paper_task_name": "Open Drawer", "module": "integrations.rlbench.iclr2027.tasks", "class_name": "ICLROpenDrawer", "bimanual": false,
       "paper_evaluation_group": "Main-10/Stress-4/Native-6", "paper_scenarios": ["static"],
-      "source_expression": "ICLROpenDrawer.get_low_dim_state: [selected drawer joint pose, joint position]", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
+      "source_expression": "ICLROpenDrawer.get_low_dim_state: [selected moving drawer pose, selected drawer joint support pose, joint position]", "source_status": "PROJECT_AUDITED_COMPACT_TASK_STATE",
       "candidate_frame_policy": "ALL_GET_LOW_DIM_STATE_FRAMES_IN_SOURCE_ORDER", "candidate_frame_policy_source_status": "AUTHOR_EMAIL_EXPLICIT_20260814",
       "segmentation_coordination": "single", "segmentation_coordination_source_status": "SINGLE_ARM_NOT_APPLICABLE", "segmentation_debug_plots_required": true,
-      "pose_chunks": [{"name": "drawer", "role": "articulated_object"}],
-      "configuration_chunks": [{"entity": "drawer", "name": "joint_position", "size": 1}]
+      "pose_chunks": [{"name": "drawer_panel", "role": "articulated_object", "action_reference": false}, {"name": "drawer_support", "role": "environment_reference"}],
+      "configuration_chunks": [{"entity": "drawer_panel", "name": "joint_position", "size": 1}]
     },
     "insert_onto_square_peg": {
       "paper_task_name": "Insert Onto Square Peg", "module": "rlbench.tasks.insert_onto_square_peg", "class_name": "InsertOntoSquarePeg", "bimanual": false,

@@ -566,7 +566,7 @@ def _sealed_episode_plan(replay_batch, original, episode):
     if plan.variation != variation:
         raise RuntimeError("sealed replay plan variation is inconsistent")
 
-    plan_fingerprint = plan.fingerprint()
+    plan_fingerprint = plan.identity_digest()
     if replay_batch["family"] == "coordination":
         binding = original.get("staged_source_binding")
         row_fingerprint = (
@@ -642,7 +642,7 @@ def _validate_replay_plan(replay_batch, replay, plan):
         replay_fingerprint = replay.get("motion_plan_fingerprint")
         if (
             not isinstance(binding, dict)
-            or binding.get("plan_fingerprint") != plan.fingerprint()
+            or binding.get("plan_fingerprint") != plan.identity_digest()
             or binding.get("formal_source_bound") is not True
             or binding.get("task_semantics_matched") is not True
             or binding.get("task_tree_matched") is not True
@@ -654,7 +654,7 @@ def _validate_replay_plan(replay_batch, replay, plan):
         replay_fingerprint = replay.get("motion_plan_fingerprint")
         if (
             not isinstance(binding, dict)
-            or binding.get("motion_plan_fingerprint") != plan.fingerprint()
+            or binding.get("motion_plan_fingerprint") != plan.identity_digest()
             or binding.get("formal_source_bound") is not True
             or binding.get("task_semantics_matched") is not True
             or binding.get("task_tree_matched") is not True
@@ -666,7 +666,7 @@ def _validate_replay_plan(replay_batch, replay, plan):
         replay_fingerprint = replay.get("motion_plan_fingerprint")
     fresh = replay.get("fresh_task_generation")
     if (
-        replay_fingerprint != plan.fingerprint()
+        replay_fingerprint != plan.identity_digest()
         or not isinstance(fresh, dict)
         or fresh.get("episode_seed") != plan.validation.get("source_seed")
         or fresh.get("variation") != plan.variation
@@ -1473,7 +1473,7 @@ def _authenticated_replay_trigger(source, task, worker, budgets):
                 scenario_reference_steps=protocol.get("trigger_reference_steps"),
             )
             registry, authentication = (
-                direct_evaluate._authenticated_v3_dynamic_trigger(args, worker)
+                direct_evaluate._authenticated_tsf_dynamic_trigger(args, worker)
             )
         else:
             args = SimpleNamespace(
@@ -1987,7 +1987,7 @@ def record(args):
                     "episode_seed": source["seed"] + warmup_episode,
                     "formal_reset_seed": warmup_reset_seed,
                     "variation": warmup_variation,
-                    "sealed_plan_fingerprint": warmup_plan.fingerprint(),
+                    "sealed_plan_fingerprint": warmup_plan.identity_digest(),
                     "fresh_generation_index": warmup_generation.get("generation_index"),
                     "source_outcome": (
                         "success" if warmup_source.get("success") else "failure"
@@ -2027,7 +2027,7 @@ def record(args):
                 originals[episode],
                 episode,
             )
-            plan_fingerprint = motion_plan.fingerprint()
+            plan_fingerprint = motion_plan.identity_digest()
 
             def run_attempt(attempt_ordinal):
                 (

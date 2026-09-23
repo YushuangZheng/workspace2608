@@ -1,0 +1,18 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "M3",
+  "paper_name": "FAIL-Detect + Retry",
+  "policy_type": "dynamac",
+  "feature_profile": null,
+  "monitor": {
+    "kind": "fail_detect",
+    "factory": "evaluations.iclr2027.methods.fail_detect.runtime:CanonicalFailDetectMonitor",
+    "backend_config": "evaluations/iclr2027/configs/methods/m3_fail_detect_main10.json",
+    "checkpoint_root": "evaluations/iclr2027/artifacts/checkpoints/m3"
+  },
+  "recovery": {
+    "kind": "skill_retry",
+    "maximum_retries": 1,
+    "budget_cycles": 400
+  }
+}

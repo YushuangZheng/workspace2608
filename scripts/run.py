@@ -45,7 +45,7 @@ def load_config(path: Path) -> DynaMACConfig:
 
 def compact_summary(policy: DynaMAC) -> dict:
     return {
-        "fingerprint": policy.fingerprint(),
+        "fingerprint": policy.identity_digest(),
         "frames": list(policy.frame_names),
         "map_modal_path": list(policy._select_mode_path("map")),
         "skills": [

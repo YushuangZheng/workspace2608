@@ -40,14 +40,20 @@ class ICLRCloseJar(CloseJar):
 
 
 class ICLROpenDrawer(OpenDrawer):
-    """Expose the selected drawer pose and its internal joint coordinate."""
+    """Expose the selected moving drawer, its support, and joint coordinate."""
 
     def __init__(self, pyrep, robot):
         super().__init__(pyrep, robot, name="open_drawer")
 
     def get_low_dim_state(self) -> np.ndarray:
+        option = self._options[self._current_index]
+        panel = Shape(f"drawer_{option}")
         joint = self._joints[self._current_index]
-        return _flat(joint.get_pose(), [joint.get_joint_position()])
+        return _flat(
+            panel.get_pose(),
+            joint.get_pose(),
+            [joint.get_joint_position()],
+        )
 
 
 class _FixedVariationMixin:

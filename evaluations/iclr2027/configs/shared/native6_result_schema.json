@@ -1,0 +1,63 @@
+{
+  "schema": "essay2608.iclr2027.native6-result-contract.v1",
+  "episode_schema": "essay2608.iclr2027.native-system-episode-result.v1",
+  "allowed_method_ids": [
+    "rvt",
+    "racer",
+    "ours"
+  ],
+  "required_episode_fields": [
+    "schema",
+    "episode_id",
+    "source_episode_id",
+    "pair_id",
+    "method_id",
+    "task",
+    "variation",
+    "seed",
+    "condition",
+    "fault_family",
+    "fault_severity",
+    "trigger_stage",
+    "horizon",
+    "config_identity",
+    "checkpoint_identity",
+    "environment_identity",
+    "eligible",
+    "physically_triggered",
+    "violation_onset_cycle",
+    "violation_end_cycle",
+    "relation_restored_cycle",
+    "final_success",
+    "cycles",
+    "termination_reason",
+    "infrastructure_error",
+    "wall_seconds",
+    "peak_memory_kib",
+    "cycle_file",
+    "cycle_file_sha256",
+    "cycle_records"
+  ],
+  "required_cycle_partitions": [
+    "audit",
+    "execution"
+  ],
+  "required_audit_fields": [
+    "eligible",
+    "physically_triggered",
+    "violation_onset_cycle",
+    "violation_end_cycle",
+    "physical_relation",
+    "relation_restored_cycle",
+    "task_success"
+  ],
+  "large_observation_policy": {
+    "rgb_point_cloud_video_required_for_every_cycle": false,
+    "compressed_physical_audit_cycles_required": true,
+    "selected_qualitative_media_may_be_delivered_separately": true
+  },
+  "result_roots": {
+    "rvt": "evaluations/iclr2027/results/native/rvt/",
+    "racer": "evaluations/iclr2027/results/native/racer/"
+  }
+}

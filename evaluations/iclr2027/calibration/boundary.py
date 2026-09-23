@@ -16,20 +16,20 @@ from essay2608.policy import (
     DynaMAC,
     synchronized_bimanual_demonstrations,
 )
-from essay2608.policy.closed_loop import (
-    ClosedLoopMultiStreamPolicy,
-    ClosedLoopTaskModelBuilder,
-    ClosedLoopTaskModelConfig,
+from essay2608.policy.tsf import (
+    TSFMultiStreamPolicy,
+    TSFTaskModelBuilder,
+    TSFTaskModelConfig,
 )
-from evaluations.development.phase23_component_ab.run import ArmCase
-from evaluations.development.phase4_boundary_calibration.run import run
+from evaluations.development.component_comparison.run import ArmCase
+from evaluations.development.boundary_calibration.run import run
 from integrations.rlbench.iclr2027.build_assets import (
-    CLOSED_LOOP_ROOT,
+    TSF_MODEL_ROOT,
     DATA_ROOT,
     DYNAMAC_ROOT,
-    PHASE6_DATA_ROOT,
-    PHASE6_DYNAMAC_ROOT,
-    PHASE6_SEGMENTATION_CONFIG,
+    BIMANUAL_DATA_ROOT,
+    DYNAMAC_BACKBONE_ROOT,
+    BIMANUAL_SEGMENTATION_CONFIG,
     SEGMENTATION_CONFIG,
 )
 from integrations.rlbench.iclr2027.task_registry import experiment_task
@@ -52,9 +52,9 @@ DEFAULT_CONFIG = (
 )
 DEFAULT_OUTPUT = (
     REPOSITORY_ROOT
-    / "evaluations/iclr2027/artifacts/calibration/normal_task_boundaries/v1"
+    / "evaluations/iclr2027/artifacts/calibration/normal_task_boundaries/main10"
 )
-TASK_MODEL_CONFIG = REPOSITORY_ROOT / "configs/closed_loop_task_model.json"
+TASK_MODEL_CONFIG = REPOSITORY_ROOT / "configs/tsf_task_model.json"
 
 
 def _json(path: Path) -> dict:
@@ -68,15 +68,15 @@ def load_cases(task_id: str, demonstration_count: int) -> list[ArmCase]:
     """Load the exact A1 models and their originating successful demos."""
 
     task = experiment_task(task_id)
-    data_root = PHASE6_DATA_ROOT if task.spec.bimanual else DATA_ROOT
-    base_root = PHASE6_DYNAMAC_ROOT if task.spec.bimanual else DYNAMAC_ROOT
+    data_root = BIMANUAL_DATA_ROOT if task.spec.bimanual else DATA_ROOT
+    base_root = DYNAMAC_BACKBONE_ROOT if task.spec.bimanual else DYNAMAC_ROOT
     if demonstration_count < 1:
         raise ValueError("calibration requires at least one normal replay")
     paths = tuple(demonstration_paths(data_root, task_id, demonstration_count))
     episodes = load_low_dim_obs_pickles(paths)
     names = [path.parent.name for path in paths]
     segmentation = load_rlbench_segmentation_config(
-        PHASE6_SEGMENTATION_CONFIG if task.spec.bimanual else SEGMENTATION_CONFIG
+        BIMANUAL_SEGMENTATION_CONFIG if task.spec.bimanual else SEGMENTATION_CONFIG
     )
     converted = (
         make_bimanual_demonstrations(
@@ -93,8 +93,8 @@ def load_cases(task_id: str, demonstration_count: int) -> list[ArmCase]:
             config=segmentation,
         )
     )
-    builder = ClosedLoopTaskModelBuilder(
-        ClosedLoopTaskModelConfig(**_json(TASK_MODEL_CONFIG))
+    builder = TSFTaskModelBuilder(
+        TSFTaskModelConfig(**_json(TASK_MODEL_CONFIG))
     )
     model_root = base_root / task_id
     if task.spec.bimanual:
@@ -106,8 +106,8 @@ def load_cases(task_id: str, demonstration_count: int) -> list[ArmCase]:
     else:
         base = DynaMAC.load(model_root / "model.npz")
         base_policies = {"single": base}
-    closed = ClosedLoopMultiStreamPolicy.load(
-        CLOSED_LOOP_ROOT / task_id,
+    tsf_policy = TSFMultiStreamPolicy.load(
+        TSF_MODEL_ROOT / task_id,
         base_policies=base_policies,
     )
     if not task.spec.bimanual:
@@ -117,7 +117,7 @@ def load_cases(task_id: str, demonstration_count: int) -> list[ArmCase]:
                 task_id,
                 "single",
                 base,
-                closed.task_models["single"],
+                tsf_policy.task_models["single"],
                 demonstrations,
                 builder._align_demonstrations(base, demonstrations),
                 task.spec.recoverable_relation_frames,
@@ -140,7 +140,7 @@ def load_cases(task_id: str, demonstration_count: int) -> list[ArmCase]:
                 task_id,
                 arm,
                 policy,
-                closed.task_models[arm],
+                tsf_policy.task_models[arm],
                 demonstrations,
                 builder._align_demonstrations(policy, demonstrations),
                 task.spec.recoverable_relation_frames,

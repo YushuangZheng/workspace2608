@@ -46,7 +46,7 @@ from integrations.rlbench.iclr2027.task_registry import (
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     DEFAULT_FINAL_SETTLING_PHYSICS_STEPS,
-    GLOBAL_IK_CONTROLLER_PROFILE,
+    HYBRID_IK_CONTROLLER_PROFILE,
     commit_joint_hold_after_primary_failure,
     initialize_fresh_task_generation,
     policy_action_execution_status,
@@ -64,8 +64,13 @@ DEFAULT_POLICY_PYTHON = Path(
 )
 SINGLE_MODELS = INTEGRATION_ROOT / "models" / "iclr2027" / "dynamac"
 BIMANUAL_MODELS = INTEGRATION_ROOT / "models" / "v4"
-CLOSED_LOOP_MODELS = INTEGRATION_ROOT / "models" / "iclr2027" / "closed_loop"
+TSF_MODELS = INTEGRATION_ROOT / "models" / "iclr2027" / "tsf"
 FAULT_CONFIG = REPOSITORY_ROOT / "evaluations" / "iclr2027" / "configs" / "shared" / "faults.json"
+
+# One executor identity is shared by every controlled method.  Keep this
+# explicit at the formal runner boundary so the legacy GLOBAL profile cannot
+# silently restore its historical "every applied action is reached" contract.
+CONTROLLED_EXECUTOR_PROFILE = HYBRID_IK_CONTROLLER_PROFILE
 
 
 def _load_json(path: Path) -> dict:
@@ -182,10 +187,21 @@ def _policy_process(
     diagnostics_dir: Path | None = None,
 ):
     boundary_root = None
+    tsf_models = TSF_MODELS
     if method.runtime is not None:
         configured = method.runtime.get("boundary_config_root")
         if configured is not None:
             boundary_root = REPOSITORY_ROOT / str(configured)
+        configured = method.runtime.get("tsf_models_root")
+        if configured is not None:
+            candidate = (REPOSITORY_ROOT / str(configured)).resolve()
+            try:
+                candidate.relative_to(REPOSITORY_ROOT.resolve())
+            except ValueError as error:
+                raise ValueError(
+                    "TSF model root must stay inside the repository"
+                ) from error
+            tsf_models = candidate
     if task.spec.bimanual:
         from integrations.rlbench.rlbench_dynamac.eval.direct_evaluate import PolicyProcess
 
@@ -194,9 +210,9 @@ def _policy_process(
             task.task_id,
             BIMANUAL_MODELS,
             policy_type=method.policy_type,
-            closed_loop_models_dir=CLOSED_LOOP_MODELS,
-            closed_loop_feature_profile=method.feature_profile or "full",
-            closed_loop_boundary_config_root=boundary_root,
+            tsf_models_dir=tsf_models,
+            tsf_feature_profile=method.feature_profile or "full",
+            tsf_boundaries_config_root=boundary_root,
             diagnostics_dir=diagnostics_dir,
         )
     from integrations.rlbench.rlbench_dynamac.eval.unimanual_evaluate import PolicyProcess
@@ -206,10 +222,10 @@ def _policy_process(
         task.task_id,
         SINGLE_MODELS,
         policy_type=method.policy_type,
-        closed_loop_models_dir=CLOSED_LOOP_MODELS,
-        closed_loop_feature_profile=method.feature_profile or "full",
+        tsf_models_dir=tsf_models,
+        tsf_feature_profile=method.feature_profile or "full",
         task_specs_path=TASK_SPECS_PATH,
-        closed_loop_boundary_config_root=boundary_root,
+        tsf_boundaries_config_root=boundary_root,
         diagnostics_dir=diagnostics_dir,
     )
 
@@ -238,6 +254,24 @@ def _reference_entries(policy_state: Mapping[str, Any]) -> dict[str, dict[str, i
     return result
 
 
+def _evaluator_policy_audit(response: Mapping[str, Any]) -> dict:
+    """Return sanitized policy lifecycle facts for evaluator-side accounting."""
+
+    raw = response.get("evaluator_audit")
+    raw_arms = raw.get("arms", {}) if isinstance(raw, Mapping) else {}
+    result = {}
+    if isinstance(raw_arms, Mapping):
+        for arm, value in raw_arms.items():
+            if not isinstance(value, Mapping):
+                continue
+            result[str(arm)] = {
+                "mode_before": value.get("mode_before"),
+                "mode_after": value.get("mode_after"),
+                "reentry_committed": bool(value.get("reentry_committed", False)),
+            }
+    return {"arms": result}
+
+
 def _environment(task):
     import rlbench.environment as environment_module
     from rlbench.observation_config import ObservationConfig
@@ -255,8 +289,8 @@ def _environment(task):
 
         environment = environment_module.Environment(
             action_mode=_make_action_mode(
-                GLOBAL_IK_CONTROLLER_PROFILE,
-                _controller_config(GLOBAL_IK_CONTROLLER_PROFILE),
+                CONTROLLED_EXECUTOR_PROFILE,
+                _controller_config(CONTROLLED_EXECUTOR_PROFILE),
             ),
             obs_config=configuration,
             headless=True,
@@ -271,8 +305,8 @@ def _environment(task):
 
     environment = environment_module.Environment(
         action_mode=_make_action_mode(
-            GLOBAL_IK_CONTROLLER_PROFILE,
-            _controller_config(GLOBAL_IK_CONTROLLER_PROFILE),
+            CONTROLLED_EXECUTOR_PROFILE,
+            _controller_config(CONTROLLED_EXECUTOR_PROFILE),
         ),
         obs_config=configuration,
         headless=True,
@@ -288,6 +322,33 @@ def _environment(task):
 def _injector_metadata(environment: Any) -> Optional[dict]:
     getter = getattr(environment, "protocol_metadata", None)
     return dict(getter()) if callable(getter) else None
+
+
+def _commit_structured_policy_failure(
+    worker: Any,
+    response: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve a policy-declared terminal failure without applying its action."""
+
+    if response.get("policy_failed") is not True:
+        return None
+    transaction_id = response.get("transaction_id")
+    if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
+        raise RuntimeError(
+            "failed TSF policy cycle did not return a transaction id"
+        )
+    failure_reasons = response.get("failure_reasons", {})
+    if not isinstance(failure_reasons, Mapping):
+        raise RuntimeError(
+            "failed TSF policy cycle returned invalid failure reasons"
+        )
+    worker.request(
+        "commit",
+        transaction_id=transaction_id,
+        primary_action_status="stopped",
+        primary_action_applied=False,
+    )
+    return dict(failure_reasons)
 
 
 def run_episode(
@@ -332,12 +393,15 @@ def run_episode(
     cycles = 0
     invalid_actions = 0
     recovery_cycles = 0
+    policy_recovery_cycles = 0
+    policy_reentry_cycles = []
     first_alarm_cycle = None
     false_interventions = 0
     retry_start_skills: dict[str, int] | None = None
     previous_violation_active = False
     success = False
     reason = "infrastructure_error"
+    policy_failure_reasons: dict[str, Any] = {}
     generation = None
     policy_identity = None
     final_injector = None
@@ -362,11 +426,17 @@ def run_episode(
                 verify_instance=False,
             )
         )
+        episode_diagnostics_dir = (
+            None
+            if policy_diagnostics_dir is None
+            else Path(policy_diagnostics_dir)
+            / str(row["episode_id"]).replace("/", "__")
+        )
         worker = _policy_process(
             task,
             policy_python,
             method_spec,
-            diagnostics_dir=policy_diagnostics_dir,
+            diagnostics_dir=episode_diagnostics_dir,
         )
         policy_identity = dict(worker.model_identity)
         worker.request("reset", observation)
@@ -380,6 +450,7 @@ def run_episode(
                     horizon=int(row["horizon"]),
                     feature_schema="essay2608.iclr2027.causal-features.v1",
                     method_config_hash=method_spec.config_sha256,
+                    checkpoint_hash=getattr(monitor, "checkpoint_hash", None),
                 )
             )
         wrapped = build_fault_environment(
@@ -422,6 +493,11 @@ def run_episode(
         }
         for cycle in range(int(row["horizon"])):
             response = worker.request("act", observation)
+            structured_failure = _commit_structured_policy_failure(worker, response)
+            if structured_failure is not None:
+                policy_failure_reasons = structured_failure
+                reason = "policy_structured_failure"
+                break
             action = response.get("action")
             if action is None:
                 settling = run_final_settling(
@@ -437,6 +513,18 @@ def run_episode(
                 break
             policy_command = np.asarray(action, dtype=np.float64)
             policy_state = _compact_policy_state(response, cycle)
+            evaluator_policy_audit = _evaluator_policy_audit(response)
+            policy_modes = {
+                str(value.get("mode_after", "")).lower()
+                for value in evaluator_policy_audit["arms"].values()
+            }
+            if policy_modes & {"verify_link", "recovery", "reentry"}:
+                policy_recovery_cycles += 1
+            if any(
+                bool(value.get("reentry_committed", False))
+                for value in evaluator_policy_audit["arms"].values()
+            ):
+                policy_reentry_cycles.append(cycle)
             entries = _reference_entries(policy_state)
             if retry is not None and entries:
                 representative = entries[sorted(entries)[0]]
@@ -481,6 +569,7 @@ def run_episode(
                     if response.get("action") is None:
                         raise RuntimeError("Skill-Retry produced no entry action")
                     command = np.asarray(response["action"], dtype=np.float64)
+                    evaluator_policy_audit = _evaluator_policy_audit(response)
             if retry is not None and retry.in_recovery:
                 recovery_cycles += 1
                 retry.consume_cycle()
@@ -536,7 +625,15 @@ def run_episode(
                 injector_event_cursor = len(events)
                 final_injector = injector
             audit = auditor.after_step(cycle, observation, cycle_injector)
-            previous_violation_active = bool(audit.get("violation_active", False))
+            # The frozen auditor represents an active violation by an onset
+            # without a matching end; it intentionally has no separate
+            # ``violation_active`` field.  Derive the runtime flag from that
+            # canonical interval so a correctly timed retry is not counted as
+            # a false intervention.
+            previous_violation_active = bool(
+                audit.get("violation_onset_cycle") is not None
+                and audit.get("violation_end_cycle") is None
+            )
             if retry is not None and retry.in_recovery and retry_start_skills:
                 current_entries = _reference_entries(
                     _compact_policy_state(response, cycle)
@@ -557,6 +654,7 @@ def run_episode(
                     "policy_complete": bool(policy_complete),
                     "injector": cycle_injector,
                     "monitor": monitor_diagnostic,
+                    "policy_audit": evaluator_policy_audit,
                     "retry": (
                         None
                         if retry_decision is None
@@ -610,6 +708,16 @@ def run_episode(
                 environment.shutdown()
         finally:
             restore_scene()
+    violation_onset = audit_summary.get("violation_onset_cycle")
+    legal_reentry_cycle = next(
+        (
+            value
+            for value in policy_reentry_cycles
+            if violation_onset is None or value >= int(violation_onset)
+        ),
+        None,
+    )
+    audit_summary["legal_reentry_cycle"] = legal_reentry_cycle
     summary = {
         "schema": EPISODE_SCHEMA,
         "episode_id": str(row["episode_id"]),
@@ -645,13 +753,18 @@ def run_episode(
         "final_success": bool(success),
         "reason": reason,
         "termination_reason": reason,
+        "policy_failure_reasons": policy_failure_reasons,
         "cycles": int(cycles),
-        "recovery_cycles": int(recovery_cycles),
+        "recovery_cycles": int(recovery_cycles + policy_recovery_cycles),
+        "generic_retry_cycles": int(recovery_cycles),
+        "policy_recovery_cycles": int(policy_recovery_cycles),
         "first_alarm_cycle": first_alarm_cycle,
         "false_interventions": int(false_interventions),
         "relation_restored_cycle": audit_summary.get("relation_restored_cycle"),
-        "legal_reentry_cycle": audit_summary.get("legal_reentry_cycle"),
-        "post_reentry_completion": None,
+        "legal_reentry_cycle": legal_reentry_cycle,
+        "post_reentry_completion": (
+            None if legal_reentry_cycle is None else bool(success)
+        ),
         "invalid_actions": int(invalid_actions),
         "wall_seconds": time.monotonic() - started,
         "peak_memory_kib": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),

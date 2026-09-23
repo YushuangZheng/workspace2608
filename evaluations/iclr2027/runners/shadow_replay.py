@@ -85,7 +85,10 @@ def replay_shadow(
     method: str,
     calibration_path: Path | None = None,
     condition: str | None = None,
+    task: str | None = None,
     limit_per_task: int | None = None,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
 ) -> dict[str, Any]:
     spec = load_method_spec(method)
     calibration = (
@@ -96,6 +99,8 @@ def replay_shadow(
     rows = _manifest_rows(manifest_path)
     if condition is not None:
         rows = [row for row in rows if row.get("condition") == condition]
+    if task is not None:
+        rows = [row for row in rows if row.get("task") == task]
     if limit_per_task is not None:
         counts: dict[str, int] = defaultdict(int)
         selected = []
@@ -106,27 +111,104 @@ def replay_shadow(
             counts[task] += 1
             selected.append(row)
         rows = selected
+    if (shard_index is None) != (shard_count is None):
+        raise ValueError("shard_index and shard_count must be provided together")
+    if shard_count is not None:
+        if shard_count < 1 or shard_index is None or not 0 <= shard_index < shard_count:
+            raise ValueError("invalid shadow shard")
+        rows = [
+            row
+            for row_index, row in enumerate(rows)
+            if row_index % shard_count == shard_index
+        ]
     if not rows:
         raise ValueError("no manifest rows selected for shadow replay")
 
     output_root.mkdir(parents=True, exist_ok=True)
     entries = []
+    monitors: dict[str, Any] = {}
     for manifest_row in rows:
         episode_id = str(manifest_row["episode_id"])
         safe = episode_id.replace("/", "__")
-        result_path = result_root / "episodes" / f"{safe}.json"
+        source_result = manifest_row.get("source_result")
+        result_path = (
+            result_root / str(source_result)
+            if source_result is not None
+            else result_root / "episodes" / f"{safe}.json"
+        )
         result = load_episode(result_path)
-        if result.get("episode_id") != episode_id:
+        expected_source_id = str(
+            manifest_row.get("source_episode_id", episode_id)
+        )
+        if result.get("episode_id") != expected_source_id:
             raise ValueError(f"result identity mismatch: {episode_id}")
+        expected_result_hash = manifest_row.get("source_result_sha256")
+        if (
+            expected_result_hash is not None
+            and _sha256(result_path) != str(expected_result_hash)
+        ):
+            raise ValueError(f"source result hash mismatch: {episode_id}")
         cycle_path = resolve_cycle_file(result_path, result)
         if _sha256(cycle_path) != result["cycle_file_sha256"]:
             raise ValueError(f"cycle hash mismatch: {episode_id}")
+        expected_cycle_hash = manifest_row.get("source_cycle_sha256")
+        if (
+            expected_cycle_hash is not None
+            and _sha256(cycle_path) != str(expected_cycle_hash)
+        ):
+            raise ValueError(f"source cycle hash mismatch: {episode_id}")
         cycles = load_cycles(cycle_path)
-        monitor = build_monitor(
-            spec,
-            calibration=calibration,
-            task_id=str(manifest_row["task"]),
-        )
+        task_id = str(manifest_row["task"])
+        if not cycles:
+            score_path = output_root / "scores" / f"{safe}.jsonl.gz"
+            _write_gzip_jsonl(score_path, ())
+            empty_digest = _canonical_digest(())
+            entries.append(
+                {
+                    "episode_id": episode_id,
+                    "task": manifest_row["task"],
+                    "condition": manifest_row["condition"],
+                    "cycles": 0,
+                    "alarm_cycles": 0,
+                    "first_alarm_cycle": None,
+                    "source_result_sha256": _sha256(result_path),
+                    "source_cycle_sha256": _sha256(cycle_path),
+                    "input_action_sha256": empty_digest,
+                    "passthrough_action_sha256": empty_digest,
+                    "action_passthrough_verified": True,
+                    "score_path": str(score_path.relative_to(REPOSITORY_ROOT)),
+                    "score_sha256": _sha256(score_path),
+                    "unscored_reason": "empty_source_trajectory",
+                }
+            )
+            continue
+        monitor = monitors.get(task_id)
+        if monitor is None:
+            if (
+                isinstance(spec.monitor, Mapping)
+                and spec.monitor.get("kind") == "ours_task_state"
+            ):
+                from evaluations.iclr2027.runners.ours_shadow import (
+                    OursCausalShadowMonitor,
+                )
+
+                runtime = spec.runtime or {}
+                monitor = OursCausalShadowMonitor(
+                    task_id,
+                    tsf_models=(
+                        REPOSITORY_ROOT / str(runtime["tsf_models_root"])
+                    ).resolve(),
+                    boundary_root=(
+                        REPOSITORY_ROOT / str(runtime["boundary_config_root"])
+                    ).resolve(),
+                )
+            else:
+                monitor = build_monitor(
+                    spec,
+                    calibration=calibration,
+                    task_id=task_id,
+                )
+            monitors[task_id] = monitor
         if monitor is None:
             raise ValueError(f"method has no runtime monitor: {spec.method_id}")
         first_feature = validate_feature_record(cycles[0]["feature"])
@@ -139,6 +221,7 @@ def replay_shadow(
                 horizon=int(manifest_row["horizon"]),
                 feature_schema=str(first_feature["schema"]),
                 method_config_hash=spec.config_sha256,
+                checkpoint_hash=getattr(monitor, "checkpoint_hash", None),
             )
         )
         score_rows = []
@@ -203,6 +286,12 @@ def replay_shadow(
         ),
         "audit_fields_used_by_monitor": False,
         "source_files_modified": False,
+        "task_filter": task,
+        "episode_shard": (
+            None
+            if shard_count is None
+            else {"index": shard_index, "count": shard_count}
+        ),
         "files": entries,
     }
     index_path = output_root / "score_index.json"
@@ -218,6 +307,10 @@ def replay_shadow(
         ),
         encoding="utf-8",
     )
+    for monitor in monitors.values():
+        close = getattr(monitor, "close", None)
+        if callable(close):
+            close()
     return artifact
 
 
@@ -229,7 +322,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--method", required=True)
     parser.add_argument("--calibration-artifact", type=Path)
     parser.add_argument("--condition", choices=("nominal", "perturbed"))
+    parser.add_argument("--task")
     parser.add_argument("--limit-per-task", type=int)
+    parser.add_argument("--shard-index", type=int)
+    parser.add_argument("--shard-count", type=int)
     args = parser.parse_args(argv)
     artifact = replay_shadow(
         manifest_path=args.manifest.resolve(),
@@ -242,7 +338,10 @@ def main(argv: list[str] | None = None) -> int:
             else args.calibration_artifact.resolve()
         ),
         condition=args.condition,
+        task=args.task,
         limit_per_task=args.limit_per_task,
+        shard_index=args.shard_index,
+        shard_count=args.shard_count,
     )
     print(
         json.dumps(

@@ -59,8 +59,8 @@ from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
     build_v3_trigger_anchor_evidence,
     checkpoint_trigger_audit,
 )
-from integrations.rlbench.rlbench_dynamac.protocols.phase6_dynamic_protocol import (
-    build_phase6_dynamic_trigger_evidence,
+from integrations.rlbench.rlbench_dynamac.protocols.tsf_dynamic_protocol import (
+    build_tsf_dynamic_trigger_evidence,
 )
 
 from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
@@ -313,13 +313,13 @@ def _train_task_into(
                 "skills": list(policy.left.skill_sequence),
                 "durations": [skill.duration for skill in policy.left.skills],
                 "config": asdict(policy.left.config),
-                "fingerprint": policy.left.fingerprint(),
+                "fingerprint": policy.left.identity_digest(),
             },
             "right": {
                 "skills": list(policy.right.skill_sequence),
                 "durations": [skill.duration for skill in policy.right.skills],
                 "config": asdict(policy.right.config),
-                "fingerprint": policy.right.fingerprint(),
+                "fingerprint": policy.right.identity_digest(),
             },
         }
         checkpoint_audit = bimanual_checkpoint_trigger_audit(policy)
@@ -336,7 +336,7 @@ def _train_task_into(
             "config": asdict(config),
             "skills": list(policy.skill_sequence),
             "durations": [skill.duration for skill in policy.skills],
-            "fingerprint": policy.fingerprint(),
+            "fingerprint": policy.identity_digest(),
             "adapter": converted.audit,
         }
         checkpoint_audit = checkpoint_trigger_audit(policy)
@@ -394,7 +394,7 @@ def _validate_published_model(
     expected_training_identity: Mapping[str, Any] | None = None,
     expected_task_spec: TaskSpec | None = None,
 ) -> None:
-    """Reload staged checkpoints and bind them to their manifest fingerprints."""
+    """Reload staged checkpoints and bind them to their manifest digests."""
 
     from essay2608.policy import BimanualDynaMAC, DynaMAC, DynaMACConfig
 
@@ -455,8 +455,8 @@ def _validate_published_model(
             record = summary.get(name)
             if not isinstance(record, dict):
                 raise RuntimeError(f"staged manifest is missing {name} policy metadata")
-            if record.get("fingerprint") != policy.fingerprint():
-                raise RuntimeError(f"staged {name} checkpoint fingerprint mismatch")
+            if record.get("fingerprint") != policy.identity_digest():
+                raise RuntimeError(f"staged {name} checkpoint digest mismatch")
             if record.get("config") != asdict(policy.config):
                 raise RuntimeError(f"staged {name} checkpoint config mismatch")
             if asdict(policy.config) != asdict(expected_policy.config):
@@ -486,8 +486,8 @@ def _validate_published_model(
             )
     else:
         policy = DynaMAC.load(output / "model.npz")
-        if summary.get("fingerprint") != policy.fingerprint():
-            raise RuntimeError("staged checkpoint fingerprint mismatch")
+        if summary.get("fingerprint") != policy.identity_digest():
+            raise RuntimeError("staged checkpoint digest mismatch")
         if summary.get("config") != asdict(policy.config):
             raise RuntimeError("staged checkpoint config mismatch")
         if manifest_schema == TRAINING_MANIFEST_SCHEMA_V3:
@@ -566,13 +566,13 @@ class PolicyServer:
             if self.bimanual
             else DynaMAC.load(task_dir / "model.npz")
         )
-        phase6_dynamic_trigger_evidence = None
+        tsf_dynamic_trigger_evidence = None
         if manifest_authenticated and manifest.get("manifest_schema") in {
             TRAINING_MANIFEST_SCHEMA_V3,
             TRAINING_MANIFEST_SCHEMA_STATIC_V1,
         }:
             try:
-                phase6_dynamic_trigger_evidence = build_phase6_dynamic_trigger_evidence(
+                tsf_dynamic_trigger_evidence = build_tsf_dynamic_trigger_evidence(
                     task,
                     manifest["checkpoint_trigger_audit"],
                     manifest,
@@ -581,9 +581,9 @@ class PolicyServer:
                 if manifest.get("manifest_schema") != TRAINING_MANIFEST_SCHEMA_STATIC_V1:
                     raise
                 # Static-training authentication is a general model identity.
-                # Stage-six smooth-background evidence is optional and exists
+                # TSF smooth-background evidence is optional and exists
                 # only for tasks registered in that separate protocol.
-                phase6_dynamic_trigger_evidence = None
+                tsf_dynamic_trigger_evidence = None
         self.model_identity = (
             {
                 "model_schema_version": self.policy.left.summary()[
@@ -597,8 +597,8 @@ class PolicyServer:
                 ],
                 "left_config": asdict(self.policy.left.config),
                 "right_config": asdict(self.policy.right.config),
-                "left_fingerprint": self.policy.left.fingerprint(),
-                "right_fingerprint": self.policy.right.fingerprint(),
+                "left_digest": self.policy.left.identity_digest(),
+                "right_digest": self.policy.right.identity_digest(),
                 "training_manifest_schema": manifest.get("manifest_schema"),
                 "manifest_authenticated": manifest_authenticated,
                 "training_config": (
@@ -609,8 +609,11 @@ class PolicyServer:
                     if manifest_authenticated
                     else None
                 ),
-                "checkpoint_trigger_audit_fingerprint": (
-                    manifest.get("checkpoint_trigger_audit", {}).get("fingerprint")
+                "checkpoint_trigger_audit_digest": (
+                    manifest.get("checkpoint_trigger_audit", {}).get(
+                        "identity_digest",
+                        manifest.get("checkpoint_trigger_audit", {}).get("fingerprint"),
+                    )
                     if manifest_authenticated
                     and isinstance(manifest.get("checkpoint_trigger_audit"), dict)
                     else None
@@ -620,7 +623,7 @@ class PolicyServer:
                     if manifest_authenticated
                     else None
                 ),
-                "phase6_dynamic_trigger_evidence": phase6_dynamic_trigger_evidence,
+                "tsf_dynamic_trigger_evidence": tsf_dynamic_trigger_evidence,
             }
             if self.bimanual
             else {
@@ -632,7 +635,7 @@ class PolicyServer:
                     "tapas_reference_commit"
                 ],
                 "config": asdict(self.policy.config),
-                "fingerprint": self.policy.fingerprint(),
+                "identity_digest": self.policy.identity_digest(),
                 "training_manifest_schema": manifest.get("manifest_schema"),
                 "manifest_authenticated": manifest_authenticated,
                 "training_config": (
@@ -643,8 +646,11 @@ class PolicyServer:
                     if manifest_authenticated
                     else None
                 ),
-                "checkpoint_trigger_audit_fingerprint": (
-                    manifest.get("checkpoint_trigger_audit", {}).get("fingerprint")
+                "checkpoint_trigger_audit_digest": (
+                    manifest.get("checkpoint_trigger_audit", {}).get(
+                        "identity_digest",
+                        manifest.get("checkpoint_trigger_audit", {}).get("fingerprint"),
+                    )
                     if manifest_authenticated
                     and isinstance(manifest.get("checkpoint_trigger_audit"), dict)
                     else None
@@ -654,7 +660,7 @@ class PolicyServer:
                     if manifest_authenticated
                     else None
                 ),
-                "phase6_dynamic_trigger_evidence": phase6_dynamic_trigger_evidence,
+                "tsf_dynamic_trigger_evidence": tsf_dynamic_trigger_evidence,
             }
         )
         if "training_identity" in manifest:
@@ -887,10 +893,9 @@ class PolicyServer:
                 if self.bimanual
                 else deepcopy(action.diagnostics)
             ),
-            # Frozen DynaMAC already decides the gripper value on its own
-            # fixed policy clock.  Apply that command with the corresponding
-            # primary action; do not gate it on the
-            # executor's Cartesian reached envelope.
+            # Frozen DynaMAC supplies the task-level gripper command on its
+            # fixed policy clock.  The shared executor separately requires
+            # physical pose completion before applying it.
             "gripper_authorization": (
                 {"left": True, "right": True} if self.bimanual else {"single": True}
             ),

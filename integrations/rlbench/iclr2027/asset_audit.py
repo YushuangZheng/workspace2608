@@ -18,7 +18,7 @@ from integrations.rlbench.rlbench_dynamac.core.paths import INTEGRATION_ROOT
 
 SCHEMA = "essay2608.iclr2027.a1-asset-audit.v1"
 NEW_MODEL_ROOT = INTEGRATION_ROOT / "models" / "iclr2027"
-REUSED_BASE_ROOT = INTEGRATION_ROOT / "models" / "phase6_v1"
+REUSED_BASE_ROOT = INTEGRATION_ROOT / "models" / "dynamac_backbone_v1"
 DEMONSTRATION_ROOT = INTEGRATION_ROOT / "data" / "iclr2027" / "demonstrations"
 
 
@@ -34,19 +34,19 @@ def _model_roots(task: ExperimentTask) -> tuple[Path, Path]:
     if task.spec.bimanual:
         return (
             REUSED_BASE_ROOT / task.task_id,
-            NEW_MODEL_ROOT / "closed_loop" / task.task_id,
+            NEW_MODEL_ROOT / "tsf" / task.task_id,
         )
     return (
         NEW_MODEL_ROOT / "dynamac" / task.task_id,
-        NEW_MODEL_ROOT / "closed_loop" / task.task_id,
+        NEW_MODEL_ROOT / "tsf" / task.task_id,
     )
 
 
 def _load_policy(task: ExperimentTask):
     from essay2608.policy import DynaMAC
-    from essay2608.policy.closed_loop import ClosedLoopMultiStreamPolicy
+    from essay2608.policy.tsf import TSFMultiStreamPolicy
 
-    base_root, closed_root = _model_roots(task)
+    base_root, tsf_root = _model_roots(task)
     if task.spec.bimanual:
         base = {
             "left": DynaMAC.load(base_root / "left.npz"),
@@ -54,8 +54,8 @@ def _load_policy(task: ExperimentTask):
         }
     else:
         base = {"single": DynaMAC.load(base_root / "model.npz")}
-    policy = ClosedLoopMultiStreamPolicy.load(closed_root, base_policies=base)
-    return base_root, closed_root, base, policy
+    policy = TSFMultiStreamPolicy.load(tsf_root, base_policies=base)
+    return base_root, tsf_root, base, policy
 
 
 def _assert_finite_mapping(values: dict[str, Any], *, label: str) -> None:
@@ -68,7 +68,7 @@ def _assert_finite_mapping(values: dict[str, Any], *, label: str) -> None:
 def audit_task_asset(task: ExperimentTask) -> dict[str, Any]:
     """Validate one task's registry, demonstrations, base policy and sidecar."""
 
-    base_root, closed_root, base, policy = _load_policy(task)
+    base_root, tsf_root, base, policy = _load_policy(task)
     if tuple(policy.arms) != tuple(base):
         raise RuntimeError(f"{task.task_id}: arm identities disagree")
     per_arm: dict[str, Any] = {}
@@ -81,7 +81,9 @@ def audit_task_asset(task: ExperimentTask) -> dict[str, Any]:
             )
         if len(model.boundaries) != max(0, len(durations) - 1):
             raise RuntimeError(f"{task.task_id}/{arm}: boundary count is not K-1")
-        expected_relation_frames = set(task.spec.action_frame_names)
+        expected_relation_frames = set(task.spec.action_frame_names).union(
+            task.spec.recoverable_relation_frames
+        )
         if task.spec.bimanual:
             expected_relation_frames.add("right_ee" if arm == "left" else "left_ee")
         if set(model.relation_frames) != expected_relation_frames:
@@ -90,9 +92,9 @@ def audit_task_asset(task: ExperimentTask) -> dict[str, Any]:
             )
         action_relevance = model.builder_config.get("action_stream_relevance")
         fold_partition = model.builder_config.get("lodo_fold_partition")
-        if model.schema_version != 5 or not isinstance(action_relevance, list):
+        if model.schema_version != 7 or not isinstance(action_relevance, list):
             raise RuntimeError(
-                f"{task.task_id}/{arm}: action-relevance sidecar is not schema v5"
+                f"{task.task_id}/{arm}: action-relevance sidecar is not schema v7"
             )
         if not isinstance(fold_partition, list) or len(fold_partition) != 5:
             raise RuntimeError(
@@ -108,7 +110,7 @@ def audit_task_asset(task: ExperimentTask) -> dict[str, Any]:
                 relevant = node.mode_action_relevant_frames[mode]
                 if not set(relevant).issubset(candidates):
                     raise RuntimeError(
-                        f"{task.task_id}/{arm}: action relevance broadens Eq. 6"
+                        f"{task.task_id}/{arm}: action relevance broadens the base selector"
                     )
                 active_candidates = {
                     frame
@@ -144,9 +146,9 @@ def audit_task_asset(task: ExperimentTask) -> dict[str, Any]:
                 raise RuntimeError(f"{task.task_id}/{arm}: non-adjacent skill boundary")
             if not boundary.terminal_window:
                 raise RuntimeError(f"{task.task_id}/{arm}: empty terminal window")
-            if not boundary.local_completion_model.goal_distributions:
+            if not boundary.local_completion_model.terminal_states:
                 raise RuntimeError(
-                    f"{task.task_id}/{arm}: unreadable local completion goal"
+                    f"{task.task_id}/{arm}: unreadable local completion window"
                 )
         per_arm[arm] = {
             "durations": list(durations),
@@ -178,7 +180,7 @@ def audit_task_asset(task: ExperimentTask) -> dict[str, Any]:
     if task.spec.bimanual:
         demonstration = {
             "source": task.demonstration_source,
-            "reused_phase6": True,
+            "reused_archived_bimanual_assets": True,
         }
         model_files = [base_root / "left.npz", base_root / "right.npz"]
     else:
@@ -193,13 +195,13 @@ def audit_task_asset(task: ExperimentTask) -> dict[str, Any]:
                 raise RuntimeError(f"{task.task_id}: demonstration hash mismatch")
         demonstration = {
             "source": task.demonstration_source,
-            "reused_phase6": False,
+            "reused_archived_bimanual_assets": False,
             "count": len(records),
             "manifest_sha256": _sha256(manifest_path),
         }
         model_files = [base_root / "model.npz"]
 
-    model_files.extend(closed_root / f"{arm}.npz" for arm in policy.arms)
+    model_files.extend(tsf_root / f"{arm}.npz" for arm in policy.arms)
     if not all(path.is_file() for path in model_files):
         raise RuntimeError(f"{task.task_id}: one or more learned artifacts are missing")
     return {
@@ -212,7 +214,7 @@ def audit_task_asset(task: ExperimentTask) -> dict[str, Any]:
         "compatible_faults": list(task.compatible_faults),
         "demonstration": demonstration,
         "base_model_root": str(base_root.relative_to(INTEGRATION_ROOT)),
-        "closed_loop_model_root": str(closed_root.relative_to(INTEGRATION_ROOT)),
+        "tsf_model_root": str(tsf_root.relative_to(INTEGRATION_ROOT)),
         "model_sha256": {
             str(path.relative_to(INTEGRATION_ROOT)): _sha256(path)
             for path in model_files

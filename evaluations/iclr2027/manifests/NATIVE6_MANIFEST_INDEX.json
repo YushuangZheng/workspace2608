@@ -1,0 +1,58 @@
+{
+  "contract_path": "evaluations/iclr2027/configs/shared/native6_contract.json",
+  "contract_sha256": "8e5e5188158a847c7fe6881ce1a9a95e646d7a4581f86860ace966d30e659fc5",
+  "faults_path": "evaluations/iclr2027/configs/shared/faults.json",
+  "faults_sha256": "141a50f4e34f6e64a65bbc0f2ed7e10e57b4358defb8e916f9dd8386dc659482",
+  "fixtures": {
+    "evaluations/iclr2027/tests/fixtures/native6/fault_cases.jsonl": "c4c0010c69f13499687e0aa52bd10c4d8d6ebea0a4cc3cbd1456ce0336f8d0fd",
+    "evaluations/iclr2027/tests/fixtures/native6/initialization_cases.jsonl": "ad792aa71c39c8ca499048874e18d36283b0b9689e8d18b414f4e2436d289b5f",
+    "evaluations/iclr2027/tests/fixtures/native6/valid_native_result.json": "ecd4dae69dcde8cbf4ada7c1509200a90ac04ad9255f057e10d41456f0a4aeed"
+  },
+  "manifests": {
+    "native6_development.jsonl": {
+      "purpose": "development_only_every_task_10_plus_10",
+      "rows": 120,
+      "sha256": "adc771743983220ad321af86a391685a34b3b149a259344dd24ab68eedc32df8"
+    },
+    "native6_nominal.jsonl": {
+      "purpose": "formal_e6_readonly_view",
+      "rows": 600,
+      "sha256": "0f1fda44d9a1defd60576eb2ac7fdf4d56768dc6170a861a11dea13a287c6a49"
+    },
+    "native6_perturbed.jsonl": {
+      "purpose": "formal_e6_readonly_view",
+      "rows": 600,
+      "sha256": "83058d0a0faa39a03a4e92972d8d736cb2a36a4ff2fbcf799b5f764a27ff85e0"
+    }
+  },
+  "materialized_utc": "2026-09-11T19:03:42.569444+00:00",
+  "result_schema_path": "evaluations/iclr2027/configs/shared/native6_result_schema.json",
+  "result_schema_sha256": "2b8ff1e2bbeddefa098f6bab2c8d6677a491c30e5e3c34a82cfcc842b3061a24",
+  "schema": "essay2608.iclr2027.native6-manifest-index.v1",
+  "selection_read_episode_results": false,
+  "source_e1_manifests": {
+    "main10_nominal.jsonl": "171255c8b80880a483f750f7da6750d16d4d6fd4c3fdfd0913a659f7e33348f8",
+    "main10_perturbed.jsonl": "6d59a96e313acbb9ca7eb0fc6bb542337d69d1479c05233c604ebbc7bb4ed7bf"
+  },
+  "source_e1_manifests_unchanged": true,
+  "validation": {
+    "development_rows": 120,
+    "e1_results_read_by_selection": false,
+    "fault_counts": {
+      "actuation_delay": 200,
+      "missed_interaction": 200,
+      "relation_loss": 200
+    },
+    "formal_nominal_rows": 600,
+    "formal_perturbed_rows": 600,
+    "place_cups_task_id": "place_cups_3",
+    "task_ids": [
+      "close_jar",
+      "open_drawer",
+      "insert_onto_square_peg",
+      "place_cups_3",
+      "stack_cups",
+      "sweep_to_dustpan"
+    ]
+  }
+}

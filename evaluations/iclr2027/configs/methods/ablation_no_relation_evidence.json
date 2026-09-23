@@ -1,0 +1,16 @@
+{
+  "schema": "essay2608.iclr2027.method-config.v1",
+  "method_id": "ablation_no_relation_evidence",
+  "paper_name": "No relation evidence",
+  "policy_type": "task_state_feedback",
+  "feature_profile": "no_relation_evidence",
+  "runtime": {
+    "tsf_models_root": "integrations/rlbench/models/iclr2027/tsf",
+    "boundary_config_root": "evaluations/iclr2027/artifacts/calibration/normal_task_boundaries/main10/runtime_configs"
+  },
+  "monitor": null,
+  "recovery": {
+    "kind": "relation_repair_and_legal_reentry",
+    "owned_by_policy": true
+  }
+}

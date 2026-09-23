@@ -1,0 +1,35 @@
+{
+  "schema": "essay2608.iclr2027.m3-method-config.v1",
+  "method_id": "M3",
+  "feature_schema": "essay2608.iclr2027.causal-features.v1",
+  "encoder_schema": "essay2608.iclr2027.monitor-vector.v1",
+  "encoder": "evaluations.iclr2027.methods.fail_detect.preprocessing.FeatureLayout",
+  "runtime_monitor": "evaluations.iclr2027.methods.fail_detect.runtime.CanonicalFailDetectMonitor",
+  "score_name": "logpzo",
+  "score_definition": "squared_l2_norm(x + velocity_model(x, zero_timestep))",
+  "observation_window": 1,
+  "unet_input_channels": 10,
+  "input_padding": "official_adjust_xshape_multiple_of_channels_then_temporal_multiple_of_four",
+  "normalizer": {
+    "fit_split": "normal_demonstrations_only",
+    "std_floor": 0.0001,
+    "clip": 8.0
+  },
+  "training": {
+    "source": "same_five_successful_demonstrations_as_the_frozen_DynaMAC_policy",
+    "objective": "official_conditional_flow_matching_velocity_mse",
+    "network": "official_conditional_unet1d",
+    "epochs": 200,
+    "batch_size": 128,
+    "optimizer": "Adam",
+    "learning_rate": 0.0001,
+    "seed": 1103,
+    "official_commit": "b758e55f7c0c988188f2e4876ffc03ae8a3c30ed"
+  },
+  "persistence": 3,
+  "inference_device_policy": "cpu_float32_for_calibration_golden_and_evaluation",
+  "formal_threshold_authority": "server_A_only_under_frozen_monitor_calibration_contract",
+  "unavailable_calibration": "score_only_no_alarm",
+  "weight_training_on_failure_train_or_calibration_or_sealed": false,
+  "official_square_weights_compatible_with_this_encoder": false
+}

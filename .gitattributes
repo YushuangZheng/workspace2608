@@ -16,3 +16,11 @@
 # Patch bytes are authenticated build inputs. Preserve upstream/context
 # whitespace and exclude it from repository-level whitespace diagnostics.
 integrations/rlbench/patches/*.patch -whitespace
+
+# Release archives focus on the reusable implementation and evaluation code.
+/evaluations/iclr2027/delivery export-ignore
+/evaluations/iclr2027/delivery/** export-ignore
+/evaluations/iclr2027/results export-ignore
+/evaluations/iclr2027/results/** export-ignore
+/evaluations/iclr2027/analysis/probes export-ignore
+/evaluations/iclr2027/analysis/probes/** export-ignore

@@ -1,0 +1,45 @@
+{
+  "schema": "essay2608.iclr2027.native6-event-grounded-physics-amendment.v5",
+  "status": "FROZEN_BEFORE_OURS_FORMAL",
+  "revision": "native6_event_grounded_physics_v3_amendment_5",
+  "amends": "native6_event_grounded_physics_v3_amendment_4",
+  "scope": "audit timing and development-gate interpretation only",
+  "reason": "development traces showed that a maintained-contact intervention can satisfy the frozen physical-effect predicate at a completed simulator step and be hidden by a later task callback; separate low-concurrency reruns also showed that six M5 wall-time exhaustions were reproducible controller-compute outcomes rather than adapter failures",
+  "completed_step_effect_audit": {
+    "definition_unchanged": true,
+    "predicate": "both gripper fingers have actual_open_amount > 0.9 and no relation target appears in contact_objects",
+    "timestamp": "first completed simulator step satisfying the predicate after injection",
+    "raw_artifacts_immutable": true,
+    "derived_reaudit_applies_uniformly_to": [
+      "rvt",
+      "racer",
+      "ours"
+    ]
+  },
+  "development_gate": {
+    "unchanged_hard_checks": [
+      "180 prescheduled rows with 10 rows per task-fault cell",
+      "at least one eligible physical event per cell",
+      "eligible-to-injected rate >= 0.8",
+      "injected-to-effect rate >= 0.8",
+      "one non-empty value for each frozen raw-result identity"
+    ],
+    "wall_time_exhaustion_role": "REPORT_ONLY_CONTROLLER_COMPUTE_OUTCOME",
+    "allowed_report_only_error_type": "EpisodeProcessTimeout",
+    "all_other_infrastructure_errors": "HARD_FAIL",
+    "formal_task_success_treatment": "every wall-time exhaustion remains an intention-to-treat failure"
+  },
+  "unchanged": [
+    "task set, variations, seeds, manifests, and denominators",
+    "fault eligibility, intervention, severity, and physical-effect definition",
+    "policy inputs, policy outputs, action execution, and recovery behavior",
+    "RVT and RACER raw formal artifacts and task-success outcomes",
+    "M5 method implementation and checkpoint"
+  ],
+  "prohibited": [
+    "selective result replacement",
+    "changing a task-success outcome during re-audit",
+    "treating crashes, missing files, schema errors, or non-timeout infrastructure failures as report-only",
+    "dropping timed-out rows from any denominator"
+  ]
+}

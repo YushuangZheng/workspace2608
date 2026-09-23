@@ -38,8 +38,8 @@ from integrations.rlbench.rlbench_dynamac.core.gripper_timing import (
     GLOBAL_GRIPPER_TIMING_PROTOCOL_ID,
     global_gripper_timing_metadata,
 )
-from integrations.rlbench.rlbench_closed_loop.protocol import (
-    closed_loop_gripper_timing_metadata,
+from integrations.rlbench.rlbench_tsf.protocol import (
+    tsf_gripper_timing_metadata,
 )
 from integrations.rlbench.rlbench_dynamac.core.records import (
     atomic_json,
@@ -54,15 +54,15 @@ from integrations.rlbench.rlbench_dynamac.core.runtime import (
     FORMAL_PRIMARY_RETRY_EXHAUSTION_MODE,
     FROZEN_V4_CONTROLLER_PROFILE,
     GLOBAL_IK_CONTROLLER_PROFILE,
-    STAGE6_IK_CONTROLLER_PROFILE,
+    HYBRID_IK_CONTROLLER_PROFILE,
     GlobalIKControllerConfig,
-    Stage6IKControllerConfig,
+    HybridIKControllerConfig,
     PrimaryActionRetryBudget,
     ScenarioController,
     apply_gripper_for_policy_target,
     commit_joint_hold_after_primary_failure,
     execute_global_ik_ee_control,
-    execute_stage6_ik_ee_control,
+    execute_hybrid_ik_ee_control,
     execute_joint_target_control,
     final_settling_metadata,
     global_ik_controller_metadata,
@@ -83,8 +83,8 @@ from integrations.rlbench.rlbench_dynamac.protocols.v3_protocol import (
     load_v3_intervention_protocol,
     load_v3_motion_source_protocol,
 )
-from integrations.rlbench.rlbench_dynamac.protocols.phase6_dynamic_protocol import (
-    resolve_phase6_dynamic_trigger,
+from integrations.rlbench.rlbench_dynamac.protocols.tsf_dynamic_protocol import (
+    resolve_tsf_dynamic_trigger,
 )
 from integrations.rlbench.rlbench_dynamac.protocols.v4_dynamic_protocol import (
     V4_LIFT_MOTION_PROTOCOL_ID,
@@ -125,7 +125,7 @@ DEFAULT_MODELS_DIR = INTEGRATION_ROOT / "models" / "v3"
 DEFAULT_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v3"
 V4_MODELS_DIR = INTEGRATION_ROOT / "models" / "v4"
 V4_RESULTS_DIR = INTEGRATION_ROOT / "results" / "v4"
-CLOSED_LOOP_MODELS_DIR = INTEGRATION_ROOT / "models" / "closed_loop_phase6_v1"
+TSF_MODELS_DIR = INTEGRATION_ROOT / "models" / "iclr2027" / "tsf"
 DEFAULT_POLICY_PYTHON = Path(
     os.environ.get(
         "DYNAMAC_POLICY_PYTHON",
@@ -366,9 +366,9 @@ def evaluation_protocol_id(
         raise ValueError(
             "formal global controller requires one request per policy tick"
         )
-    if controller_profile == STAGE6_IK_CONTROLLER_PROFILE:
+    if controller_profile == HYBRID_IK_CONTROLLER_PROFILE:
         controller = (
-            "rlbench-stage6-current-seeded-pseudo6-then-bounded-trac-distance-"
+            "rlbench-hybrid-current-seeded-pseudo6-then-bounded-trac-distance-"
             "then-cartesian-continuation-collision-aware-or-relaxed-sampling-path-"
             "converged-joint-target-cartesian-feedback-"
         )
@@ -404,16 +404,16 @@ def _resolved_controller_profile(args):
     requested = getattr(args, "controller_profile", "auto")
     if requested == "auto":
         return (
-            STAGE6_IK_CONTROLLER_PROFILE
-            if getattr(args, "policy_type", "dynamac") == "closed_loop_multistream"
+            HYBRID_IK_CONTROLLER_PROFILE
+            if getattr(args, "policy_type", "dynamac") == "task_state_feedback"
             else GLOBAL_IK_CONTROLLER_PROFILE
         )
     return requested
 
 
 def _controller_config(controller_profile):
-    if controller_profile == STAGE6_IK_CONTROLLER_PROFILE:
-        return Stage6IKControllerConfig()
+    if controller_profile == HYBRID_IK_CONTROLLER_PROFILE:
+        return HybridIKControllerConfig()
     if controller_profile == GLOBAL_IK_CONTROLLER_PROFILE:
         return GlobalIKControllerConfig()
     if controller_profile == FROZEN_V4_CONTROLLER_PROFILE:
@@ -441,11 +441,11 @@ def _validate_v3_protocol_budgets(args):
     return protocol
 
 
-def _authenticated_phase6_dynamic_trigger(args, worker):
+def _authenticated_tsf_dynamic_trigger(args, worker):
     """Resolve the smooth trigger against the checkpoint actually loaded."""
 
     protocol = _validate_v3_protocol_budgets(args)
-    authentication = resolve_phase6_dynamic_trigger(
+    authentication = resolve_tsf_dynamic_trigger(
         worker.model_identity,
         args.task,
         args.scenario_steps,
@@ -454,16 +454,16 @@ def _authenticated_phase6_dynamic_trigger(args, worker):
     requested_step = getattr(args, "scenario_trigger_step", None)
     if requested_step is not None and requested_step != authenticated_step:
         raise RuntimeError(
-            "command-line trigger step differs from authenticated Stage-six trigger"
+            "command-line trigger step differs from authenticated TSF trigger"
         )
     if authenticated_step >= worker.policy_steps:
         raise RuntimeError(
-            "authenticated Stage-six trigger lies outside the loaded policy clock"
+            "authenticated TSF trigger lies outside the loaded policy clock"
         )
     requested_reference = getattr(args, "scenario_reference_steps", None)
     if requested_reference is not None and requested_reference != worker.policy_steps:
         raise RuntimeError(
-            "Stage-six trigger reference must equal the loaded policy clock"
+            "TSF trigger reference must equal the loaded policy clock"
         )
     return protocol, authentication
 
@@ -593,13 +593,13 @@ def _make_action_mode(
 
     if controller_profile not in {
         GLOBAL_IK_CONTROLLER_PROFILE,
-        STAGE6_IK_CONTROLLER_PROFILE,
+        HYBRID_IK_CONTROLLER_PROFILE,
         FROZEN_V4_CONTROLLER_PROFILE,
     }:
         raise ValueError("unsupported bimanual controller profile")
     if controller_profile in {
         GLOBAL_IK_CONTROLLER_PROFILE,
-        STAGE6_IK_CONTROLLER_PROFILE,
+        HYBRID_IK_CONTROLLER_PROFILE,
     }:
         if controller_config is None:
             controller_config = _controller_config(controller_profile)
@@ -637,7 +637,7 @@ def _make_action_mode(
             }
             if controller_profile in {
                 GLOBAL_IK_CONTROLLER_PROFILE,
-                STAGE6_IK_CONTROLLER_PROFILE,
+                HYBRID_IK_CONTROLLER_PROFILE,
             }:
                 self._execution_diagnostics = (
                     initialize_global_ik_controller_diagnostics()
@@ -654,7 +654,7 @@ def _make_action_mode(
             )
             if controller_profile in {
                 GLOBAL_IK_CONTROLLER_PROFILE,
-                STAGE6_IK_CONTROLLER_PROFILE,
+                HYBRID_IK_CONTROLLER_PROFILE,
             }:
                 self._execution_diagnostics.update(
                     {
@@ -669,14 +669,14 @@ def _make_action_mode(
         def policy_action_status(self):
             return (
                 self._last_policy_action_status
-                if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
+                if self._controller_profile == HYBRID_IK_CONTROLLER_PROFILE
                 else "reached"
             )
 
         def policy_action_statuses(self):
             return (
                 dict(self._last_policy_action_statuses)
-                if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
+                if self._controller_profile == HYBRID_IK_CONTROLLER_PROFILE
                 else {"left": "reached", "right": "reached"}
             )
 
@@ -750,17 +750,17 @@ def _make_action_mode(
             assert_unit_quaternion(left_action[3:])
             if self._controller_profile in {
                 GLOBAL_IK_CONTROLLER_PROFILE,
-                STAGE6_IK_CONTROLLER_PROFILE,
+                HYBRID_IK_CONTROLLER_PROFILE,
             }:
                 try:
                     executor = (
-                        execute_stage6_ik_ee_control
-                        if self._controller_profile == STAGE6_IK_CONTROLLER_PROFILE
+                        execute_hybrid_ik_ee_control
+                        if self._controller_profile == HYBRID_IK_CONTROLLER_PROFILE
                         else execute_global_ik_ee_control
                     )
                     per_arm_status = {}
                     executor_kwargs = {}
-                    if executor is execute_stage6_ik_ee_control:
+                    if executor is execute_hybrid_ik_ee_control:
                         executor_kwargs["per_arm_status_out"] = per_arm_status
                     status = executor(
                         scene,
@@ -973,16 +973,16 @@ class PolicyProcess:
         timeout=120.0,
         *,
         policy_type="dynamac",
-        closed_loop_models_dir=CLOSED_LOOP_MODELS_DIR,
+        tsf_models_dir=TSF_MODELS_DIR,
         diagnostics_dir=None,
-        closed_loop_feature_profile="full",
-        closed_loop_boundary_config_root=None,
+        tsf_feature_profile="full",
+        tsf_boundaries_config_root=None,
     ):
         self.timeout = float(timeout)
         if self.timeout <= 0.0:
             raise ValueError("policy timeout must be positive")
-        if policy_type not in {"dynamac", "closed_loop_multistream"}:
-            raise ValueError("policy_type must be dynamac or closed_loop_multistream")
+        if policy_type not in {"dynamac", "task_state_feedback"}:
+            raise ValueError("policy_type must be dynamac or task_state_feedback")
         self.policy_type = policy_type
         if policy_type == "dynamac":
             command = [
@@ -999,28 +999,28 @@ class PolicyProcess:
             command = [
                 str(python),
                 "-m",
-                "integrations.rlbench.rlbench_closed_loop.policy_server",
+                "integrations.rlbench.rlbench_tsf.policy_server",
                 "serve",
                 "--task",
                 task,
                 "--models-dir",
-                str(Path(closed_loop_models_dir).resolve()),
+                str(Path(tsf_models_dir).resolve()),
                 "--base-models-dir",
                 str(Path(models_dir).resolve()),
                 "--feature-profile",
-                str(closed_loop_feature_profile),
+                str(tsf_feature_profile),
             ]
             if diagnostics_dir is not None:
                 command.extend(
                     ["--diagnostics-dir", str(Path(diagnostics_dir).resolve())]
                 )
-            if closed_loop_boundary_config_root is not None:
+            if tsf_boundaries_config_root is not None:
                 command.extend(
                     [
                         "--boundary-config",
                         str(
                             (
-                                Path(closed_loop_boundary_config_root) / f"{task}.json"
+                                Path(tsf_boundaries_config_root) / f"{task}.json"
                             ).resolve()
                         ),
                     ]
@@ -1059,10 +1059,10 @@ class PolicyProcess:
                         "policy worker gripper timing does not match evaluator"
                     )
             elif (
-                self.gripper_timing != closed_loop_gripper_timing_metadata()
+                self.gripper_timing != tsf_gripper_timing_metadata()
                 or response.get("policy_type") != self.policy_type
             ):
-                raise RuntimeError("closed-loop policy worker timing identity mismatch")
+                raise RuntimeError("TSF policy worker timing identity mismatch")
         except Exception:
             if self.process.poll() is None:
                 self.process.terminate()
@@ -1345,12 +1345,12 @@ def _run_v4_store_episode(
         row.setdefault("dynamic_clock_steps", committed_policy_steps)
         row.setdefault("staged_source_binding", source_binding)
         row.setdefault("fresh_task_generation", fresh_task_generation)
-        row.setdefault("motion_plan_fingerprint", motion_plan.fingerprint())
+        row.setdefault("motion_plan_fingerprint", motion_plan.identity_digest())
         row.setdefault("motion_plan_protocol_id", V4_STORE_MOTION_PROTOCOL_ID)
         row.setdefault(
             "motion_plan_evidence",
             {
-                "plan_fingerprint": motion_plan.fingerprint(),
+                "plan_fingerprint": motion_plan.identity_digest(),
                 "source_waypoint_validated": motion_plan.validation[
                     "source_waypoint_validated"
                 ],
@@ -1455,7 +1455,7 @@ def _run_v4_store_episode(
             transaction_id = response.get("transaction_id")
             if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
                 raise RuntimeError(
-                    "failed closed-loop policy cycle did not return a transaction id"
+                    "failed TSF policy cycle did not return a transaction id"
                 )
             worker.request(
                 "commit",
@@ -1744,7 +1744,7 @@ def _run_episode(
         row.setdefault("fresh_task_generation", fresh_task_generation)
         row.setdefault(
             "motion_plan_fingerprint",
-            motion_plan.fingerprint() if motion_plan is not None else None,
+            motion_plan.identity_digest() if motion_plan is not None else None,
         )
         row.setdefault(
             "motion_plan_protocol_id",
@@ -1762,7 +1762,7 @@ def _run_episode(
             "motion_plan_evidence",
             (
                 {
-                    "plan_fingerprint": motion_plan.fingerprint(),
+                    "plan_fingerprint": motion_plan.identity_digest(),
                     "source_waypoint_validated": motion_plan.validation.get(
                         "source_waypoint_validated"
                     ),
@@ -1847,7 +1847,7 @@ def _run_episode(
             transaction_id = response.get("transaction_id")
             if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
                 raise RuntimeError(
-                    "failed closed-loop policy cycle did not return a transaction id"
+                    "failed TSF policy cycle did not return a transaction id"
                 )
             worker.request(
                 "commit",
@@ -2253,12 +2253,12 @@ def _evaluate_reserved(args):
         args.models_dir,
         timeout=args.policy_timeout,
         policy_type=getattr(args, "policy_type", "dynamac"),
-        closed_loop_models_dir=getattr(
-            args, "closed_loop_models_dir", CLOSED_LOOP_MODELS_DIR
+        tsf_models_dir=getattr(
+            args, "tsf_models_dir", TSF_MODELS_DIR
         ),
         diagnostics_dir=getattr(args, "policy_diagnostics_dir", None),
-        closed_loop_feature_profile=getattr(
-            args, "closed_loop_feature_profile", "full"
+        tsf_feature_profile=getattr(
+            args, "tsf_feature_profile", "full"
         ),
     )
     results = []
@@ -2274,7 +2274,7 @@ def _evaluate_reserved(args):
             )
         else:
             intervention_registry, trigger_authentication = (
-                _authenticated_phase6_dynamic_trigger(args, worker)
+                _authenticated_tsf_dynamic_trigger(args, worker)
             )
         scenario_reference_steps = worker.policy_steps
         scenario_reference_source = (
@@ -2441,9 +2441,9 @@ def _evaluate_reserved(args):
     summary = {
         **({"release": "v4"} if getattr(args, "release", "v3") == "v4" else {}),
         "policy_type": getattr(args, "policy_type", "dynamac"),
-        "closed_loop_feature_profile": (
-            getattr(args, "closed_loop_feature_profile", "full")
-            if getattr(args, "policy_type", "dynamac") == "closed_loop_multistream"
+        "tsf_feature_profile": (
+            getattr(args, "tsf_feature_profile", "full")
+            if getattr(args, "policy_type", "dynamac") == "task_state_feedback"
             else None
         ),
         "task": args.task,
@@ -2533,7 +2533,7 @@ def _evaluate_reserved(args):
                     "schema": motion_plan_payload["schema"],
                     "protocol_id": motion_plan_payload["protocol_id"],
                     "batch_fingerprint": motion_plan_payload["batch_fingerprint"],
-                    "plan_fingerprints": [plan.fingerprint() for plan in motion_plans],
+                    "plan_fingerprints": [plan.identity_digest() for plan in motion_plans],
                     "scenario_independent": True,
                     "seed_domain": motion_plan_payload["seed_domain"],
                     "goal_sampling_max_attempts": args.scenario_max_attempts,
@@ -2752,16 +2752,16 @@ def build_parser():
     parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
     parser.add_argument(
         "--policy-type",
-        choices=("dynamac", "closed_loop_multistream"),
+        choices=("dynamac", "task_state_feedback"),
         default="dynamac",
     )
     parser.add_argument(
-        "--closed-loop-models-dir",
+        "--tsf-models-dir",
         type=Path,
-        default=CLOSED_LOOP_MODELS_DIR,
+        default=TSF_MODELS_DIR,
     )
     parser.add_argument(
-        "--closed-loop-feature-profile",
+        "--tsf-feature-profile",
         choices=("progress_only", "progress_dynamic_roles", "full"),
         default="full",
     )
@@ -2771,12 +2771,12 @@ def build_parser():
         choices=(
             "auto",
             GLOBAL_IK_CONTROLLER_PROFILE,
-            STAGE6_IK_CONTROLLER_PROFILE,
+            HYBRID_IK_CONTROLLER_PROFILE,
         ),
         default="auto",
         help=(
             "IK executor profile; auto preserves the V4 controller for DynaMAC "
-            "and enables Cartesian-verified execution for the closed-loop policy."
+            "and enables Cartesian-verified execution for the TSF policy."
         ),
     )
     parser.add_argument("--policy-python", type=Path, default=DEFAULT_POLICY_PYTHON)

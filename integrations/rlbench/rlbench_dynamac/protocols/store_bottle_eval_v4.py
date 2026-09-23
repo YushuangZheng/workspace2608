@@ -637,11 +637,11 @@ class StoreBottleMultiEntityPlan:
             "validation": dict(self.validation),
         }
 
-    def fingerprint(self) -> str:
+    def identity_digest(self) -> str:
         return canonical_fingerprint(self.metadata())
 
     def to_json(self) -> dict[str, Any]:
-        return {**self.metadata(), "fingerprint": self.fingerprint()}
+        return {**self.metadata(), "fingerprint": self.identity_digest()}
 
     @classmethod
     def from_json(cls, payload: Any) -> "StoreBottleMultiEntityPlan":
@@ -1486,7 +1486,7 @@ def bind_v4_store_source_plan(
         "low_dim_frames_matched": True,
         "deterministic_source_reconstruction": reconstruction,
         "formal_task_validate_calls": 0,
-        "plan_fingerprint": plan.fingerprint(),
+        "plan_fingerprint": plan.identity_digest(),
         "fresh_task_generation": fresh_task_generation,
     }
 
@@ -1711,5 +1711,5 @@ class StoreBottleMultiEntityController:
             "applications_per_moved_entity": (
                 self.total_steps if self.scenario == "smooth" else 1
             ),
-            "stage6_smooth_background_extension": self.scenario == "smooth",
+            "hybrid_smooth_background_extension": self.scenario == "smooth",
         }

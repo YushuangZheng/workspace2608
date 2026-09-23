@@ -1,0 +1,88 @@
+{
+  "schema": "essay2608.iclr2027.native6-event-grounded-physics.v3",
+  "status": "FROZEN_FOR_DEVELOPMENT_VALIDATION",
+  "revision": "native6_event_grounded_physics_v3",
+  "clock": {
+    "unit": "completed_pyrep_step",
+    "time_source": "sim.simGetSimulationTime",
+    "configured_timestep_source": "PyRep.get_simulation_timestep",
+    "dynamics_substeps_are_clock_ticks": false,
+    "initialization_steps_are_excluded": true,
+    "step_ui_is_excluded": true,
+    "instrumentation_point": "concrete_scene_pyrep_step_instance",
+    "planner_each_step_callback_allowed": false,
+    "scene_step_callback_alone_is_sufficient": false
+  },
+  "trigger": {
+    "rule": "first_eligible_physical_event",
+    "event_ordinal": 1,
+    "uses_policy_cycle_fraction": false,
+    "uses_learned_task_state": false,
+    "uses_policy_alarm_or_belief": false
+  },
+  "eligibility": {
+    "motion_translation_m": 0.005,
+    "motion_rotation_rad": 0.08726646259971647,
+    "open_amount_threshold": 0.9,
+    "stable_relation_seconds": 0.15,
+    "maintained_contact_evidence": "sim_contact_info",
+    "proximity_only_is_maintained_contact": false
+  },
+  "medium": {
+    "actuation_delay_seconds": 0.6,
+    "missed_interaction_occurrences": 1,
+    "attachment_relation_loss_translation_m": 0.04,
+    "attachment_relation_loss_translation_world_xyz": [0.04, 0.0, 0.0],
+    "maintained_contact_relation_loss": "open_selected_gripper_without_entity_translation"
+  },
+  "fault_semantics": {
+    "actuation_delay": "replace_the_first_eligible_motion_transaction_with_a_physical_hold_for_the_frozen_simulation_duration_then_return_observation_to_the_policy",
+    "missed_interaction": "at_the_actual_discrete_close_attempt_after_arm_motion_suppress_attachment_for_that_attempt_and_confirm_target_non_attachment",
+    "relation_loss_attachment": "after_a_stable_attachment_release_and_translate_the_attached_entity",
+    "relation_loss_maintained_contact": "after_validated_stable_simulator_contact_open_the_selected_gripper_without_translating_the_contact_entity"
+  },
+  "effect_confirmation": {
+    "actuation_delay": {
+      "minimum_hold_seconds": 0.6,
+      "maximum_tcp_translation_during_hold_m": 0.001,
+      "maximum_tcp_rotation_during_hold_rad": 0.017453292519943295
+    },
+    "missed_interaction": {
+      "target_absent_from_selected_gripper_attachments": true,
+      "maximum_restored_target_translation_error_m": 0.001
+    },
+    "relation_loss_attachment": {
+      "target_absent_from_selected_gripper_attachments": true,
+      "minimum_target_translation_m": 0.035
+    },
+    "relation_loss_maintained_contact": {
+      "selected_gripper_open_amount_above": 0.9,
+      "validated_contact_must_be_lost": true
+    }
+  },
+  "required_cycle_execution_fields": [
+    "cycle",
+    "command_action",
+    "applied_action",
+    "policy_error",
+    "terminal"
+  ],
+  "required_physical_event_fields": [
+    "sim_step",
+    "simulation_time_s",
+    "event_kind",
+    "arm",
+    "actual_open_amount",
+    "attachment_objects",
+    "contact_objects",
+    "relation_source"
+  ],
+  "development_gate": {
+    "episodes_per_task_fault_cell": 10,
+    "minimum_assigned_to_eligible": 0.8,
+    "minimum_eligible_to_injected": 0.8,
+    "minimum_injected_to_physical_effect": 0.8,
+    "zero_eligible_cell_can_pass": false,
+    "infrastructure_errors_allowed": 0
+  }
+}

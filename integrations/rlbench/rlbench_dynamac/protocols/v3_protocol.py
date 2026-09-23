@@ -431,7 +431,7 @@ def _anchor_from_arm_audit(arm_audit, profile, require_full_window):
         raise RuntimeError("V3 trigger skill duration differs from preregistration")
     frame = skill.get("frames", {}).get(profile.get("evidence_frame"))
     if not isinstance(frame, dict):
-        raise RuntimeError("V3 trigger evidence frame was rejected by Equation (6)")
+        raise RuntimeError("V3 trigger evidence frame failed the selection rule")
     selected = frame.get("selected_by_eq6")
     availability_runs = frame.get("availability_runs")
     active_runs = frame.get("poe_active_runs")
@@ -449,7 +449,7 @@ def _anchor_from_arm_audit(arm_audit, profile, require_full_window):
     if require_full_window:
         first, last = [int(value) for value in profile["required_active_window"]]
     if not _run_contains(availability_runs[0], first, last):
-        raise RuntimeError("V3 trigger window is not Equation (5)-available")
+        raise RuntimeError("V3 trigger window is not eligible")
     if not _run_contains(active_runs[0], first, last):
         raise RuntimeError("V3 trigger window does not participate in the final PoE")
     earlier_duration = 0
@@ -646,7 +646,7 @@ def resolve_authenticated_v3_trigger(model_identity, task=None, scenario=None):
     if anchor.get("required_active_window") != required_window:
         raise RuntimeError("V3 checkpoint trigger active window is invalid")
     if anchor.get("selected_by_eq6") != [True]:
-        raise RuntimeError("V3 trigger evidence frame is not Equation (6)-selected")
+        raise RuntimeError("V3 trigger evidence frame was not selected")
     availability = anchor.get("availability_runs")
     active = anchor.get("poe_active_runs")
     if (

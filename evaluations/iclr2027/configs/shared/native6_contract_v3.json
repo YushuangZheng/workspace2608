@@ -1,0 +1,59 @@
+{
+  "schema": "essay2608.iclr2027.native6-contract.v3",
+  "status": "DEVELOPMENT_ONLY_UNTIL_A_ACCEPTANCE",
+  "purpose": "event-grounded rerun of E6 native-system perturbation evaluation",
+  "protocol_revision": "native6_event_grounded_physics_v3",
+  "systems": ["rvt", "racer", "ours"],
+  "task_ids": [
+    "close_jar",
+    "open_drawer",
+    "insert_onto_square_peg",
+    "place_cups_3",
+    "stack_cups",
+    "sweep_to_dustpan"
+  ],
+  "fault_families": ["actuation_delay", "missed_interaction", "relation_loss"],
+  "development": {
+    "manifest": "evaluations/iclr2027/manifests/native6_v3_development.jsonl",
+    "episodes_per_task_fault_cell": 10,
+    "rows_per_system": 180,
+    "paper_result": false,
+    "server_a_acceptance_required_before_formal": true
+  },
+  "formal": {
+    "perturbed_manifest": "evaluations/iclr2027/manifests/native6_v3_perturbed.jsonl",
+    "perturbed_rows_per_system": 600,
+    "nominal_manifest": "evaluations/iclr2027/manifests/native6_nominal.jsonl",
+    "existing_nominal_rows_per_system": 600,
+    "existing_nominal_reuse_requires_adapter_diff_acceptance": true,
+    "old_perturbed_results_reusable": false,
+    "ours_e1_perturbed_results_reusable": false,
+    "intention_to_treat": true
+  },
+  "identity": {
+    "required_result_bindings": [
+      "config_identity",
+      "checkpoint_identity",
+      "environment_identity",
+      "fault_adapter_identity",
+      "fault_config_identity",
+      "audit_protocol_revision",
+      "manifest_identity"
+    ],
+    "development_and_formal_must_match": true
+  },
+  "legacy_result_policy": {
+    "nominal": "retain_pending_adapter_diff_acceptance",
+    "perturbed": "preserve_as_invalid_for_robustness_protocol_diagnostic",
+    "overwrite_legacy_results": false,
+    "selective_rerun_of_legacy_rows": false
+  },
+  "prohibited": [
+    "using_high_level_policy_cycles_as_physical_time",
+    "using_early_middle_late_cycle_fractions",
+    "using_proximity_alone_as_maintained_contact",
+    "reading_policy_state_belief_alarm_or_fault_identity_inside_a_policy",
+    "starting_formal_before_server_A_accepts_both_development_gates",
+    "overwriting_any_native6_v2_result"
+  ]
+}

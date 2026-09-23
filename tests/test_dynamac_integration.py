@@ -95,7 +95,7 @@ def test_schema_v13_checkpoint_roundtrips_explicit_timestep_component_masks(
         restored.skills[0].streams["object"].selected_by_eq6,
         [True, True],
     )
-    assert restored.fingerprint() == policy.fingerprint()
+    assert restored.identity_digest() == policy.identity_digest()
     assert restored.summary()["model_schema_version"] == 13
     assert restored.summary()["selection_semantics_id"] == (
         "eq5_timestep_availability_before_eq6_and_poe_"
@@ -259,6 +259,51 @@ def test_failed_skill_boundary_action_rolls_back_virtual_capture() -> None:
     assert "virtual_skill_1" not in policy._virtual_frames
     assert policy._skill_index == 1
     assert policy._time_index == 0
+
+
+def test_skill_retry_preserves_pending_skill_entry_virtual_capture() -> None:
+    policy = DynaMAC(DynaMACConfig(maximum_modes=1, default_mode_strategy="map"))
+    policy.frame_names = ()
+    policy.skill_sequence = (0, 1)
+    mean = pose([0.0, 0.0, 0.0])[None, None]
+    covariance = (np.eye(6) * 0.01)[None, None]
+    policy.skills = [
+        SkillModel(
+            0,
+            1,
+            ("virtual_skill_0",),
+            np.ones(1),
+            {"virtual_skill_0": StreamModel("virtual_skill_0", mean, covariance)},
+            np.zeros((1, 1, 1)),
+        ),
+        SkillModel(
+            1,
+            1,
+            ("virtual_skill_1",),
+            np.ones(1),
+            {
+                "virtual_skill_1": StreamModel(
+                    "virtual_skill_1", mean.copy(), covariance.copy()
+                )
+            },
+            np.zeros((1, 1, 1)),
+            transition_from_previous=np.ones((1, 1)),
+        ),
+    ]
+    start = DynaMACObservation(pose([0.0, 0.0, 0.0]), {})
+    policy.reset(start, mode_strategy="map")
+    policy.act(start)
+    assert policy._pending_virtual_capture
+    assert "virtual_skill_1" not in policy._virtual_frames
+
+    assert policy.restart_current_skill_reference() == (1, 0)
+    assert policy._pending_virtual_capture
+
+    entry_pose = pose([0.3, -0.2, 0.1])
+    action = policy.act(DynaMACObservation(entry_pose, {}))
+    assert action.pose.shape == (7,)
+    np.testing.assert_allclose(policy._virtual_frames["virtual_skill_1"], entry_pose)
+    assert not policy._pending_virtual_capture
 
 
 def test_published_json_explicitly_freezes_every_dynamac_choice() -> None:

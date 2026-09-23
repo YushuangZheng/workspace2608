@@ -425,8 +425,8 @@ def build_selective_composition_provenance(
     for episode, (base_plan, replacement_plan) in enumerate(
         zip(base_plans, composed_plans)
     ):
-        base_fingerprint = base_plan.fingerprint()
-        replacement_fingerprint = replacement_plan.fingerprint()
+        base_fingerprint = base_plan.identity_digest()
+        replacement_fingerprint = replacement_plan.identity_digest()
         if base_fingerprint != replacement_fingerprint:
             rows.append(
                 {

@@ -118,12 +118,12 @@ def test_default_protocol_is_demo_aligned_and_has_stable_identity() -> None:
     assert protocol.protocol_id == (
         "rlbench-discrete-gripper-bimanual-velocity0p04"
         "-attach1-detach-before-open1-transfer-detect1"
-        "-retry-pending-close1-v3"
+        "-retry-pending-close1-attachment-aware-open-v4"
     )
     assert protocol.extend_evaluation_protocol_id("absolute-ee-v3") == (
         "absolute-ee-v3+rlbench-discrete-gripper-bimanual-velocity0p04"
         "-attach1-detach-before-open1-transfer-detect1"
-        "-retry-pending-close1-v3"
+        "-retry-pending-close1-attachment-aware-open-v4"
     )
     assert protocol.extend_evaluation_protocol_id(
         protocol.extend_evaluation_protocol_id("absolute-ee-v3")
@@ -321,3 +321,19 @@ def test_unimanual_attachment_suppression_preserves_pending_close(
     mode._dynamac_attachment_suppressed_arms = set()
     mode.action(scene, np.asarray([0.0]))
     assert gripper.grasped == [obj]
+
+
+def test_unimanual_open_releases_thin_attached_object_above_aperture_threshold(
+    fake_vendor_gripper_modes,
+) -> None:
+    obj = object()
+    gripper = _OwnershipGripper(open_amount=0.92, detected=True, grasped=(obj,))
+    scene = _scene(gripper=gripper)
+    scene.task.get_graspable_objects = lambda: [obj]
+    mode = DiscreteGripperProtocol(bimanual=False).make_action_mode()
+
+    mode.action(scene, np.asarray([1.0]))
+
+    assert gripper.releases == 1
+    assert gripper.grasped == []
+    assert gripper.open_amount == 1.0

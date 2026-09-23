@@ -9,13 +9,13 @@ from integrations.rlbench.rlbench_dynamac.eval import (
 )
 from integrations.rlbench.rlbench_dynamac.core.runtime import (
     GLOBAL_IK_CONTROLLER_PROFILE,
-    STAGE6_IK_CONTROLLER_PROFILE,
+    HYBRID_IK_CONTROLLER_PROFILE,
     GlobalIKControllerConfig,
-    Stage6IKControllerConfig,
+    HybridIKControllerConfig,
     _prepare_collision_aware_path_command,
     _release_configuration_path_motion_handle,
     execute_global_ik_ee_control,
-    execute_stage6_ik_ee_control,
+    execute_hybrid_ik_ee_control,
     global_ik_controller_metadata,
     initialize_global_ik_controller_diagnostics,
 )
@@ -308,6 +308,13 @@ class _RelaxedNonlinearOnlyScene(_Scene):
                 arm.velocity = np.zeros_like(arm.current)
 
 
+class _NeverMovingScene(_Scene):
+    def step(self):
+        self.steps += 1
+        for arm in self.arms:
+            arm.velocity = np.zeros_like(arm.current)
+
+
 class _Solver:
     def __init__(self, result):
         self.result = result
@@ -397,7 +404,7 @@ def _execute(scene, arm_targets, factory, *, config=None):
     return status, diagnostics
 
 
-def _execute_stage6(
+def _execute_hybrid(
     scene,
     arm_targets,
     factory,
@@ -406,10 +413,10 @@ def _execute_stage6(
     per_arm_status_out=None,
 ):
     diagnostics = initialize_global_ik_controller_diagnostics()
-    status = execute_stage6_ik_ee_control(
+    status = execute_hybrid_ik_ee_control(
         scene,
         tuple(arm_targets),
-        config=config or Stage6IKControllerConfig(),
+        config=config or HybridIKControllerConfig(),
         diagnostics=diagnostics,
         external_solver_factory=factory,
         ik_error=_IKError,
@@ -417,7 +424,7 @@ def _execute_stage6(
         configuration_path_error=_ConfigurationPathError,
         invalid_action_error=_InvalidActionError,
         path_algorithm="RRTConnect",
-        error_message="stage6 IK failed",
+        error_message="hybrid IK failed",
         per_arm_status_out=per_arm_status_out,
     )
     return status, diagnostics
@@ -467,12 +474,12 @@ def test_profile_is_formal_global_and_declares_solver_order():
     assert diagnostics["selected_joint_delta_l2_max"] == pytest.approx(2**0.5 / 10)
 
 
-def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
-    config = Stage6IKControllerConfig()
+def test_hybrid_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
+    config = HybridIKControllerConfig()
     metadata = config.metadata()
     controller = global_ik_controller_metadata(config)
 
-    assert metadata["profile"] == STAGE6_IK_CONTROLLER_PROFILE
+    assert metadata["profile"] == HYBRID_IK_CONTROLLER_PROFILE
     assert metadata["post_execution_cartesian_verification"] is True
     assert metadata["fallback_collision_policy"] == (
         "collision_aware_first_then_bounded_relaxation"
@@ -519,6 +526,10 @@ def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
     assert controller["same_target_solver_tier_persistence"] == (
         "per_arm_exact_target_across_closed_loop_cycles"
     )
+    assert controller["same_target_solver_exhaustion_memory"] == (
+        "reuse_final_exhaustion_while_target_is_solver_equivalent_"
+        "and_tip_joints_are_unchanged"
+    )
     assert controller["physical_stall_resolution"] == (
         "same_target_bounded_solver_escalation_then_report_stall"
     )
@@ -550,14 +561,14 @@ def test_stage6_profile_is_distinct_and_uses_collision_aware_first_fallbacks():
     )
 
 
-def test_stage6_accepts_an_already_reached_target_before_reissuing_ik():
+def test_hybrid_accepts_an_already_reached_target_before_reissuing_ik():
     arm = _CartesianArm(jacobian_result=_IKError("must not solve"))
     arm.current = np.asarray([0.0008, 0.0])
     arm.target = arm.current.copy()
     scene = _Scene(arm)
     factory = _Factory(RuntimeError("must not solve"))
 
-    status, diagnostics = _execute_stage6(
+    status, diagnostics = _execute_hybrid(
         scene,
         ((arm, _target(0.0)),),
         factory,
@@ -570,19 +581,19 @@ def test_stage6_accepts_an_already_reached_target_before_reissuing_ik():
     assert diagnostics["cartesian_pre_execution_control_accepts"] == 1
 
 
-def test_stage6_continues_toward_a_target_outside_local_ik_basin():
+def test_hybrid_continues_toward_a_target_outside_local_ik_basin():
     arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
     factory = _LocalStepFactory(maximum_cartesian_step=0.005)
     scene = _Scene(arm)
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_segments=8,
         cartesian_continuation_max_raw_physics_steps=64,
     )
 
-    first_status, first_diagnostics = _execute_stage6(
+    first_status, first_diagnostics = _execute_hybrid(
         scene, ((arm, _target(0.05)),), factory, config=config
     )
-    second_status, second_diagnostics = _execute_stage6(
+    second_status, second_diagnostics = _execute_hybrid(
         scene, ((arm, _target(0.05)),), factory, config=config
     )
 
@@ -603,10 +614,10 @@ def test_stage6_continues_toward_a_target_outside_local_ik_basin():
     assert arm.sampling_calls == []
 
 
-def test_stage6_continuation_backs_off_before_global_sampling():
+def test_hybrid_continuation_backs_off_before_global_sampling():
     arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
     factory = _LocalStepFactory(maximum_cartesian_step=0.00125)
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_segments=8,
         cartesian_continuation_max_raw_physics_steps=64,
     )
@@ -615,7 +626,7 @@ def test_stage6_continuation_backs_off_before_global_sampling():
     runs = []
     for _ in range(5):
         runs.append(
-            _execute_stage6(
+            _execute_hybrid(
                 scene, ((arm, _target(0.05)),), factory, config=config
             )
         )
@@ -645,19 +656,19 @@ def test_stage6_continuation_backs_off_before_global_sampling():
     assert arm.sampling_calls == []
 
 
-def test_stage6_reobserves_between_bounded_cartesian_continuation_steps():
+def test_hybrid_reobserves_between_bounded_cartesian_continuation_steps():
     arm = _CartesianArm(jacobian_result=_IKError("no full-target solution"))
     scene = _Scene(arm)
     factory = _LocalStepFactory(maximum_cartesian_step=0.005)
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_segments=8,
         cartesian_continuation_max_raw_physics_steps=64,
     )
 
-    first_status, _first_diagnostics = _execute_stage6(
+    first_status, _first_diagnostics = _execute_hybrid(
         scene, ((arm, _target(0.05)),), factory, config=config
     )
-    second_status, second_diagnostics = _execute_stage6(
+    second_status, second_diagnostics = _execute_hybrid(
         scene, ((arm, _target(0.05)),), factory, config=config
     )
 
@@ -668,11 +679,11 @@ def test_stage6_reobserves_between_bounded_cartesian_continuation_steps():
     assert second_diagnostics["cartesian_multi_pass_goals_completed"] == 1
 
 
-def test_stage6_direct_feedback_reaches_a_dense_target():
+def test_hybrid_direct_feedback_reaches_a_dense_target():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     factory = _Factory(lambda target: [target[0], 0.0])
 
-    status, diagnostics = _execute_stage6(
+    status, diagnostics = _execute_hybrid(
         _Scene(arm), ((arm, _target(0.018)),), factory
     )
 
@@ -684,18 +695,18 @@ def test_stage6_direct_feedback_reaches_a_dense_target():
     np.testing.assert_allclose(arm.current, [0.018, 0.0])
 
 
-def test_stage6_converged_execution_continues_across_bounded_policy_actions():
+def test_hybrid_converged_execution_continues_across_bounded_policy_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     factory = _Factory(lambda _target: [0.2, 0.0])
     scene = _SlowScene(arm)
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_raw_physics_steps=8
     )
 
     runs = []
     for _ in range(10):
         runs.append(
-            _execute_stage6(
+            _execute_hybrid(
                 scene, ((arm, _target(0.2)),), factory, config=config
             )
         )
@@ -719,19 +730,19 @@ def test_stage6_converged_execution_continues_across_bounded_policy_actions():
     )
 
 
-def test_stage6_reuses_a_progress_verified_solution_for_the_same_target():
+def test_hybrid_reuses_a_progress_verified_solution_for_the_same_target():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _Scene(arm)
     factory = _Factory(lambda _target: [0.2, 0.0])
 
-    first_status, _first_diagnostics = _execute_stage6(
+    first_status, _first_diagnostics = _execute_hybrid(
         scene, ((arm, _target(0.2)),), factory
     )
     # Move outside the pre-execution acceptance envelope while preserving the
     # same absolute target, so this test continues to exercise the verified
     # joint-solution cache rather than the no-op completion path.
     arm.current = np.asarray([0.198, 0.0])
-    second_status, second_diagnostics = _execute_stage6(
+    second_status, second_diagnostics = _execute_hybrid(
         scene, ((arm, _target(0.2)),), factory
     )
 
@@ -741,11 +752,11 @@ def test_stage6_reuses_a_progress_verified_solution_for_the_same_target():
     np.testing.assert_allclose(arm.current, [0.2, 0.0])
 
 
-def test_stage6_direct_feedback_reports_real_progress_for_a_farther_target():
+def test_hybrid_direct_feedback_reports_real_progress_for_a_farther_target():
     arm = _CartesianArm(jacobian_result=lambda position: [0.5 * position[0], 0.0])
     factory = _Factory(lambda target: [0.5 * target[0], 0.0])
 
-    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+    status, diagnostics = _execute_hybrid(_Scene(arm), ((arm, _target(0.05)),), factory)
 
     assert status == "progressed"
     np.testing.assert_allclose(arm.current, [0.025, 0.0])
@@ -753,18 +764,18 @@ def test_stage6_direct_feedback_reports_real_progress_for_a_farther_target():
     assert diagnostics["cartesian_goal_directed_progress_accepts"] == 1
 
 
-def test_stage6_slow_motion_converges_across_bounded_policy_actions():
+def test_hybrid_slow_motion_converges_across_bounded_policy_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _SlowScene(arm)
     factory = _Factory(lambda target: [target[0], 0.0])
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_raw_physics_steps=8
     )
 
-    first_status, first_diagnostics = _execute_stage6(
+    first_status, first_diagnostics = _execute_hybrid(
         scene, ((arm, _target(0.05)),), factory, config=config
     )
-    second_status, second_diagnostics = _execute_stage6(
+    second_status, second_diagnostics = _execute_hybrid(
         scene, ((arm, _target(0.05)),), factory, config=config
     )
 
@@ -776,18 +787,18 @@ def test_stage6_slow_motion_converges_across_bounded_policy_actions():
     assert second_diagnostics.get("controller_raw_physics_budget_exhaustions", 0) == 0
 
 
-def test_stage6_small_observed_motion_is_reobserved_between_bounded_actions():
+def test_hybrid_small_observed_motion_is_reobserved_between_bounded_actions():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _SlowScene(arm, step=0.0015)
     factory = _Factory(lambda target: [target[0], 0.0])
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_raw_physics_steps=8
     )
 
     runs = []
     for _ in range(10):
         runs.append(
-            _execute_stage6(
+            _execute_hybrid(
                 scene, ((arm, _target(0.05)),), factory, config=config
             )
         )
@@ -806,16 +817,16 @@ def test_stage6_small_observed_motion_is_reobserved_between_bounded_actions():
     )
 
 
-def test_stage6_bounds_total_raw_physics_before_closed_loop_reobservation():
+def test_hybrid_bounds_total_raw_physics_before_closed_loop_reobservation():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _SlowScene(arm, step=5.0e-5)
     factory = _Factory(lambda target: [target[0], 0.0])
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_segments=1000,
         cartesian_continuation_max_raw_physics_steps=64,
     )
 
-    status, diagnostics = _execute_stage6(
+    status, diagnostics = _execute_hybrid(
         scene,
         ((arm, _target(0.05)),),
         factory,
@@ -829,12 +840,12 @@ def test_stage6_bounds_total_raw_physics_before_closed_loop_reobservation():
     assert diagnostics["cartesian_policy_action_raw_physics_steps_max"] == 64
 
 
-def test_stage6_native_primary_avoids_a_coarse_external_model_solution():
+def test_hybrid_native_primary_avoids_a_coarse_external_model_solution():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _Scene(arm)
     factory = _Factory(lambda target: [target[0] - 0.0015, 0.0])
 
-    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+    status, diagnostics = _execute_hybrid(scene, ((arm, _target(0.05)),), factory)
 
     assert status == "reached"
     assert arm.current[0] == pytest.approx(0.05)
@@ -844,12 +855,12 @@ def test_stage6_native_primary_avoids_a_coarse_external_model_solution():
     assert diagnostics["selected_via_trac_ik_distance"] == 0
 
 
-def test_stage6_uses_external_solver_when_native_primary_has_no_solution():
+def test_hybrid_uses_external_solver_when_native_primary_has_no_solution():
     arm = _CartesianArm(jacobian_result=_IKError("no native solution"))
     scene = _Scene(arm)
     factory = _Factory(lambda target: [target[0], 0.0])
 
-    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+    status, diagnostics = _execute_hybrid(scene, ((arm, _target(0.05)),), factory)
 
     assert status == "reached"
     assert arm.current[0] == pytest.approx(0.05)
@@ -858,12 +869,12 @@ def test_stage6_uses_external_solver_when_native_primary_has_no_solution():
     assert diagnostics["selected_via_trac_ik_distance"] == 1
 
 
-def test_stage6_escalates_same_target_after_primary_physically_stalls():
+def test_hybrid_escalates_same_target_after_primary_physically_stalls():
     arm = _CartesianArm(jacobian_result=lambda _position: [0.0, 0.0])
     scene = _Scene(arm)
     factory = _Factory(lambda target: [target[0], 0.0])
 
-    status, diagnostics = _execute_stage6(scene, ((arm, _target(0.05)),), factory)
+    status, diagnostics = _execute_hybrid(scene, ((arm, _target(0.05)),), factory)
 
     assert status == "reached"
     assert arm.solver_events == ["pseudo_inverse", "trac_ik_distance"]
@@ -873,21 +884,21 @@ def test_stage6_escalates_same_target_after_primary_physically_stalls():
     assert diagnostics["selected_via_trac_ik_distance"] == 1
 
 
-def test_stage6_persists_solver_escalation_across_raw_physics_budgets():
+def test_hybrid_persists_solver_escalation_across_raw_physics_budgets():
     arm = _CartesianArm(jacobian_result=lambda _position: [0.0, 0.0])
     scene = _Scene(arm)
     factory = _Factory(lambda target: [target[0], 0.0])
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_raw_physics_steps=1,
     )
 
-    first_status, first_diagnostics = _execute_stage6(
+    first_status, first_diagnostics = _execute_hybrid(
         scene,
         ((arm, _target(0.05)),),
         factory,
         config=config,
     )
-    second_status, second_diagnostics = _execute_stage6(
+    second_status, second_diagnostics = _execute_hybrid(
         scene,
         ((arm, _target(0.05)),),
         factory,
@@ -902,18 +913,18 @@ def test_stage6_persists_solver_escalation_across_raw_physics_budgets():
     assert arm.current[0] == pytest.approx(0.05)
 
 
-def test_stage6_resolves_again_when_cartesian_target_changes():
+def test_hybrid_resolves_again_when_cartesian_target_changes():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _Scene(arm)
     factory = _Factory(lambda target: [target[0], 0.0])
 
-    _execute_stage6(scene, ((arm, _target(0.02)),), factory)
-    _execute_stage6(scene, ((arm, _target(0.03)),), factory)
+    _execute_hybrid(scene, ((arm, _target(0.02)),), factory)
+    _execute_hybrid(scene, ((arm, _target(0.03)),), factory)
 
     assert arm.solver_events == ["pseudo_inverse", "pseudo_inverse"]
 
 
-def test_global_controller_does_not_use_the_stage6_joint_cache():
+def test_global_controller_does_not_use_the_hybrid_joint_cache():
     arm = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     scene = _Scene(arm)
     factory = _Factory(lambda target: [target[0], 0.0])
@@ -924,14 +935,14 @@ def test_global_controller_does_not_use_the_stage6_joint_cache():
     assert arm.solver_events == ["pseudo_inverse", "pseudo_inverse"]
 
 
-def test_stage6_sampling_fallback_is_collision_aware():
+def test_hybrid_sampling_fallback_is_collision_aware():
     arm = _CartesianArm(
         jacobian_result=_IKError("no local solution"),
         sampling_result=[[0.005, 0.0]],
     )
     factory = _Factory(RuntimeError("no external solution"))
 
-    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+    status, diagnostics = _execute_hybrid(_Scene(arm), ((arm, _target(0.05)),), factory)
 
     assert status == "progressed"
     assert len(arm.sampling_calls) >= 1
@@ -940,11 +951,11 @@ def test_stage6_sampling_fallback_is_collision_aware():
     assert diagnostics["selected_via_sampling"] >= 1
 
 
-def test_stage6_sampling_relaxes_collision_filter_only_after_aware_failure():
+def test_hybrid_sampling_relaxes_collision_filter_only_after_aware_failure():
     arm = _CollisionSelectiveSamplingArm()
     factory = _Factory(RuntimeError("no external solution"))
 
-    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+    status, diagnostics = _execute_hybrid(_Scene(arm), ((arm, _target(0.05)),), factory)
 
     assert status == "reached"
     assert [call[1]["ignore_collisions"] for call in arm.sampling_calls] == [
@@ -956,11 +967,11 @@ def test_stage6_sampling_relaxes_collision_filter_only_after_aware_failure():
     assert diagnostics["selected_via_collision_relaxed_sampling"] == 1
 
 
-def test_stage6_near_fallback_uses_fast_linear_path_before_nonlinear_planning():
+def test_hybrid_near_fallback_uses_fast_linear_path_before_nonlinear_planning():
     arm = _LinearPathArm(collision_aware_fails=True)
     factory = _Factory(RuntimeError("no external solution"))
 
-    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+    status, diagnostics = _execute_hybrid(_Scene(arm), ((arm, _target(0.05)),), factory)
 
     assert status == "reached"
     assert [call[1]["ignore_collisions"] for call in arm.linear_path_calls] == [
@@ -973,44 +984,73 @@ def test_stage6_near_fallback_uses_fast_linear_path_before_nonlinear_planning():
     assert diagnostics["far_target_planner_attempts"] == 0
 
 
-def test_stage6_near_fallback_skips_unbounded_nonlinear_planning():
+def test_hybrid_near_fallback_attempts_nonlinear_after_prepare_exhaustion():
     arm = _LinearPathArm(collision_aware_fails=True, relaxed_fails=True)
     factory = _Factory(RuntimeError("no external solution"))
     diagnostics = initialize_global_ik_controller_diagnostics()
 
-    with pytest.raises(_InvalidActionError):
-        execute_stage6_ik_ee_control(
-            _Scene(arm),
-            ((arm, _target(0.05)),),
-            config=Stage6IKControllerConfig(),
-            diagnostics=diagnostics,
-            external_solver_factory=factory,
-            ik_error=_IKError,
-            configuration_error=_ConfigurationError,
-            configuration_path_error=_ConfigurationPathError,
-            invalid_action_error=_InvalidActionError,
-            path_algorithm="RRTConnect",
-            error_message="stage6 IK failed",
-        )
+    status = execute_hybrid_ik_ee_control(
+        _Scene(arm),
+        ((arm, _target(0.05)),),
+        config=HybridIKControllerConfig(),
+        diagnostics=diagnostics,
+        external_solver_factory=factory,
+        ik_error=_IKError,
+        configuration_error=_ConfigurationError,
+        configuration_path_error=_ConfigurationPathError,
+        invalid_action_error=_InvalidActionError,
+        path_algorithm="RRTConnect",
+        error_message="hybrid IK failed",
+    )
 
-    assert arm.path_calls == []
+    assert status == "stopped"
+    assert len(arm.path_calls) >= 1
     assert diagnostics["near_target_nonlinear_planner_skips"] == 1
-    assert diagnostics["far_target_planner_attempts"] == 0
+    assert diagnostics["near_target_nonlinear_planner_attempts"] >= 1
 
 
-def test_stage6_near_fallback_uses_collision_aware_rrt_after_measured_stall():
+def test_hybrid_prepare_exhaustion_is_reused_across_subresolution_target_jitter():
+    arm = _LinearPathArm(collision_aware_fails=True, relaxed_fails=True)
+    arm.path_fails = True
+    scene = _Scene(arm)
+    factory = _Factory(RuntimeError("no external solution"))
+
+    status, diagnostics = _execute_hybrid(
+        scene,
+        ((arm, _target(0.05)),),
+        factory,
+    )
+
+    assert status == "stopped"
+    assert diagnostics["same_target_solver_exhaustion_records"] == 1
+    solver_events = list(arm.solver_events)
+    path_calls = list(arm.path_calls)
+
+    status, diagnostics = _execute_hybrid(
+        scene,
+        ((arm, _target(0.0500001)),),
+        factory,
+    )
+
+    assert status == "stopped"
+    assert diagnostics["same_target_solver_exhaustion_fast_returns"] == 1
+    assert arm.solver_events == solver_events
+    assert arm.path_calls == path_calls
+
+
+def test_hybrid_near_fallback_uses_collision_aware_rrt_after_measured_stall():
     arm = _LinearPathArm(collision_aware_fails=True)
     diagnostics = initialize_global_ik_controller_diagnostics()
 
     command = _prepare_collision_aware_path_command(
         arm,
         _target(0.05),
-        config=Stage6IKControllerConfig(),
+        config=HybridIKControllerConfig(),
         diagnostics=diagnostics,
         configuration_path_error=_ConfigurationPathError,
         invalid_action_error=_InvalidActionError,
         path_algorithm="RRTConnect",
-        error_message="stage6 IK failed",
+        error_message="hybrid IK failed",
         allow_near_nonlinear=True,
     )
 
@@ -1024,18 +1064,18 @@ def test_stage6_near_fallback_uses_collision_aware_rrt_after_measured_stall():
     assert diagnostics["linear_path_collision_relaxed_attempts"] == 0
 
 
-def test_stage6_path_families_advance_after_physical_not_only_planning_stall():
+def test_hybrid_path_families_advance_after_physical_not_only_planning_stall():
     arm = _PhysicallyStalledPathArm()
     scene = _RelaxedPathOnlyScene(arm)
     factory = _Factory(RuntimeError("no external solution"))
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_raw_physics_steps=1,
     )
     statuses = []
     diagnostics = []
 
     for _ in range(7):
-        status, audit = _execute_stage6(
+        status, audit = _execute_hybrid(
             scene,
             ((arm, _target(0.05)),),
             factory,
@@ -1062,18 +1102,18 @@ def test_stage6_path_families_advance_after_physical_not_only_planning_stall():
     assert arm.current[0] == pytest.approx(0.05)
 
 
-def test_stage6_uses_relaxed_nonlinear_path_only_after_all_other_tiers_stall():
+def test_hybrid_uses_relaxed_nonlinear_path_only_after_all_other_tiers_stall():
     arm = _PhysicallyStalledPathArm()
     scene = _RelaxedNonlinearOnlyScene(arm)
     factory = _Factory(RuntimeError("no external solution"))
-    config = Stage6IKControllerConfig(
+    config = HybridIKControllerConfig(
         cartesian_continuation_max_raw_physics_steps=1,
     )
     statuses = []
     diagnostics = []
 
     for _ in range(8):
-        status, audit = _execute_stage6(
+        status, audit = _execute_hybrid(
             scene,
             ((arm, _target(0.05)),),
             factory,
@@ -1101,14 +1141,82 @@ def test_stage6_uses_relaxed_nonlinear_path_only_after_all_other_tiers_stall():
     assert arm.current[0] == pytest.approx(0.05)
 
 
-def test_stage6_keeps_all_bimanual_targets_active_on_the_shared_physics_clock():
+def test_hybrid_reuses_final_exhaustion_without_repeating_expensive_solver():
+    arm = _PhysicallyStalledPathArm()
+    scene = _NeverMovingScene(arm)
+    factory = _Factory(RuntimeError("no external solution"))
+    config = HybridIKControllerConfig(
+        cartesian_continuation_max_raw_physics_steps=1,
+    )
+
+    for _ in range(8):
+        status, diagnostics = _execute_hybrid(
+            scene,
+            ((arm, _target(0.05)),),
+            factory,
+            config=config,
+        )
+        assert status == "stopped"
+
+    assert diagnostics["same_target_solver_exhaustion_records"] == 1
+    steps_after_exhaustion = scene.steps
+    solver_events_after_exhaustion = list(arm.solver_events)
+    paths_after_exhaustion = list(arm.path_family_history)
+
+    status, diagnostics = _execute_hybrid(
+        scene,
+        ((arm, _target(0.05)),),
+        factory,
+        config=config,
+    )
+
+    assert status == "stopped"
+    assert diagnostics["same_target_solver_exhaustion_fast_returns"] == 1
+    assert scene.steps == steps_after_exhaustion
+    assert arm.solver_events == solver_events_after_exhaustion
+    assert arm.path_family_history == paths_after_exhaustion
+
+
+def test_hybrid_reopens_exhausted_chain_after_robot_state_changes():
+    arm = _PhysicallyStalledPathArm()
+    scene = _NeverMovingScene(arm)
+    factory = _Factory(RuntimeError("no external solution"))
+    config = HybridIKControllerConfig(
+        cartesian_continuation_max_raw_physics_steps=1,
+    )
+
+    for _ in range(8):
+        _execute_hybrid(
+            scene,
+            ((arm, _target(0.05)),),
+            factory,
+            config=config,
+        )
+    steps_after_exhaustion = scene.steps
+    arm.current[1] += 0.01
+
+    status, diagnostics = _execute_hybrid(
+        scene,
+        ((arm, _target(0.05)),),
+        factory,
+        config=config,
+    )
+
+    assert status == "stopped"
+    assert diagnostics["same_target_solver_exhaustion_reopens"] == 1
+    assert diagnostics["same_target_solver_exhaustion_fast_returns"] == 0
+    assert scene.steps == steps_after_exhaustion + 1
+    assert diagnostics["physical_stall_solver_tier_max"] == 1
+
+
+def test_hybrid_keeps_all_bimanual_targets_active_on_the_shared_physics_clock():
     right = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     left = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     left.current = np.asarray([0.05, 0.0])
     left.target = left.current.copy()
     factory = _Factory(lambda target: [target[0], 0.0])
 
-    status, diagnostics = _execute_stage6(
+    status, diagnostics = _execute_hybrid(
         _Scene(right, left),
         ((right, _target(0.05)), (left, _target(0.05))),
         factory,
@@ -1120,13 +1228,13 @@ def test_stage6_keeps_all_bimanual_targets_active_on_the_shared_physics_clock():
     assert factory.calls == []
 
 
-def test_stage6_accepts_one_arm_progress_while_the_other_is_stationary():
+def test_hybrid_accepts_one_arm_progress_while_the_other_is_stationary():
     moving = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     stalled = _CartesianArm(jacobian_result=lambda position: [position[0], 0.0])
     factory = _Factory(lambda target: [target[0], 0.0])
 
     per_arm_status = {}
-    status, diagnostics = _execute_stage6(
+    status, diagnostics = _execute_hybrid(
         _PartiallyStalledScene(moving, stalled),
         ((moving, _target(0.05)), (stalled, _target(0.05))),
         factory,
@@ -1143,18 +1251,18 @@ def test_stage6_accepts_one_arm_progress_while_the_other_is_stationary():
     assert diagnostics["cartesian_partial_arm_progress_accepts"] == 1
 
 
-def test_stage6_reports_joint_motion_without_cartesian_progress_as_stopped():
+def test_hybrid_reports_joint_motion_without_cartesian_progress_as_stopped():
     arm = _CartesianArm(jacobian_result=[-0.2, 0.0])
     factory = _Factory(RuntimeError("no external solution"))
 
-    status, diagnostics = _execute_stage6(_Scene(arm), ((arm, _target(0.05)),), factory)
+    status, diagnostics = _execute_hybrid(_Scene(arm), ((arm, _target(0.05)),), factory)
 
     assert status == "stopped"
     assert diagnostics["physical_stall_solver_escalations"] >= 1
     assert diagnostics["reached_joint_target_with_cartesian_residual"] >= 1
 
 
-def test_stage6_rejects_discontinuous_sampling_branch_after_physical_stall():
+def test_hybrid_rejects_discontinuous_sampling_branch_after_physical_stall():
     class _StalledPrimaryWithLargeSampling(_LinearPathArm):
         def __init__(self):
             super().__init__()
@@ -1164,7 +1272,7 @@ def test_stage6_rejects_discontinuous_sampling_branch_after_physical_stall():
     arm = _StalledPrimaryWithLargeSampling()
     factory = _Factory(RuntimeError("no external solution"))
 
-    status, diagnostics = _execute_stage6(
+    status, diagnostics = _execute_hybrid(
         _Scene(arm),
         ((arm, _target(0.05)),),
         factory,

@@ -17,10 +17,12 @@ def shadow_observe(
 
     monitor.observe(
         {
+            "cycle": int(feature["cycle"]),
             "arms": deepcopy(feature["arms"]),
             "task_state": deepcopy(feature["task_state"]),
             "observation_timestamp": int(feature["observation_timestamp"]),
             "previous_action_resolution": deepcopy(feature["action_resolution"]),
+            "action_resolution": deepcopy(feature["action_resolution"]),
         },
         {
             "action": deepcopy(feature["action"]),

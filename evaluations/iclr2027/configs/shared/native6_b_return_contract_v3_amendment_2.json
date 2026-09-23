@@ -1,0 +1,61 @@
+{
+  "schema": "essay2608.iclr2027.native6-b-return-contract-amendment.v2",
+  "status": "FROZEN_FOR_AMENDMENT_2_DEVELOPMENT_DELIVERY",
+  "amends": "evaluations/iclr2027/configs/shared/native6_b_return_contract_v3_amendment_1.json",
+  "source_protocol_amendment": "evaluations/iclr2027/results/e6_handoff/A_TO_B_E6_V3_PROTOCOL_AMENDMENT_2.json",
+  "mapping_preflight_acceptance": "evaluations/iclr2027/results/e6_handoff/A_ACCEPTANCE_E6_V3_OBJECT_MAPPING_PREFLIGHT.json",
+  "required_development_delivery_manifest_fields": [
+    "source_protocol_amendment_2_sha256",
+    "source_mapping_preflight_acceptance_sha256"
+  ],
+  "required_formal_delivery_manifest_fields": [
+    "source_protocol_amendment_2_sha256",
+    "source_mapping_preflight_acceptance_sha256",
+    "source_development_acceptance_sha256"
+  ],
+  "required_system_identity_fields": [
+    "physical_protocol_amendment_2_identity",
+    "protocol_amendment_2_identity"
+  ],
+  "expected_identity_files": {
+    "physical_protocol_amendment_2_identity": "evaluations/iclr2027/configs/shared/native6_physical_protocol_v3_amendment_2.json",
+    "protocol_amendment_2_identity": "evaluations/iclr2027/results/e6_handoff/A_TO_B_E6_V3_PROTOCOL_AMENDMENT_2.json"
+  },
+  "accepted_mapping_reports": {
+    "rvt": {
+      "path": "evaluations/iclr2027/native_systems/rvt/e6_v3/mapping/OBJECT_MAPPING_PREFLIGHT.json",
+      "sha256": "716e0726f6763837ad11807c23586b3de5960c691c561c5c92224071af43b421"
+    },
+    "racer": {
+      "path": "evaluations/iclr2027/native_systems/racer/e6_v3/mapping/OBJECT_MAPPING_PREFLIGHT.json",
+      "sha256": "ab90300278e3b6326f7e3b344af144b3f11a3b8ae72c34f4eaa14903d5faf5d7"
+    }
+  },
+  "required_development_evidence": {
+    "integration_path_template": "evaluations/iclr2027/native_systems/<system>/e6_v3/amendment_2/INTEGRATION.json",
+    "migration_path_template": "evaluations/iclr2027/results/native_v3/<system>/development/amendment_2_migration.json",
+    "regression_path_template": "evaluations/iclr2027/results/native_v3/<system>/development/amendment_2_regression.json"
+  },
+  "migration_modes": {
+    "fresh_full_development_under_amendment_2": {
+      "invalidated_episode_ids": 0,
+      "retained_episode_ids": 0,
+      "executed_episode_ids": 180
+    },
+    "full_rerun_after_amendment_1": {
+      "invalidated_episode_ids": 180,
+      "retained_episode_ids": 0,
+      "executed_episode_ids": 180,
+      "invalidated_artifacts": "one immutable artifact per original episode ID",
+      "original_bundle": "archived episodes aggregate and failed gate with SHA256"
+    }
+  },
+  "invalidated_archive_prefix_template": "evaluations/iclr2027/results/native_v3/<system>/development/invalidated/amendment_2/",
+  "formal_authorization": {
+    "status": "LOCKED",
+    "future_A_acceptance_path": "evaluations/iclr2027/results/e6_handoff/A_ACCEPTANCE_E6_V3_DEVELOPMENT.json",
+    "must_bind_both_system_development_deliveries": true
+  },
+  "original_handoff_or_amendment_1_overwritten": false,
+  "original_failed_development_results_overwritten": false
+}

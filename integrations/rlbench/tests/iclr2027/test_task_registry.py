@@ -31,7 +31,7 @@ def test_main_place_cups_uses_repeated_three_cup_level() -> None:
 
 def test_articulated_tasks_retain_internal_configuration_fields() -> None:
     assert TASKS["open_drawer"].spec.configuration_schema == {
-        "drawer": {"joint_position": 1}
+        "drawer_panel": {"joint_position": 1}
     }
     assert TASKS["push_buttons_3"].spec.configuration_schema == {
         "button0": {"joint_position": 1},
@@ -68,14 +68,14 @@ def test_frozen_a1_assets_are_readable_and_complete() -> None:
     assert all(task["arms"] for task in audit["tasks"])
 
 
-def test_generic_static_model_does_not_require_phase6_dynamic_trigger() -> None:
+def test_generic_static_model_does_not_require_tsf_dynamic_trigger() -> None:
     task = TASKS["push_buttons_1"]
     server = PolicyServer(
         task.task_id,
         INTEGRATION_ROOT / "models" / "iclr2027" / "dynamac",
         task_spec=task.spec,
     )
-    assert server.model_identity["phase6_dynamic_trigger_evidence"] is None
+    assert server.model_identity["tsf_dynamic_trigger_evidence"] is None
 
 
 def test_a1_gate_separates_backbone_failure_from_infrastructure_failure(

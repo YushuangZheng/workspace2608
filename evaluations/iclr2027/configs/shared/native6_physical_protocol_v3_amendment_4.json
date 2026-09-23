@@ -1,0 +1,65 @@
+{
+  "schema": "essay2608.iclr2027.native6-event-grounded-physics-amendment.v4",
+  "status": "FROZEN_BEFORE_FORMAL",
+  "revision": "native6_event_grounded_physics_v3_amendment_4",
+  "amends": "native6_event_grounded_physics_v3_amendment_2",
+  "precedence": "this amendment overrides only the interpretation of the Native-6 v3 development gate",
+  "reason": "RACER development and a preregistered read-only diagnostic showed that assigned-to-eligible measures whether the native policy reaches a physical event, whereas eligible-to-injected and injected-to-effect measure whether the fault adapter acts correctly once that event exists",
+  "applies_uniformly_to": [
+    "rvt",
+    "racer",
+    "ours"
+  ],
+  "unchanged": [
+    "task set and task variations",
+    "development and formal episode assignments",
+    "fault families, severities, eligibility definitions, interventions, and physical-effect definitions",
+    "object and finger mappings",
+    "simulator clock and first-eligible-event trigger rule",
+    "episode result schema and seven result identity fields",
+    "intention-to-treat denominator",
+    "all accepted development episode bytes",
+    "formal perturbation manifest"
+  ],
+  "development_gate": {
+    "episodes_per_task_fault_cell": 10,
+    "assigned_to_eligible": {
+      "role": "REPORT_ONLY_NATIVE_POLICY_EVENT_REACHABILITY",
+      "minimum_rate": null,
+      "must_be_reported_for_every_cell": true
+    },
+    "eligible_event_evidence": {
+      "minimum_observed_events_per_cell": 1,
+      "purpose": "ensure every adapter path has at least one observed physical opportunity in development"
+    },
+    "eligible_to_injected": {
+      "role": "HARD_ADAPTER_GATE",
+      "minimum_rate": 0.8
+    },
+    "injected_to_physical_effect": {
+      "role": "HARD_ADAPTER_GATE",
+      "minimum_rate": 0.8
+    },
+    "infrastructure_errors_allowed": 0
+  },
+  "formal_reporting": {
+    "primary_denominator": "all_prescheduled_episodes_intention_to_treat",
+    "untriggered_assignments_removed": false,
+    "required_coverage_fields": [
+      "assigned_to_eligible",
+      "eligible_to_injected",
+      "injected_to_physical_effect"
+    ],
+    "triggered_subset_role": "secondary_descriptive_analysis_only",
+    "cross_system_triggered_subset_is_causal": false
+  },
+  "prohibited": [
+    "changing the threshold only for RACER or one task-fault cell",
+    "relabeling diagnostic replays as development results",
+    "replacing the three original non-eligible RACER episodes",
+    "selective reruns or resampling to raise assigned-to-eligible",
+    "using formal outcomes to revise the gate",
+    "dropping untriggered assigned episodes from intention-to-treat results"
+  ],
+  "prospective_status": "frozen before any Native-6 v3 formal perturbed episode is run"
+}

@@ -113,7 +113,7 @@ def test_sealed_replay_batch_binds_source_identity_and_episode(monkeypatch):
         validation = {"source_seed": 91}
 
         @staticmethod
-        def fingerprint():
+        def identity_digest():
             return "plan-fingerprint"
 
     plan = Plan()
@@ -276,7 +276,7 @@ def test_replay_trigger_is_reauthenticated_from_checkpoint(monkeypatch):
     }
     monkeypatch.setattr(
         failure_videos.direct_evaluate,
-        "_authenticated_v3_dynamic_trigger",
+        "_authenticated_tsf_dynamic_trigger",
         lambda args, worker: (
             {"schema": "registry", "fingerprint": "fingerprint"},
             {"trigger_step": 13},
@@ -911,7 +911,7 @@ def test_record_replays_same_fixed_episode_fresh_until_first_match(
         variation = 2
 
         @staticmethod
-        def fingerprint():
+        def identity_digest():
             return "sealed-plan"
 
     class Environment:

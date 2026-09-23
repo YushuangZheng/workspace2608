@@ -192,7 +192,7 @@ def test_existing_v3_schema13_checkpoint_stays_read_only_load_compatible() -> No
     left = DynaMAC.load(task_root / "left.npz")
 
     assert left.summary()["model_schema_version"] == 13
-    assert left.fingerprint() == manifest["left"]["fingerprint"]
+    assert left.identity_digest() == manifest["left"]["fingerprint"]
 
 
 def test_train_entry_injects_only_the_store_v4_spec(monkeypatch, tmp_path: Path) -> None:
@@ -272,7 +272,7 @@ class _FakeArm:
             "tapas_reference_commit": "fake",
         }
 
-    def fingerprint(self):
+    def identity_digest(self):
         return "fake"
 
 

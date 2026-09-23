@@ -1,0 +1,35 @@
+{
+  "schema": "essay2608.iclr2027.native6-event-grounded-physics-amendment.v1",
+  "status": "FROZEN_FOR_PREFLIGHT_AND_DEVELOPMENT",
+  "amends": "native6_event_grounded_physics_v3",
+  "precedence": "this amendment overrides only the listed missed-interaction and mapping clauses",
+  "object_mapping": "evaluations/iclr2027/configs/shared/native6_object_contact_mapping_v3.json",
+  "missed_interaction_by_relation_source": {
+    "attachment": {
+      "eligible": "first actual open-to-close gripper transaction after arm motion with a frozen attachment-capable semantic root detected",
+      "intervention": "execute the physical close while suppressing simulator attachment for that transaction and restore only the detected unattached rigid root if contact friction displaced it",
+      "effect": "the frozen semantic root is absent from selected-gripper attachments and any restored rigid root is within 0.001 m of its pre-close position"
+    },
+    "maintained_contact": {
+      "task_scope": ["open_drawer"],
+      "eligible": "first actual open-to-close transaction after arm motion with a validated Panda-finger-to-active-drawer contact candidate",
+      "intervention": "apply open amount 1.0 for that gripper transaction without moving the drawer or changing the arm path",
+      "effect": "actual open amount exceeds 0.9 and no validated Panda-finger-to-active-drawer contact or attachment exists after the transaction"
+    }
+  },
+  "forbidden": [
+    "declaring Open Drawer missed-interaction effective merely because no attachment exists",
+    "restoring or translating an articulated drawer shape",
+    "using arbitrary dynamic/respondable task-tree objects",
+    "using proximity-only evidence as maintained contact",
+    "expanding gripper contacts beyond the four frozen Panda finger collision shapes"
+  ],
+  "identity": {
+    "base_fault_config_identity_remains_sha256_of_native6_physical_protocol_v3_json_for_result_schema_compatibility": true,
+    "system_identity_must_add": [
+      "object_mapping_identity",
+      "physical_protocol_amendment_identity",
+      "protocol_amendment_identity"
+    ]
+  }
+}
